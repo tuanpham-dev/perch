@@ -1,0 +1,21 @@
+[Unit]
+Description=Perch (web UI for your terminals)
+Documentation=https://github.com/tuanpham-dev/perch
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/perch/bin/perch run
+# Only the main process is signalled on stop/restart. `perch run` stops
+# the web server's own process tree itself; the terminal daemon the server
+# starts runs in its own session and must keep running across restarts.
+KillMode=process
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perch
+
+[Install]
+WantedBy=default.target
