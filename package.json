@@ -1,0 +1,29 @@
+{
+  "name": "perch",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "mux",
+    "server",
+    "client",
+    "extensions/*"
+  ],
+  "scripts": {
+    "predev": "npm run build:extensions",
+    "dev": "concurrently -n ext,server,client -c yellow,blue,green \"node extensions/build.mjs --watch\" \"npm run dev -w server\" \"npm run dev -w client\"",
+    "prebuild": "npm run build:extensions",
+    "build": "npm run build -w client",
+    "test": "npm run test -w mux && node --test 'cli/perch/*.test.ts' && npm run test -w client && node --test extensions/*/*.test.mjs && node --import ./server/src/tsSpecifiers.mjs --test server/src/*.test.mjs && npm run test -w server",
+    "start": "npm run start -w server",
+    "build:extensions": "node extensions/build.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "esbuild": "^0.28.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "esbuild@0.25.12": true,
+    "node-pty@1.1.0": true
+  }
+}
