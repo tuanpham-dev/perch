@@ -1,0 +1,37 @@
+{
+  "name": "live-preview",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.1",
+  "displayName": "Live Preview",
+  "description": "Built-in live-reloading HTML preview (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "Live Preview",
+      "properties": {
+        "livePreview.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reload the preview when the HTML file or a sibling file in its folder changes."
+        },
+        "livePreview.pollInterval": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 250,
+          "maximum": 10000,
+          "description": "How often (ms) to check the previewed folder for changes when auto-refresh is on."
+        },
+        "livePreview.sendAutoSubmit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Submit a picked element's context to the agent immediately. Off (default) types it into the pane for you to review before pressing Enter."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js",
+    "server": "./server.js"
+  }
+}

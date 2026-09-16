@@ -1,0 +1,103 @@
+{
+  "name": "agents",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "Agents",
+  "description": "Built-in agent definitions: Claude Code and OpenAI Codex, for agent detection, \"Start work\" launch presets, and core's agent-hook pipeline. The app itself ships no agents - every agent comes from an extension's contributes.agents, and this is the one that supplies the two common CLIs (bundled - see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "agents": [
+      {
+        "id": "claude",
+        "label": "Claude Code",
+        "program": "claude",
+        "command": "claude",
+        "resume": "claude --continue",
+        "skipPermissionsArgs": "--dangerously-skip-permissions",
+        "docsUrl": "https://docs.claude.com/en/docs/claude-code",
+        "iconUrl": "./claude.svg",
+        "icon": "sparkle",
+        "oneShot": {
+          "args": [
+            "-p",
+            "{modelArgs}",
+            "{prompt}"
+          ],
+          "modelArgs": [
+            "--model",
+            "{model}"
+          ]
+        },
+        "hooks": {
+          "file": "~/.claude/settings.json",
+          "ownership": "merged",
+          "container": {
+            "key": "hooks"
+          },
+          "entry": "nested",
+          "matcherEvents": [
+            "PreToolUse",
+            "PostToolUse"
+          ],
+          "events": {
+            "session-start": "SessionStart",
+            "prompt-submit": "UserPromptSubmit",
+            "tool-start": "PreToolUse",
+            "tool-end": "PostToolUse",
+            "permission": "PermissionRequest",
+            "stop": "Stop",
+            "subagent-stop": "SubagentStop"
+          }
+        }
+      },
+      {
+        "id": "codex",
+        "label": "OpenAI Codex",
+        "program": "codex",
+        "command": "codex",
+        "resume": "codex resume --last",
+        "skipPermissionsArgs": "--dangerously-bypass-approvals-and-sandbox",
+        "docsUrl": "https://github.com/openai/codex",
+        "iconUrl": "./codex.svg",
+        "icon": "hubot",
+        "oneShot": {
+          "args": [
+            "exec",
+            "{modelArgs}",
+            "{prompt}"
+          ],
+          "modelArgs": [
+            "-m",
+            "{model}"
+          ]
+        },
+        "hooks": {
+          "file": "~/.codex/hooks.json",
+          "ownership": "whole-file",
+          "companion": "~/.codex/config.toml",
+          "container": {
+            "key": "hooks"
+          },
+          "entry": "nested",
+          "matcherEvents": [],
+          "extraFields": {
+            "description": "perch agent hooks"
+          },
+          "events": {
+            "session-start": "SessionStart",
+            "prompt-submit": "UserPromptSubmit",
+            "tool-start": "PreToolUse",
+            "tool-end": "PostToolUse",
+            "permission": "PermissionRequest",
+            "stop": "Stop",
+            "subagent-stop": "SubagentStop"
+          }
+        }
+      }
+    ]
+  },
+  "perch": {
+    "server": "./server.js"
+  }
+}

@@ -1,0 +1,134 @@
+/* ---- Command history panel ---- */
+
+.cmdhist-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.cmdhist-pane-select {
+  margin: 4px 8px;
+  padding: 2px 4px;
+  background: var(--input-bg, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.cmdhist-list {
+  overflow-y: auto;
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+}
+
+.cmdhist-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  min-height: 22px;
+}
+
+.cmdhist-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.cmdhist-exit {
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmdhist-exit.ok {
+  color: var(--success, #4ec9b0);
+}
+
+.cmdhist-exit.fail {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.cmdhist-spinner {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin: 0 4px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: cmdhist-spin 0.9s linear infinite;
+}
+
+@keyframes cmdhist-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cmdhist-command {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg);
+  font-family: var(--mono-font, monospace);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cmdhist-row.running .cmdhist-command {
+  cursor: default;
+  color: var(--fg-bright);
+}
+
+.cmdhist-meta {
+  flex-shrink: 0;
+  color: var(--fg-dim, var(--fg));
+  opacity: 0.7;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmdhist-actions {
+  display: none;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.cmdhist-row:hover .cmdhist-actions,
+.cmdhist-row:focus-within .cmdhist-actions {
+  display: inline-flex;
+}
+
+.cmdhist-action {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 1px;
+  color: var(--fg);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.cmdhist-action:hover {
+  background: var(--list-active-bg, var(--list-hover-bg));
+}
+
+.cmdhist-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--fg-dim, var(--fg));
+  opacity: 0.8;
+}

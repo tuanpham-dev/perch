@@ -1,0 +1,1305 @@
+.git-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+.git-empty {
+  padding: 8px 12px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.git-error {
+  margin: 6px 8px 0;
+  padding: 6px 8px;
+  background: var(--error);
+  color: #ffffff;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.git-commit-box {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.git-commit-message {
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+  max-height: 300px;
+  /* Right padding clears the overlaid AI button (and the scrollbar that
+     appears once the box grows past max-height), so typed text never runs
+     underneath it. */
+  padding: 6px 30px 6px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.git-commit-message:focus {
+  border-color: var(--focus-border);
+}
+
+.git-amend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--fg-inactive);
+  cursor: pointer;
+  user-select: none;
+}
+
+.git-amend-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Positioning context for the AI button overlaid on the message input. */
+.git-commit-input {
+  position: relative;
+  display: flex;
+}
+
+.git-generate-button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  /* The textarea paints its own background, so the button needs none of its
+     own — but it must sit above it to stay clickable. */
+  z-index: 1;
+}
+
+.git-generate-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.git-commit-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 8px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.git-commit-button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.git-commit-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-sync-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-sync-button:hover:not(:disabled) {
+  background: var(--list-hover-bg);
+}
+
+.git-sync-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-sync-counts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.git-branch-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 120px;
+  padding: 3px 8px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-branch-button:hover:not(:disabled) {
+  background: var(--list-hover-bg);
+}
+
+.git-branch-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-branch-button-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-credential-form,
+.git-confirm {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 8px 8px;
+  padding: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+}
+
+.git-credential-error,
+.git-confirm-text {
+  font-size: 12px;
+  color: var(--fg);
+}
+
+/* git/ssh's own prompt text, shown verbatim — monospace because hostkey
+   prompts carry a fingerprint the user should be able to eyeball, capped
+   and scrollable so a long known-hosts warning can't swallow the panel. */
+.git-auth-prompt-text {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.git-auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.git-credential-input {
+  padding: 5px 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+
+.git-credential-input:focus {
+  border-color: var(--focus-border);
+}
+
+.git-credential-buttons,
+.git-confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.git-credential-cancel,
+.git-credential-submit,
+.git-confirm-discard {
+  padding: 4px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--input-border);
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.git-credential-submit,
+.git-confirm-discard {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+.git-credential-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-groups {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Anchors .marquee-rect, whose left/top are in this container's own
+     content space (scrollTop-relative) — see useMarqueeSelection.ts. */
+  position: relative;
+  /* Rows are edge-to-edge with no gap between them, so a changelist taller
+     than the panel otherwise leaves literally zero empty pixels to arm a
+     marquee drag from at any scroll position. This reserves a strip of
+     genuine empty space at the very bottom, reachable by scrolling to the
+     end, so a new drag can always be started even in a fully-scrolled long
+     changelist. */
+  padding-bottom: 48px;
+}
+
+/* Rubber-band drag-to-select rectangle — shared look with the FILES tree's
+   copy (client/src/styles.css). Positioned by JS in content-space, not
+   viewport-space, so it stays pinned to what it's selecting through an
+   edge-triggered autoscroll. */
+.marquee-rect {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.git-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-inactive);
+}
+
+.git-group-title {
+  flex-shrink: 0;
+}
+
+.git-group-count {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.git-group-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.git-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Matches client/src's .file-tree-row padding exactly, so the two trees
+     read as one visual system. */
+  padding: 3px 12px 3px 6px;
+  /* 22px icon-button actions render at, plus this row's own vertical
+     padding — border-box, so revealing actions on hover fits inside the
+     already-reserved height instead of growing the row and shifting rows
+     below it (see .git-row-actions). */
+  min-height: 28px;
+  box-sizing: border-box;
+  cursor: pointer;
+  /* Matches client/src's .file-tree-row font-size. */
+  font-size: 13.5px;
+  /* client/src's .file-tree-row is a <button>, and the app has no global
+     `button { font-family: inherit }` reset, so it renders in the
+     browser's native form-control font (Arial on this stack) instead of
+     the app's system-ui/Ubuntu/Droid-Sans UI stack every other panel
+     inherits. .git-row is a <div> (see the no-native-<button> comment
+     below), so it inherits the UI stack correctly by default — this
+     explicit override intentionally matches FILES tree's actual rendered
+     look rather than "fixing" it, since that reset lives outside this
+     extension's scope. */
+  font-family: Arial, sans-serif;
+  /* A div, not a native <button> (see FileRow's own comment on why) — a
+     Shift+click range-select gesture otherwise triggers the browser's
+     native text-selection-extend instead of just the row's click handler,
+     same fix FileTree.tsx's file rows needed. */
+  user-select: none;
+}
+
+.git-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.git-row:focus-visible,
+.git-group-header:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* Multi-selection highlight — same convention as client/src's
+   .file-tree-row.selected. */
+.git-row.selected {
+  background: var(--list-active-bg);
+}
+
+.git-row.selected:hover {
+  background: var(--list-active-bg);
+}
+
+/* Fixed box (mirrors client/src's .file-tree-file-icon) so an SVG icon
+   theme's <img> can't distort, and rows stay aligned whether or not a given
+   file name resolves to an icon (kind: "none" renders nothing — the row's
+   own flex `gap` just closes up, same as FileTree). */
+.git-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  min-width: 17px;
+  font-size: 17px;
+  line-height: 1;
+  text-align: center;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.git-row-status {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.git-row-status.git-status-modified {
+  color: var(--git-modified-fg);
+}
+.git-row-status.git-status-added {
+  color: var(--git-added-fg);
+}
+.git-row-status.git-status-untracked {
+  color: var(--git-untracked-fg);
+}
+.git-row-status.git-status-deleted {
+  color: var(--error);
+}
+.git-row-status.git-status-renamed {
+  color: var(--git-renamed-fg);
+}
+.git-row-status.git-status-conflicted {
+  color: var(--button);
+}
+
+.git-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-row-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  direction: rtl;
+  text-align: left;
+}
+
+/* Single flex item so it's pushed right as one unit — putting margin-left:
+   auto on both .git-row-actions and .git-row-status separately would split
+   the leftover space between them instead of pinning actions flush against
+   the status letter. Same pattern as FileTree's .file-tree-row-trailer. */
+.git-row-trailer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.git-row-actions {
+  flex-shrink: 0;
+  /* No reserved space — hidden entirely (zero width) until hovered, same
+     as the search extension's row actions, so git-row-name/git-row-dir get
+     the full row width normally and only truncate further on hover. The
+     row's own min-height (above) absorbs the 22px icon-buttons appearing
+     so revealing them doesn't grow the row and shift rows below it. */
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.git-row:hover .git-row-actions,
+.git-row:focus-visible .git-row-actions {
+  display: flex;
+}
+
+/* Matches client/src's .chevron / .chevron-spacer exactly — the 14px box
+   (rather than a bare icon) is what keeps a directory row's icon aligned
+   with a file row's icon at the same depth once .git-row-chevron-spacer
+   (below) reserves the same width on file rows. */
+.git-row-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  color: var(--fg-inactive);
+}
+
+.git-row-chevron .codicon {
+  font-size: 13px;
+}
+
+.git-row-chevron:hover {
+  color: var(--fg-bright);
+}
+
+.git-row-chevron-spacer {
+  display: inline-block;
+  width: 14px;
+  min-width: 14px;
+}
+
+/* --- Commits pane --- */
+
+/* The pane's scroll area. Deliberately not .git-groups: no marquee
+   selection runs in here (CommitRow carries no data-path), so it needs the
+   scrolling without that container's positioning context. */
+.git-commits-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.git-commit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  min-height: 26px;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+
+.git-commit-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.git-commit-unpushed-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  visibility: hidden;
+}
+
+.git-commit-unpushed-dot.visible {
+  visibility: visible;
+  background: var(--git-added-fg);
+}
+
+.git-commit-subject {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-commit-time {
+  flex-shrink: 0;
+  color: var(--fg-inactive);
+  font-size: 12px;
+}
+
+.git-commits-load-more {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  color: var(--fg-accent);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-commits-load-more:hover:not(:disabled) {
+  background: var(--list-hover-bg);
+}
+
+.git-commits-load-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* --- Diff view --- */
+
+.git-diff-host {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  background: var(--bg);
+}
+
+.git-diff-host.hidden {
+  display: none;
+}
+
+.git-diff-status {
+  padding: 12px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.git-diff-error {
+  color: var(--error);
+}
+
+.git-diff-raw {
+  margin: 0;
+  padding: 12px;
+  color: var(--fg-inactive);
+  font-family: var(--terminal-font, monospace);
+  font-size: var(--terminal-font-size, 13px);
+  line-height: var(--terminal-line-height, 1.4);
+  letter-spacing: var(--terminal-letter-spacing, 0);
+  white-space: pre-wrap;
+}
+
+.git-diff-commit-header {
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.git-diff-body {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--terminal-font, monospace);
+  font-size: var(--terminal-font-size, 13px);
+  line-height: var(--terminal-line-height, 1.4);
+  letter-spacing: var(--terminal-letter-spacing, 0);
+}
+
+.git-diff-hunk {
+  border-bottom: 1px solid var(--border);
+}
+
+.git-diff-hunk-header {
+  padding: 2px 10px;
+  background: var(--sidebar-header-bg);
+  color: var(--fg-accent);
+  font-size: 12px;
+}
+
+.git-diff-line {
+  display: flex;
+  white-space: pre;
+  padding: 0 10px;
+}
+
+.git-diff-line-marker {
+  flex-shrink: 0;
+  width: 16px;
+  color: var(--fg-inactive);
+}
+
+.git-diff-line-add {
+  background: color-mix(in srgb, var(--git-added-fg) 18%, transparent);
+}
+
+.git-diff-line-del {
+  background: color-mix(in srgb, var(--error) 18%, transparent);
+}
+
+.git-diff-line-add .git-diff-line-marker {
+  color: var(--git-added-fg);
+}
+
+.git-diff-line-del .git-diff-line-marker {
+  color: var(--error);
+}
+
+/* Tint the line text itself, not just the gutter marker — a bare marker
+   next to plain-`--fg` text reads as barely-there at a glance. */
+.git-diff-line-add .git-diff-line-text {
+  color: color-mix(in srgb, var(--git-added-fg) 75%, var(--fg));
+}
+
+.git-diff-line-del .git-diff-line-text {
+  color: color-mix(in srgb, var(--error) 75%, var(--fg));
+}
+
+.git-diff-line {
+  cursor: pointer;
+}
+
+.git-diff-line-selected {
+  background: color-mix(in srgb, var(--fg-accent) 22%, transparent);
+}
+
+/* A line covered by an already-queued (not-yet-sent) comment — a left-edge
+   stripe rather than a full-row tint so it stays visible together with
+   .git-diff-line-selected on a line the user reselects to add another. */
+.git-diff-line-commented {
+  box-shadow: inset 3px 0 0 var(--fg-accent);
+}
+
+.git-diff-comment-anchor {
+  padding: 4px 10px;
+}
+
+.git-diff-comment-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--fg-accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-diff-comment-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px;
+  background: var(--sidebar-header-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fg-accent);
+  border-radius: 4px;
+}
+
+/* Matches the app's own form-input convention (.git-credential-input above,
+   search extension's .search-text-input) rather than an ad hoc style. */
+.git-diff-comment-box textarea {
+  resize: vertical;
+  min-height: 48px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  padding: 5px 6px;
+  outline: none;
+}
+
+.git-diff-comment-box textarea:focus {
+  border-color: var(--focus-border);
+}
+
+.git-diff-comment-error {
+  color: var(--error);
+  font-size: 12px;
+}
+
+.git-diff-comment-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+/* Shared primary/ghost buttons for diff-comment actions (Add Comment, Send
+   to Agent vs. Cancel, Clear) — gives the panel a clear default action
+   instead of every button reading with the same plain weight. */
+.git-diff-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--fg-accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-diff-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-diff-btn-ghost {
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  padding: 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-diff-btn-ghost:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.git-diff-btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* --- Pending comments (queued via "Add Comment", delivered together) --- */
+
+.git-diff-pending-panel {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar-header-bg);
+  font-size: 12px;
+}
+
+.git-diff-pending-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.git-diff-pending-count {
+  flex: 1;
+  color: var(--fg);
+}
+
+.git-diff-pending-panel .git-diff-comment-error {
+  padding: 0 10px 6px;
+}
+
+/* --- Inline comment markers (GitHub-review style) — a small numbered badge
+   anchored to the diff line where the comment's range ends; clicking it
+   toggles the full card below, instead of the card always taking up space
+   inline (or being listed separately), so it's obvious at a glance which
+   lines a comment is about without every comment's text competing for room. */
+
+.git-diff-comment-marker {
+  margin: 2px 10px;
+}
+
+/* Weighted like the host app's own numbered badge convention
+   (client/src/styles.css's .window-decoration-badge on session rows), sized
+   a bit larger for standalone legibility here (it isn't sitting next to
+   other row content the way that one is). */
+.git-diff-comment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--fg-accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.git-diff-inline-comment {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: var(--sidebar-header-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fg-accent);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.git-diff-inline-comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.git-diff-inline-comment-range {
+  color: var(--fg-accent);
+  font-family: var(--terminal-font, monospace);
+}
+
+.git-diff-inline-comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.git-diff-inline-comment-text {
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.git-diff-comment-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.git-diff-comment-edit textarea {
+  resize: vertical;
+  min-height: 48px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  padding: 5px 6px;
+  outline: none;
+}
+
+.git-diff-comment-edit textarea:focus {
+  border-color: var(--focus-border);
+}
+
+/* --- Merge banner --- */
+
+.git-merge-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px 0;
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.git-merge-banner-text {
+  flex: 1;
+}
+
+.git-merge-abort-button {
+  padding: 3px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--input-border);
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.git-merge-abort-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* --- Conflict view: stale-file banner --- */
+
+.git-conflict-stale-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px 0;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--error) 12%, var(--input-bg));
+  border: 1px solid color-mix(in srgb, var(--error) 40%, var(--input-border));
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.git-conflict-stale-banner span {
+  flex: 1;
+}
+
+.git-conflict-stale-reload {
+  padding: 3px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--input-border);
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+/* --- Conflict view --- */
+
+.git-conflict-host {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  background: var(--bg);
+}
+
+.git-conflict-host.hidden {
+  display: none;
+}
+
+.git-conflict-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--sidebar-header-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.git-conflict-count {
+  flex: 1;
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+.git-conflict-resolve-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.git-conflict-resolve-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-conflict-toolbar-secondary {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--sidebar-header-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.git-conflict-accept-all-label {
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.git-conflict-accept-all {
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--input-border);
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.git-conflict-accept-all:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-conflict-save-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.git-conflict-save-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-conflict-body {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--terminal-font, monospace);
+  font-size: var(--terminal-font-size, 13px);
+  line-height: var(--terminal-line-height, 1.4);
+  letter-spacing: var(--terminal-letter-spacing, 0);
+}
+
+.git-conflict-text {
+  margin: 0;
+  padding: 2px 10px;
+  color: var(--fg-inactive);
+  white-space: pre-wrap;
+}
+
+.git-conflict-block {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.git-conflict-side {
+  border-left: 3px solid transparent;
+}
+
+.git-conflict-ours {
+  border-left-color: var(--focus-border);
+  background: color-mix(in srgb, var(--focus-border) 10%, transparent);
+}
+
+.git-conflict-theirs {
+  border-left-color: var(--git-added-fg);
+  background: color-mix(in srgb, var(--git-added-fg) 10%, transparent);
+}
+
+.git-conflict-base {
+  border-left-color: var(--fg-inactive);
+  background: color-mix(in srgb, var(--fg-inactive) 8%, transparent);
+  opacity: 0.75;
+}
+
+.git-conflict-block-resolved {
+  border-left: 3px solid var(--git-added-fg);
+  background: color-mix(in srgb, var(--git-added-fg) 8%, transparent);
+}
+
+.git-conflict-side-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-inactive);
+}
+
+.git-conflict-accept {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--input-border);
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.git-conflict-accept:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-conflict-side-body {
+  margin: 0;
+  padding: 2px 10px 6px;
+  white-space: pre-wrap;
+}
+
+.git-conflict-block-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 10px;
+  background: var(--sidebar-header-bg);
+}
+
+.git-conflict-accept-both {
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--input-border);
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.git-conflict-accept-both:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- FILES tree decoration row colors (applied via the file-decoration
+   provider's className; the badge element itself is core FileTree's
+   .file-tree-git-badge) ---- */
+
+.file-tree-row.git-status-modified {
+  color: var(--git-modified-fg);
+}
+
+.file-tree-row.git-status-added {
+  color: var(--git-added-fg);
+}
+
+.file-tree-row.git-status-untracked {
+  color: var(--git-untracked-fg);
+}
+
+.file-tree-row.git-status-deleted {
+  color: var(--error);
+}
+
+.file-tree-row.git-status-renamed {
+  color: var(--git-renamed-fg);
+}
+
+.file-tree-row.git-status-conflicted {
+  color: var(--button);
+}
+
+.file-tree-row.git-status-ignored {
+  color: var(--fg-inactive);
+  opacity: 0.6;
+}
+
+/* ---- Status-bar item (the branch readout) ----
+   Layout (gap, height, hover) comes from core's .status-bar-item; only the
+   parts core knows nothing about live here. */
+
+.git-status-bar-branch {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The compact (phone) bar gives every item less room, and the branch name
+   is the one part of this readout worth keeping there. */
+.status-bar.compact .git-status-bar-branch {
+  max-width: 90px;
+}
+
+.git-status-bar-counts {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 11px;
+}
+
+/* Tighter than the 13px core gives bar icons — these sit inline with their
+   own numbers, not beside a label. */
+.git-status-bar-counts .codicon {
+  font-size: 11px;
+}
+
+/* Merge/rebase/cherry-pick in progress — the one state worth interrupting
+   the readout for, since half the panel's actions mean something else
+   while it lasts. */
+.git-status-bar-operation {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 11px;
+}
+
+/* ---- STASH pane ---- */
+
+.git-stash-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.git-stash-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  /* 28px, not 26: 3px of padding either side plus a 22px icon-button is
+     exactly 28, so revealing the actions on hover must not grow the row and
+     nudge every row below it down. Same reason .git-row above uses 28. */
+  min-height: 28px;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.git-stash-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.git-stash-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One slot for both, so hovering a row can't move anything: the timestamp
+   stays in the flow and keeps the width (it only goes invisible), and the
+   actions are laid over it. min-width covers a very short timestamp ("now"),
+   which would otherwise be narrower than the three 22px buttons. */
+.git-stash-trailer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  min-width: 66px;
+}
+
+.git-stash-time {
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+/* Row actions appear on hover (or keyboard focus), like the change rows' —
+   the timestamp gives way to them rather than both crowding the row. */
+.git-stash-actions {
+  position: absolute;
+  right: 0;
+  display: none;
+  align-items: center;
+}
+
+.git-stash-row:hover .git-stash-actions,
+.git-stash-row:focus-within .git-stash-actions {
+  display: flex;
+}
+
+/* visibility, not display: the timestamp is what holds the slot open. */
+.git-stash-row:hover .git-stash-time,
+.git-stash-row:focus-within .git-stash-time {
+  visibility: hidden;
+}

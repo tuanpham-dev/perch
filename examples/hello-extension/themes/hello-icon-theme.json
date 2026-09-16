@@ -1,0 +1,14 @@
+{
+  "iconDefinitions": {
+    "hello-file": { "iconPath": "./icons/file.svg" },
+    "hello-folder": { "iconPath": "./icons/folder.svg" },
+    "hello-folder-open": { "iconPath": "./icons/folder-open.svg" },
+    "hello-demo": { "iconPath": "./icons/demo.svg" }
+  },
+  "fileExtensions": {
+    "demo": "hello-demo"
+  },
+  "file": "hello-file",
+  "folder": "hello-folder",
+  "folderExpanded": "hello-folder-open"
+}

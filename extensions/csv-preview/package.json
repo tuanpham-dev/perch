@@ -1,0 +1,35 @@
+{
+  "name": "csv-preview",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "CSV Preview",
+  "description": "Built-in editable CSV/TSV grid preview (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "CSV Preview",
+      "properties": {
+        "csv.clickAction": {
+          "type": "string",
+          "default": "edit",
+          "enum": [
+            "edit",
+            "preview"
+          ],
+          "enumDescriptions": [
+            "Clicking a CSV/TSV file opens it in the editor; the grid preview is behind the hover icon and context menu.",
+            "Clicking a CSV/TSV file opens the grid preview; the editor is behind the hover icon and context menu."
+          ],
+          "description": "What a FILES-tree click on a CSV/TSV file opens."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js"
+  },
+  "dependencies": {
+    "papaparse": "^5.5.4"
+  }
+}

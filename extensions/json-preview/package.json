@@ -1,0 +1,36 @@
+{
+  "name": "json-preview",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "JSON/YAML Preview",
+  "description": "Built-in JSON/YAML tree preview (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "JSON/YAML Preview",
+      "properties": {
+        "json.clickAction": {
+          "type": "string",
+          "default": "edit",
+          "enum": [
+            "edit",
+            "preview"
+          ],
+          "enumDescriptions": [
+            "Clicking a JSON/YAML file opens it in the editor; the tree preview is behind the hover icon and context menu.",
+            "Clicking a JSON/YAML file opens the tree preview; the editor is behind the hover icon and context menu."
+          ],
+          "description": "What a FILES-tree click on a JSON/YAML file opens."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js"
+  },
+  "dependencies": {
+    "react-json-view-lite": "^2.5.0",
+    "yaml": "^2.9.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "pdf-preview",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "PDF Preview",
+  "description": "Built-in PDF viewer tab (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "perch": {
+    "client": "./dist/client.js"
+  }
+}

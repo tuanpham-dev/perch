@@ -1,0 +1,81 @@
+{
+  "name": "hello-extension",
+  "publisher": "perch-samples",
+  "version": "1.0.0",
+  "displayName": "Hello Extension",
+  "description": "Reference extension: a color theme, an icon theme, two terminal font groups (one bundling a mono font + a Nerd Font symbols companion), functionality (command, .demo file viewer, sidebar panel, server route), and configurable settings (string, boolean, integer, enum).",
+  "contributes": {
+    "themes": [
+      {
+        "label": "Hello Purple",
+        "uiTheme": "vs-dark",
+        "path": "./themes/hello-purple-color-theme.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "hello-icons",
+        "label": "Hello Icons",
+        "path": "./themes/hello-icon-theme.json"
+      }
+    ],
+    "fonts": [
+      {
+        "group": "Hello",
+        "fonts": [
+          { "family": "Hello Mono", "src": [{ "path": "./fonts/HelloMono-Regular.woff2", "format": "woff2" }] },
+          {
+            "family": "Hello Mono",
+            "src": [{ "path": "./fonts/HelloMono-Bold.woff2", "format": "woff2" }],
+            "weight": "bold"
+          },
+          { "family": "Hello Nerd Symbols", "src": [{ "path": "./fonts/HelloNerdSymbols.woff2", "format": "woff2" }] }
+        ]
+      },
+      {
+        "group": "Hello Nerd Symbols Only",
+        "fonts": [
+          { "family": "Hello Nerd Symbols", "src": [{ "path": "./fonts/HelloNerdSymbols.woff2", "format": "woff2" }] }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Hello Extension",
+      "properties": {
+        "hello.greeting": {
+          "type": "string",
+          "default": "Hello from the sample extension!",
+          "description": "Greeting shown by the \"Say Hello\" command and the sidebar panel"
+        },
+        "hello.shout": {
+          "type": "boolean",
+          "default": false,
+          "description": "Shout the greeting (adds \"!!!\")"
+        },
+        "hello.repeatCount": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 5,
+          "description": "How many times to repeat the greeting"
+        },
+        "hello.mood": {
+          "type": "string",
+          "enum": ["neutral", "excited", "formal"],
+          "enumItemLabels": ["Neutral", "Excited", "Formal"],
+          "enumDescriptions": [
+            "Just the greeting, plainly",
+            "Adds an exclamation and an emoji",
+            "Adds a formal closing"
+          ],
+          "default": "neutral",
+          "description": "Tone of the greeting"
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./client.js",
+    "server": "./server.js"
+  }
+}

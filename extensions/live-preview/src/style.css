@@ -1,0 +1,245 @@
+/* ---- Live Preview ---- */
+
+.live-preview-host {
+  position: absolute;
+  inset: 0;
+}
+
+.live-preview-host.hidden {
+  display: none;
+}
+
+.live-preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  /* HTML pages assume a white canvas unless they set their own background —
+     matches a browser's own default, not the app's dark --bg. */
+  background: #fff;
+}
+
+.live-preview-status {
+  padding: 24px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.live-preview-error {
+  color: var(--error);
+}
+
+/* --- Element picker: pick -> comment -> queue -> send all (mirrors
+   git-scm's DiffView.tsx pending-comment flow) --- */
+
+.live-preview-pick-popover {
+  position: absolute;
+  /* Above both the badge markers (9) and the pending-comments footer (10) —
+     a popover for a picked/expanded element near the bottom of the page
+     must win the stacking tie against that footer, not lose to it just
+     because the footer renders later in the DOM. */
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 260px;
+  max-width: calc(100% - 16px);
+  padding: 8px;
+  background: var(--sidebar-header-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fg-accent);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.live-preview-pick-selector {
+  color: var(--fg-accent);
+  font-family: var(--terminal-font, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Matches the app's own form-input convention (git-scm's
+   .git-credential-input, search extension's .search-text-input) rather
+   than an ad hoc style. */
+.live-preview-pick-popover textarea {
+  resize: vertical;
+  min-height: 48px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  padding: 5px 6px;
+  outline: none;
+}
+
+.live-preview-pick-popover textarea:focus {
+  border-color: var(--focus-border);
+}
+
+/* A queued comment's numbered badge, pinned to the center of its picked
+   element (the rect captured at pick time) — clicking it toggles a popover
+   with the comment's text and an edit option, mirroring DiffView.tsx's
+   comment-badge treatment (git-scm). */
+.live-preview-comment-marker {
+  position: absolute;
+  /* Above the pending-comments footer (10) — a marker whose element sits
+     near the bottom of the page would otherwise render under that footer
+     and become unclickable once it's showing. */
+  z-index: 11;
+  transform: translate(-50%, -50%);
+}
+
+/* Weighted like the host app's own numbered badge convention
+   (client/src/styles.css's .window-decoration-badge on session rows), sized
+   a bit larger for standalone legibility (it isn't sitting next to other
+   row content the way that one is). A solid border and drop shadow are kept
+   (unlike git-scm's plain version) since this one floats over arbitrary,
+   unpredictable page backgrounds and needs to stay legible against any of
+   them. */
+.live-preview-comment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--fg-accent);
+  color: var(--bg);
+  border: 2px solid var(--bg);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* left/top come from usePopoverPosition's clamped, viewport-aware
+   placement (inline style) — this just narrows the base popover's
+   percentage-based max-width, which would otherwise resolve against the
+   wrong containing block now that this renders as a host-level sibling
+   rather than nested inside the badge. */
+.live-preview-pick-popover.live-preview-comment-popover {
+  max-width: 280px;
+}
+
+.live-preview-comment-text {
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.live-preview-pick-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.live-preview-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--fg-accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.live-preview-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.live-preview-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  padding: 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.live-preview-btn-ghost:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.live-preview-btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.live-preview-pending-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  max-height: 45%;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar-header-bg);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.live-preview-pending-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.live-preview-pending-count {
+  flex: 1;
+  color: var(--fg);
+}
+
+.live-preview-pending-error {
+  padding: 0 10px 6px;
+  color: var(--error);
+  flex-shrink: 0;
+}
+
+.live-preview-pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 8px;
+  overflow: auto;
+}
+
+.live-preview-pending-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.live-preview-pending-selector {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-accent);
+  font-family: var(--terminal-font, monospace);
+}
+
+.live-preview-pending-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+}

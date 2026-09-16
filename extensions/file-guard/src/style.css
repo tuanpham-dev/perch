@@ -1,0 +1,105 @@
+/* ---- File Guard viewer tab ---- */
+
+/* Same outer chrome as the sibling viewers (markdown-host & co.): absolute
+   fill under the tab bar, app background, hidden when the tab is inactive. */
+.file-guard-host {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.file-guard-host.hidden {
+  display: none;
+}
+
+.file-guard-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 420px;
+  padding: 24px;
+  text-align: center;
+}
+
+.file-guard-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 34px;
+  line-height: 1;
+}
+
+.file-guard-file-icon[src] {
+  object-fit: contain;
+}
+
+.file-guard-name {
+  color: var(--fg-bright);
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.file-guard-size {
+  color: var(--fg-inactive);
+  font-size: 12px;
+}
+
+.file-guard-reason {
+  margin-top: 6px;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.file-guard-error {
+  color: var(--error);
+}
+
+.file-guard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.file-guard-download,
+.file-guard-open-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.file-guard-download {
+  background: var(--button-bg);
+  border: 1px solid transparent;
+  color: var(--button-fg);
+}
+
+.file-guard-download:hover {
+  filter: brightness(1.1);
+}
+
+.file-guard-open-editor {
+  background: var(--button-secondary-bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.file-guard-open-editor:hover {
+  color: var(--fg-bright);
+}

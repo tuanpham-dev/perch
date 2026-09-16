@@ -1,0 +1,286 @@
+/* ---- Markdown preview ---- */
+
+.markdown-host {
+  position: absolute;
+  inset: 0;
+}
+
+.markdown-host.hidden {
+  display: none;
+}
+
+.markdown-scroll {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.markdown-status {
+  padding: 24px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.markdown-error {
+  color: var(--error);
+}
+
+.markdown-body {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 32px 60px;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  color: var(--fg-bright);
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 24px 0 12px;
+}
+
+.markdown-body h1 {
+  font-size: 1.8em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-body h2 {
+  font-size: 1.4em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-body h3 {
+  font-size: 1.2em;
+}
+
+.markdown-body p {
+  margin: 12px 0;
+}
+
+.markdown-body a {
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body strong {
+  color: var(--fg-bright);
+  font-weight: 600;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.markdown-body li {
+  margin: 4px 0;
+}
+
+.markdown-body li input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+.markdown-body blockquote {
+  margin: 12px 0;
+  padding: 4px 14px;
+  border-left: 3px solid var(--border);
+  color: var(--fg-inactive);
+}
+
+.markdown-body code {
+  background: var(--button-secondary-bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.9em;
+}
+
+.markdown-body :not(pre) > code {
+  color: var(--warning);
+}
+
+.markdown-body pre {
+  background: var(--button-secondary-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+/* Copy-button wrapper around each fenced code block — the pre keeps its own
+   margins/scrolling; the wrapper only anchors the overlay button. */
+.markdown-codeblock {
+  position: relative;
+}
+
+.markdown-copy-button {
+  position: absolute;
+  top: 18px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--fg-inactive);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.markdown-codeblock:hover .markdown-copy-button,
+.markdown-copy-button:focus-visible {
+  opacity: 1;
+}
+
+.markdown-copy-button:hover {
+  color: var(--fg-bright);
+}
+
+/* No hover on touch — keep the button always reachable. */
+@media (pointer: coarse) {
+  .markdown-copy-button {
+    opacity: 1;
+  }
+}
+
+/* Transient notice for a clicked link whose target doesn't exist. */
+.markdown-link-notice {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  max-width: 80%;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--warning);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+/* rehype-highlight's github-dark theme sets its own background — deferring
+   to the app's own .markdown-body pre background above instead. */
+.markdown-body .hljs {
+  background: transparent;
+}
+
+/* github-dark (imported in client.tsx) stays the default/dark path — this
+   overrides just the token colors with a github-light-derived palette when
+   the active UI theme is light (see computeHl() in client.tsx). Covers the
+   common token classes; an uncommon one falls back to the inherited body
+   color rather than github-dark's (unreadable-on-light) value. */
+.markdown-body[data-hl="light"] .hljs {
+  color: #24292e;
+}
+
+.markdown-body[data-hl="light"] .hljs-comment,
+.markdown-body[data-hl="light"] .hljs-quote {
+  color: #6a737d;
+}
+
+.markdown-body[data-hl="light"] .hljs-keyword,
+.markdown-body[data-hl="light"] .hljs-selector-tag,
+.markdown-body[data-hl="light"] .hljs-literal {
+  color: #d73a49;
+}
+
+.markdown-body[data-hl="light"] .hljs-string,
+.markdown-body[data-hl="light"] .hljs-doctag {
+  color: #032f62;
+}
+
+.markdown-body[data-hl="light"] .hljs-title,
+.markdown-body[data-hl="light"] .hljs-section,
+.markdown-body[data-hl="light"] .hljs-name {
+  color: #6f42c1;
+}
+
+.markdown-body[data-hl="light"] .hljs-attr,
+.markdown-body[data-hl="light"] .hljs-attribute,
+.markdown-body[data-hl="light"] .hljs-variable,
+.markdown-body[data-hl="light"] .hljs-number {
+  color: #005cc5;
+}
+
+.markdown-body[data-hl="light"] .hljs-built_in,
+.markdown-body[data-hl="light"] .hljs-type {
+  color: #e36209;
+}
+
+.markdown-body[data-hl="light"] .hljs-meta {
+  color: #22863a;
+}
+
+.markdown-body[data-hl="light"] .hljs-symbol,
+.markdown-body[data-hl="light"] .hljs-bullet {
+  color: #e36209;
+}
+
+.markdown-body[data-hl="light"] .hljs-deletion {
+  color: #b31d28;
+  background: #ffeef0;
+}
+
+.markdown-body[data-hl="light"] .hljs-addition {
+  color: #22863a;
+  background: #f0fff4;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.95em;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+}
+
+.markdown-body th {
+  background: var(--panel-bg);
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+

@@ -1,0 +1,38 @@
+# Git
+
+A VS Code-style SOURCE CONTROL panel for the active directory's git repository: stage, commit, amend, push/pull/fetch, branch switching, stash, AI-written commit messages, commit history, a stash list, a status-bar branch readout, and diff.
+
+## Contributes
+
+- **Sidebar panel:** SOURCE CONTROL — staged/unstaged/conflicted file lists, stage/unstage/discard, commit message box (Ctrl/Cmd+Enter to commit, Amend toggle to rewrite HEAD instead of composing a new commit), a branch button (switch or create a local branch), and a More Actions (`…`) menu for Pull/Push/Fetch/Stash/Pop Stash.
+- **AI commit messages:** the sparkle button next to the Amend toggle writes a commit message from the staged diff — the diff itself (truncated past 60k characters), its full file statistics, and the last ten commit subjects so the message follows this repository's own conventions. With Amend on it describes `HEAD~1..index` instead, so the message covers the whole amended commit. It fills the box for you to edit; nothing is committed until you press Commit, and the button is disabled once the box has text, so it can never overwrite your own typing.
+- **COMMITS pane:** recent history with unpushed markers, click a commit for its full diff, Load More, and a refresh button in its header. It's a pane of the SOURCE CONTROL panel — stacked below it in the same tab, with its own collapse state and a splitter to size the two against each other. Drag its header onto another tab's icon (or right-click it) to move it into the Explorer, the Run tab, or the other sidebar; "Reset Location" puts it back under SOURCE CONTROL.
+- **STASH pane:** every stash entry with its message and age, and per-row **Apply** (restore, keep the entry), **Pop** (restore and drop) and **Drop** (confirmed first — a dropped entry is only reachable by hash afterwards). The header stashes all changes or refreshes; clicking a row opens that entry's diff. Like COMMITS it's a pane of the SOURCE CONTROL panel, so it collapses, resizes and moves on its own.
+- **Diff viewer:** click a file to open its working-tree or staged diff, or a COMMITS row to open that commit's diff; Shift+click a file opens it in the editor instead.
+- **Merge conflict resolver:** click a conflicted file to accept Current/Incoming/Both per block (or Accept All), then Save and Mark as Resolved — used for merge, rebase, cherry-pick/revert conflicts, and a stash pop that lands in conflict.
+- **Status bar item:** the current branch at the bottom-left, with a `*` when the working tree is dirty, the ahead/behind counts next to it, and a badge while a merge/rebase/cherry-pick is unfinished. Click it to open the SOURCE CONTROL panel, where switching branch, syncing and committing already live. Hidden when the active directory isn't a repository, and it rides the same status poll the panel does, so it costs no extra requests. Drag it anywhere along the bar (or to the other end) like any status-bar item.
+- **File tree git status:** modified/added/untracked/renamed/deleted badges in the FILES tree (see Settings → UI → "Git status in file tree" to toggle), plus a branch-name pill on the FILES tree root.
+
+## Settings
+
+Which AI writes the commit messages — the provider, model, binary path or API key — is **not** configured here. It is shared with every other AI feature in the app, under **Settings → AI Providers**. This extension contributes only the instruction it sends.
+
+- **Commit message instruction** (`gitScm.aiCommitInstruction`) — the instruction the sparkle button sends; the staged diff, its file statistics and recent commit subjects are appended to it. Edit it to change the house style — subject length, whether a body is wanted, Conventional Commits.
+- **Poll interval** (`gitScm.pollInterval`, default 3000ms) — how often the active directory's git status refreshes in the background; 0 disables polling.
+- **Fetch interval** (`gitScm.fetchInterval`, default 0/off) — how often to run a non-interactive `git fetch` in the background so ahead/behind counts stay current; never prompts for credentials, so an auth-requiring remote just fails the fetch silently. Manual fetch is always available via More Actions (`…`).
+- **File tree decorations** (`gitScm.fileTreeDecorations`, default on) — git status badges and row colors in the FILES tree; off skips the per-repo status scan.
+- **AI** (`gitScm.aiProfile` / `gitScm.aiModel`) — which of the AIs configured in Settings → AI Providers writes commit messages, and optionally a model for just this job (empty follows that AI's own model — Settings → AI Providers can fetch the list an API endpoint offers). Lets the sparkle button run on something cheap while the rest of the app uses your everyday model.
+- **Status bar** (`gitScm.statusBar`, default on) — the branch readout in the status bar. Settings → UI turns the bar itself on and off.
+- **Click action** (`gitScm.clickAction`, default "Open Diff") — what clicking a file in the panel opens; the other action is always available via Shift+click.
+
+## Authentication
+
+Push/pull/sync answer git and ssh prompts interactively: when the remote asks for anything — HTTPS username/password, an SSH key passphrase, or first-contact host-key confirmation (the fingerprint is shown verbatim) — a form appears in the panel. Under the hood every prompt is relayed from a `GIT_ASKPASS`/`SSH_ASKPASS` helper over a token-guarded unix socket; nothing is ever embedded in remote URLs.
+
+- **In-memory cache:** answered HTTPS credentials are kept per host in the server process (never on disk), so repeated operations don't re-prompt until the server restarts. Rejected credentials are dropped automatically.
+- **Remember credentials:** checking the box hands the pair to `git credential approve`, which stores it in whatever `credential.helper` you've configured (e.g. `git config --global credential.helper store`, or `cache`, `libsecret`, `gh`). With no helper configured it's a silent no-op — the extension itself never writes secrets to disk.
+- **SSH:** agent keys (`SSH_AUTH_SOCK`) work as before with no prompting. Passphrase and host-key prompts rely on OpenSSH's `SSH_ASKPASS_REQUIRE=force` (OpenSSH ≥ 8.4). Unix sockets mean Linux/macOS only.
+
+## Notes
+
+Requires `git` on the server's PATH. Bundled with Perch.

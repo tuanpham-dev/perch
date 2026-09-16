@@ -1,0 +1,46 @@
+{
+  "name": "Hello Purple",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#1a1030",
+    "editor.foreground": "#e0d6f5",
+    "foreground": "#f2ecff",
+    "sideBar.background": "#140b26",
+    "panel.border": "#2a1c4a",
+    "input.background": "#241640",
+    "input.border": "#2a1c4a",
+    "focusBorder": "#b388ff",
+    "button.background": "#7c4dff",
+    "button.foreground": "#ffffff",
+    "errorForeground": "#ff6e6e",
+    "list.hoverBackground": "#ffffff14",
+    "list.activeSelectionBackground": "#7c4dff40",
+    "list.activeSelectionForeground": "#ffffff",
+    "descriptionForeground": "#9b8fc0",
+
+    "editorGroupHeader.tabsBackground": "#140b26",
+    "tab.inactiveBackground": "#140b26",
+    "tab.inactiveForeground": "#9b8fc0",
+    "tab.activeBackground": "#1a1030",
+    "tab.activeForeground": "#f2ecff",
+    "tab.activeBorderTop": "#b388ff",
+    "tab.border": "#2a1c4a",
+
+    "sideBarSectionHeader.background": "#1a1030",
+    "scrollbarSlider.background": "#ffffff14",
+    "scrollbarSlider.hoverBackground": "#7c4dff40",
+    "badge.background": "#ffffff14",
+    "badge.foreground": "#9b8fc0",
+
+    "terminal.background": "#1a1030",
+    "terminal.foreground": "#e0d6f5",
+    "terminalCursor.foreground": "#b388ff",
+    "terminal.ansiRed": "#ff6e6e",
+    "terminal.ansiGreen": "#6effa3",
+    "terminal.ansiYellow": "#ffe066",
+    "terminal.ansiBlue": "#7c9bff",
+    "terminal.ansiMagenta": "#b388ff",
+    "terminal.ansiCyan": "#6ee7e7",
+    "terminal.ansiBrightBlack": "#5a4a80"
+  }
+}
