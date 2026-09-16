@@ -102,17 +102,18 @@ export interface SidebarPanelHostProps {
   // capability FileViewerHostProps.showMenu gives file viewers.
   showMenu?: (x: number, y: number, items: MenuItem[]) => void;
   // The app's shared confirm dialog (message → resolves true on confirm) —
-  // for destructive panel actions like the ports panel's Kill process.
+  // for destructive panel actions (killing a process, discarding changes).
   confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean>;
 }
 
 // "tab": the panel is its own sidebar tab (SCM, Search). "explorer": the
 // panel is an accordion section inside the Explorer tab, alongside the
-// built-in SESSIONS/FILES sections — it takes part in the accordion's
+// built-in PROJECTS/FILES sections — it takes part in the accordion's
 // ordering/collapse/resize persistence under its namespaced id. "run": the
-// same accordion treatment inside the Run tab (TASKS/PORTS), which has no
+// same accordion treatment inside the Run tab (TASKS), which has no
 // built-in sections and therefore only appears in the tab strip while at
-// least one non-hidden run panel is registered.
+// least one non-hidden run panel is registered. "commands": the same again
+// inside the Commands tab (HISTORY/SNIPPETS).
 export type SidebarPanelLocation = "tab" | "explorer" | "run" | "commands";
 
 export interface RegisteredSidebarPanel {
@@ -128,7 +129,7 @@ export interface RegisteredSidebarPanel {
   // depends on data fetched after activate() runs.
   badge?: number | null;
   location: SidebarPanelLocation;
-  // Whether an accordion section ("explorer"/"run") starts collapsed for
+  // Whether an accordion section ("explorer"/"run"/"commands") starts collapsed for
   // users with no stored state for it (the tab location ignores this).
   defaultCollapsed?: boolean;
   // Accordion sections only: hides this section (and, for the Run tab, lets
@@ -151,7 +152,7 @@ export interface RegisteredSidebarPanel {
 }
 
 // What a window action's isVisible/onClick are evaluated against — a plain
-// snapshot of one SESSIONS-tree window row, not a live handle.
+// snapshot of one PROJECTS-tree window row, not a live handle.
 export interface WindowActionContext {
   sessionName: string;
   windowIndex: number;
@@ -301,7 +302,7 @@ export interface ExtensionContext {
     // "extensions" when omitted.
     icon?: string;
     // Where the panel renders — its own sidebar tab (default) or an
-    // accordion section inside the Explorer or Run tab. See
+    // accordion section inside the Explorer, Run or Commands tab. See
     // SidebarPanelLocation.
     location?: SidebarPanelLocation;
     // Renders this panel as a PANE OF another panel of THIS extension,
@@ -326,7 +327,7 @@ export interface ExtensionContext {
     // section — see focusSidebarTab/focusAccordionPanel. For "tab" panels,
     // omitting it omits the command entirely (most panels don't need a
     // dedicated shortcut cluttering the palette); accordion panels
-    // ("explorer"/"run") always get the command (unbound when omitted),
+    // ("explorer"/"run"/"commands") always get the command (unbound when omitted),
     // matching the built-in sections' own always-present focus commands.
     focusBinding?: string;
     component: ReactNS.ComponentType<SidebarPanelHostProps>;
@@ -345,7 +346,7 @@ export interface ExtensionContext {
     isVisible: (ctx: SidebarTabMenuContext) => boolean;
     onClick: (ctx: SidebarTabMenuContext) => void;
   }): void;
-  // Contributes a button to the SESSIONS tree's window rows (next to the
+  // Contributes a button to the PROJECTS tree's window rows (next to the
   // built-in kill-window button), shown only on rows where isVisible
   // returns true — e.g. a preview action for windows running a specific
   // command. Generic: not tied to any particular command or extension.
@@ -388,7 +389,7 @@ export interface ExtensionContext {
     provideDecoration: (path: string, isDir: boolean) => FileDecoration | undefined;
     provideRootDecoration?: (rootPath: string) => RootDecoration | undefined;
   }): { refresh(): void };
-  // Contributes badges to SESSIONS-tree window rows (where the built-in
+  // Contributes badges to PROJECTS-tree window rows (where the built-in
   // subagent count rendered before extraction). Same sync-from-cache +
   // refresh() contract as registerFileDecorationProvider.
   registerSessionDecorationProvider(provider: {
@@ -397,8 +398,8 @@ export interface ExtensionContext {
     onClick?: (anchorRect: DOMRect, ctx: SessionDecorationContext) => void;
   }): { refresh(): void };
   // Supplies a terminal engine (the CreateTerminalEngine seam from
-  // engines/types) — TerminalView resolves the engine setting against this
-  // registry after extensions settle. See engines/index.ts.
+  // engines/types) — loadEngine activates the resolved engine's extension
+  // on demand once the extension list is known. See engines/index.ts.
   registerTerminalEngine(engine: { id: string; label: string; create: CreateTerminalEngine }): void;
   // Supplies an editor for the `editor` setting — the implementation behind
   // this extension's contributes.editors declaration (which is what the
@@ -442,8 +443,9 @@ export interface ExtensionContext {
   // with an optional click action (the Claude usage extension's token
   // counter is the motivating case). `placement` picks the bar's left or
   // right group (default "right", where core's own readouts also live), and
-  // `order` sorts within it. The bar is hidden entirely on phones/tablets,
-  // so an item never renders there. See StatusBarItemContext.
+  // `order` sorts within it. The bar stays on phones, compact, so an item
+  // renders there too and should shrink to its icon and number when
+  // `mobilePointer` is set. See StatusBarItemContext.
   registerStatusBarItem(item: {
     id: string;
     // Names the item in the gear menu's Status Bar list, where the user
@@ -681,7 +683,7 @@ export interface SessionDecorationContext {
   command: string;
 }
 
-// A badge on a SESSIONS-tree window row (the subagent count, generically).
+// A badge on a PROJECTS-tree window row (the subagent count, generically).
 export interface SessionDecoration {
   badge: string;
   tooltip?: string;
@@ -832,8 +834,8 @@ export interface RegisteredAppOverlay {
 // panel the item can reveal.
 export interface StatusBarItemContext {
   // matchMedia("(pointer: coarse) and (hover: none)") — a real phone or
-  // tablet. The whole bar is hidden there, so an item that renders is on a
-  // pointer device; the flag is passed for parity with the other contexts.
+  // tablet. The bar stays on phones in compact form; when set, shrink the
+  // item to its icon and number.
   mobilePointer: boolean;
   // The app's shared context menu, for an item whose click is a short list
   // of actions.
@@ -1628,7 +1630,7 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       // Tab panels: opt-in only — most don't warrant a dedicated shortcut
       // cluttering the palette/keybinding list. Accordion sections: always
       // registered (unbound when no focusBinding), matching the built-in
-      // SESSIONS/FILES sections' always-present focus commands. A defaultTab
+      // PROJECTS/FILES sections' always-present focus commands. A defaultTab
       // panel renders as a section like those, so it's treated like one.
       if (panel.focusBinding || location !== "tab" || defaultTab) {
         extensionCommands.push({

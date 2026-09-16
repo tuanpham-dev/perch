@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "File Guard",
-  "description": "Built-in guard for FILES-tree clicks on binary or oversized files: opens an info tab with a Download button instead of dumping the bytes into the editor (bundled — see extensions/build.mjs).",
+  "description": "Built-in guard for FILES-tree clicks on binary or oversized files: opens an info tab with a Download button instead of dumping the bytes into the editor (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "contributes": {
     "configuration": {

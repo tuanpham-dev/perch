@@ -49,8 +49,8 @@ export default function UiSection() {
         <span>Show status bar</span>
       </label>
       <div className="settings-hint">
-        RAM in use, open terminals, and listening ports, along the bottom of the window. Always hidden on
-        phones and tablets.
+        Git branch, open terminals, listening ports, and items from extensions, along the bottom of the
+        window. On phones it shows just icons and counts.
       </div>
 
       <label className="settings-row checkbox-row">

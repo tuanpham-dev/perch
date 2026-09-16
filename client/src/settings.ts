@@ -82,8 +82,10 @@ export interface AppSettings {
   // elsewhere) — synced across devices, so a phone and a desktop each get
   // the engine suited to them from one setting. Switching (directly or via
   // auto re-resolving) remounts the terminal and reattaches. Otherwise a
-  // namespaced extension engine id (ext.<extensionId>.<engineId>) — both
-  // engines are bundled extensions now; see client/src/engines/index.ts.
+  // namespaced extension engine id (ext.<extensionId>.<engineId>) —
+  // xterm-engine is bundled and required, ghostty-engine is an optional
+  // registry install (auto falls back to xterm without it); see
+  // client/src/engines/index.ts.
   terminalEngine: string;
   // Which editor opens files, git diffs and merge conflicts: the bare id
   // "nvim" (core's terminal editor, the default and the per-capability
@@ -172,8 +174,8 @@ export interface AppSettings {
   // After a restore, type an agent's resume command ("claude --continue")
   // into windows that were running it.
   resumeAgentsOnRestore: boolean;
-  // The bottom status bar (RAM, terminals, listening ports). Hidden on
-  // touch devices regardless — a phone has no room for it.
+  // The bottom status bar (git branch, terminals, listening ports, extension
+  // items). Stays on phones, compacted to icons and counts.
   showStatusBar: boolean;
   // When the installed desktop app's browser title bar is hidden (Window
   // Controls Overlay), draw the app's own title bar in that strip and drop
@@ -191,17 +193,18 @@ export interface AppSettings {
   // drag onto the server.
   uploadMaxSizeMb: number;
   // Destination directory for image paste/drop and the {image} touch key
-  // (plans/mobile-image-upload-key.md) — an absolute path used as-is for
-  // every upload, regardless of the pane's cwd. Empty falls back to the
-  // pane's own `<cwd>/uploads`.
+  // (plans/mobile-image-upload-key.md). {tmp} (the server's temp folder),
+  // {cwd} (the pane's folder) and {gitroot} (its repo root) are expanded per
+  // upload; default "{tmp}". Empty falls back to the pane's own
+  // `<cwd>/uploads`.
   pasteDropUploadDir: string;
   // Comma-separated program names (lib/terminalInput.ts's whenMatches
   // rules) gating
   // zero-lag local echo (plans/codeman-mobile-features.md): on a mobile
   // pointer device, while the pane's foreground command matches, typed
-  // input renders instantly in a DOM overlay and buffers until Enter
-  // instead of round-tripping through the PTY per keystroke. "" disables
-  // it entirely. Desktop and non-matching panes are unaffected regardless.
+  // input renders instantly in a DOM overlay while every keystroke is still
+  // sent to the PTY straight away (see localEcho.ts). Also gates image
+  // paste/drop uploads, on desktop too. "" disables both.
   localEchoWhen: string;
   // Where the PROJECTS tree creates new worktrees. {repo} is the repository
   // root, {branch} the branch name with path separators replaced by "-". A
@@ -225,13 +228,10 @@ export interface AppSettings {
   // `model` field, because "default model" is exactly what it says - a
   // profile named explicitly by an extension still uses its own.
   aiDefaultModel: string;
-  // Every AI agent the app knows, in the user's own order — the one list
-  // behind agent detection ("which window is the agent in"), agent launch
-  // presets ("Start work") and core's agent-hook pipeline. Extensions read
-  // it through GET /api/agents or host.agents.list() instead of each
-  // carrying its own copy (plans/agent-platform-core.md). Seeded with
-  // DEFAULT_AGENTS; the server falls back to the same seed for a document
-  // that has never stored the key (see server/src/agents.ts).
+  // The user's per-agent enabled overrides, keyed by id. The agents
+  // themselves come from extensions' contributes.agents (server/src/agents.ts
+  // resolveAgents), which extensions read through GET /api/agents or
+  // host.agents.list(); a stored entry no extension contributes is ignored.
   agents: AgentPreset[];
   // The one switch over core's agent-hook pipeline: on, core keeps its hooks
   // installed in each agent's own config file, so the app can show working /
@@ -241,9 +241,8 @@ export interface AppSettings {
   agentHooksEnabled: boolean;
   // How agents are launched by default. "yolo" appends each agent's own
   // skip-permissions flag (see AgentPreset.skipPermissionsArgs); "manual"
-  // leaves the prompts on. Per-launch controls (the New Worktree form's
-  // checkbox, JIRA's Start work menu) start from this and can override it
-  // for one launch.
+  // leaves the prompts on. Every launch follows it (the New Worktree form,
+  // an extension's Start work); there is no per-launch override.
   agentPermissions: "yolo" | "manual";
   // Whether core installs the per-tool-call hook events (tool-start /
   // tool-end) an extension asked for. Off by default: they fire once per
@@ -254,7 +253,7 @@ export interface AppSettings {
   // that specified it writes it agentHooks.highFrequencyEvents, which no
   // AppSettings key could be without quoting.
   agentHooksHighFrequencyEvents: boolean;
-  // Gates the "Kill Session"/"Kill Window" confirm dialogs. Unsaved-changes
+  // Gates the "Close Project"/"Close Terminal" confirm dialogs. Unsaved-changes
   // confirms (dirty CSV tabs) are never gated — that's data loss, not a
   // preference.
   confirmBeforeKill: boolean;
@@ -290,7 +289,7 @@ export interface AppSettings {
   paletteSortByUsage: boolean;
   // Web-push a notification when a command reported by shell integration
   // (plans/warp-features.md) finishes after running at least this many
-  // seconds. 0 disables. Read server-side (push.ts) from the synced doc —
+  // seconds. 0 disables. Read server-side (index.ts, which calls push.ts) from the synced doc —
   // the shell reports and the push fan-out never touch the client.
   notifyCommandMinDuration: number;
 }

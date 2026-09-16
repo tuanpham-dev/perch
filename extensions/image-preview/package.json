@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "Image Preview",
-  "description": "Built-in image viewer tab with zoom/pan (bundled — see extensions/build.mjs).",
+  "description": "Built-in image viewer tab with zoom/pan (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "perch": {
     "client": "./dist/client.js"

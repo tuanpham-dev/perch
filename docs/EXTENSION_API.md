@@ -11,19 +11,32 @@ to read).
 
 - [Anatomy and lifecycle](#anatomy-and-lifecycle)
 - [The manifest (`package.json`)](#the-manifest-packagejson)
+  - [`perch`](#perch)
+  - [`contributes.themes`](#contributesthemes)
+  - [`contributes.iconThemes`](#contributesiconthemes)
+  - [`contributes.fonts`](#contributesfonts)
+  - [`contributes.terminalEngines`](#contributesterminalengines)
+  - [`contributes.editors`](#contributeseditors)
+  - [`contributes.agents`](#contributesagents)
+  - [`contributes.configuration`](#contributesconfiguration)
 - [Client API](#client-api)
   - [`activate(ctx)` / `deactivate()`](#activatectx--deactivate)
   - [Commands](#commands--registercommand)
   - [File viewers](#file-viewers--registerfileviewer)
-  - [Editors](#editors--registereditor)
+  - [File-open interceptors](#file-open-interceptors--registerfileopeninterceptor)
   - [Sidebar panels](#sidebar-panels--registersidebarpanel)
   - [Sidebar tabs](#sidebar-tabs--registersidebartab)
   - [Sidebar tab menu items](#sidebar-tab-menu-items--registersidebartabmenuitem)
+  - [File menu items](#file-menu-items--registerfilemenuitem)
+  - [Tab group menu items](#tab-group-menu-items--registertabgroupmenuitem)
   - [Window actions](#window-actions--registerwindowaction)
   - [File decorations](#file-decorations--registerfiledecorationprovider)
   - [Session decorations](#session-decorations--registersessiondecorationprovider)
   - [Terminal engines](#terminal-engines--registerterminalengine)
+  - [Editors](#editors--registereditor)
   - [Terminal accessories](#terminal-accessories--registerterminalaccessory)
+  - [App overlays](#app-overlays--registerappoverlay)
+  - [Status bar items](#status-bar-items--registerstatusbaritem)
   - [Quick-switcher providers](#quick-switcher-providers--registerquickswitcherprovider)
   - [Settings components](#settings-components--registersettingscomponent)
   - [The `ctx.app` host API](#the-ctxapp-host-api)
@@ -34,6 +47,7 @@ to read).
 - [Sharing the host runtime](#sharing-the-host-runtime)
 - [Building and packaging](#building-and-packaging)
 - [Security model](#security-model)
+- [Terminals without tmux](#terminals-without-tmux)
 
 ---
 
@@ -43,10 +57,10 @@ An extension is a folder with a `package.json` manifest, discovered from two
 places:
 
 1. **Bundled** — the repo's own `extensions/<folder>/` (shipped with the
-   app; shows a *Built-in* badge in Settings).
+   app; shows a *Built-in* badge in the Extensions tab).
 2. **User-installed** — `~/.config/perch/extensions/<folder>/`
    (`$XDG_CONFIG_HOME` respected), either dropped in directly or unpacked
-   from a `.perch` installed through Settings → Extensions.
+   from a `.perch` installed through the Extensions tab's Install from .perch.
 
 A user-installed extension with the same id **always wins** over a bundled
 one — that's how you override a built-in preview, and one way to restore a
@@ -72,8 +86,9 @@ disabled or uninstalled.
 
 - Server hooks mount at server startup (for everything enabled) and on
   enable; they unmount on disable/uninstall. The ES module itself stays
-  resident until the server restarts — Node can't unload it — so Settings
-  shows a restart hint after disabling one.
+  resident until the server restarts — Node can't unload it — so a server
+  entry may export an optional `deactivate()`, which runs after its routes
+  unmount, to stop its own timers and watchers.
 - Client entries dynamic-import and `activate()` once per page load, after
   the extension list and settings have loaded. Disable/enable while the page
   is open calls the module's optional `deactivate()` and re-`activate()`s
@@ -81,9 +96,10 @@ disabled or uninstalled.
   deactivation, but anything you created outside the registries (injected
   stylesheets, your own DOM roots, timers, subscriptions) is yours to tear
   down in `deactivate()`.
-- Consumers that depend on registrations existing (the terminal-engine
-  resolution) wait on an internal *extensions-settled* gate that resolves
-  after the first activation pass completes — your `activate()` should do
+- Terminal-engine extensions are excluded from that page-load pass and
+  activated on demand once the extension list is known. The sidebar waits on
+  an internal *extensions-settled* gate (every activation finished, or 5s)
+  before showing panes homed in extension tabs — your `activate()` should do
   its `register*` calls synchronously so contributions are present when the
   gate opens.
 - Themes, icon themes, and fonts are **data-only** manifest contributions:
@@ -111,6 +127,9 @@ the whole extension.
     "themes": [ ... ],             // color themes
     "iconThemes": [ ... ],         // file-icon themes
     "fonts": [ ... ],              // terminal font groups
+    "terminalEngines": [ ... ],    // terminal engines (with registerTerminalEngine)
+    "editors": [ ... ],            // editors (with registerEditor)
+    "agents": [ ... ],             // AI agents for the app's registry (declared only)
     "configuration": { ... }       // settings (object, or an array of them)
   },
 
@@ -127,7 +146,7 @@ the whole extension.
 | Field | Meaning |
 | --- | --- |
 | `client` | Extension-relative path to the browser entry — an ESM module exporting `activate(ctx)` (and optionally `deactivate()`). Dynamic-imported by the host; see [Client API](#client-api). |
-| `server` | Extension-relative path to the server entry — an ESM module exporting `activate({ router, log, getSettings, host })`; see [Server API](#server-api). |
+| `server` | Extension-relative path to the server entry — an ESM module exporting `activate({ router, log, getSettings, ai, secrets, host })` (and optionally `deactivate()`); see [Server API](#server-api). |
 | `required` | **Bundled extensions only** (silently ignored on user-installed ones, which could otherwise claim it). Marks the extension as a *required builtin*: the server refuses `disable`/`uninstall`, ignores stale state-file entries for it, and the UI shows a **Required** chip instead of those actions. Reserved for surfaces the app cannot function without — currently only `xterm-engine`, the terminal rendering floor. |
 
 ### `contributes.themes`
@@ -184,6 +203,28 @@ renders bold cells with it); entries with distinct families bundle
 companion fonts (e.g. a Nerd Font symbols face) that ride along in the
 stack when the group is picked. Reference: `extensions/ibm-plex-mono`.
 
+### `contributes.terminalEngines`
+
+```jsonc
+"contributes": {
+  "terminalEngines": [
+    { "id": "xterm", "label": "xterm.js" }
+  ]
+}
+```
+
+Declares that this extension supplies a terminal engine for the
+`terminalEngine` setting. Data-only: Settings → Terminal lists every enabled
+extension's entries as `ext.<extensionId>.<id>` without running any extension
+code, and the implementation arrives from
+[`registerTerminalEngine`](#terminal-engines--registerterminalengine) under the
+same id. Entries missing `id` or `label` are dropped.
+
+Declaring one changes how the extension activates: it is left out of the
+page-load activation pass and activated only when a terminal resolves to one
+of its engines. Keep unrelated contributions in a separate extension, or they
+won't exist until then. Reference: `extensions/xterm-engine`.
+
 ### `contributes.editors`
 
 ```jsonc
@@ -205,6 +246,170 @@ activation. The stored setting value is the namespaced `ext.<extensionId>.<id>`.
 to nvim, which core provides and which handles all three — so an editor that
 only declares `"file"` simply never receives diffs or conflicts. An entry
 declaring none of the three is dropped.
+
+### `contributes.agents`
+
+An extension can add agents to the app's own registry (**Settings → AI Providers**),
+so a plugin can teach the app about an agent core has never heard of without
+the user defining one by hand. Declared, not activated: these are read from
+the manifest, so a contributed agent is detected and offered for launching
+whether or not your extension has a client or server entry.
+
+```json
+"contributes": {
+  "agents": [
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "program": "opencode",
+      "command": "opencode",
+      "resume": "opencode --continue",
+      "skipPermissionsArgs": "--yolo",
+      "docsUrl": "https://example.com/opencode",
+      "icon": "hubot",
+      "hooks": {
+        "file": "~/.opencode/settings.json",
+        "events": { "session-start": "SessionStart", "stop": "Stop" }
+      }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Required. Namespaced with your extension id when merged (`<publisher>.<name>.<id>`), so two extensions cannot collide. |
+| `label` | The name shown for the agent. Falls back to `program`, then `command`. |
+| `program` | The foreground command a window running it reports — how a window is recognised as this agent. Omit for launch-only. |
+| `command` | The full launch line. Omit for detection-only. An entry with neither is dropped. |
+| `resume` | The line that picks the agent back up in the same folder (`claude --continue`). Typed into a window that was running the agent when terminals are restored after a restart, if **Resume agents** is on. Omit and a restored window stays at its shell prompt. |
+| `skipPermissionsArgs` | Appended for the agent's no-prompts mode (also to `resume`). Empty means it has none, and no "skip permissions" choice is offered for it. |
+| `hooks` | How the app should write this agent's hook config — see **The hooks descriptor** below. Omit it for an agent whose CLI has none; a malformed one costs the agent its hooks, not its row. |
+| `oneShot` | How to run this CLI for a single prompt — see **The one-shot form** below. Declaring it also lists this agent as an AI provider under Settings → AI Providers. |
+| `docsUrl` | Where to read about it, or how to install it — the row's link, and the only useful action for an agent whose CLI is absent. |
+| `icon` | A codicon name for the row. Unknown or omitted falls back to a generic robot. |
+| `iconUrl` | An image for the row — extension-relative or an absolute URL. Takes precedence over `icon`. |
+
+Contributed agents are **not editable** in Settings — whoever contributed
+them owns the command line — but the user can enable and disable them like
+any other. The settings document records only that choice: an agent's
+identity, including its hook descriptor, always comes from the manifest, and
+an entry in the document that no installed extension contributes is dropped
+rather than shown as a dead row. An agent whose `program` is not on `PATH` is
+shown dimmed rather than offered as if it would run.
+
+The app itself ships **no** agents. Claude Code and OpenAI Codex come from the
+bundled `agents` extension, which is an ordinary extension using exactly the
+contribution documented here — uninstall it and the list is empty.
+
+#### The hooks descriptor
+
+An agent's `hooks` says which file to write, in what shape, and what that CLI
+calls each event. Only `file` and `events` are required; every other field
+defaults to the commonest shape.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `file` | required | The config file to write. `~` is expanded. A path outside `$HOME` is refused and the descriptor is dropped. |
+| `events` | required | Maps the app's normalized event names (see the table further down) to what this CLI calls them. An event you leave out is one the app will never install or claim. An empty map drops the descriptor. |
+| `ownership` | `"merged"` | `"merged"` — the file holds other things and the app only adds its own part. `"whole-file"` — the file is the app's, so the UI warns that replacing it discards what was there. |
+| `container` | `{"key": "hooks"}` | Where the event map lives: under a top-level key, or `{"wrapper": "<name>", "extra": {…}}` for a CLI that wants a named wrapper object carrying its own fields. |
+| `entry` | `"nested"` | The shape of one event's value. `"nested"` — a list of entries each with its own `hooks` array. `"flat"` — a list of handlers directly. |
+| `matcherEvents` | `[]` | Raw event names that take `matcher: "*"`. Putting a matcher on an event that does not accept one is how a config file gets rejected at startup. |
+| `extraFields` | `{}` | Top-level fields the CLI's parser requires. Written only when absent — a value the user put there is theirs. |
+| `companion` | none | A second file to write alongside the hooks; see **Companions** below. Must sit in the same directory as `file`. |
+
+The app writes only its own entries, recognised by the command being its own
+hook shim and nothing else. A hand-written hook in the same file is never
+read, rewritten or removed, whatever it points at, and every write is preceded
+by a timestamped backup and performed as a temp-file rename.
+
+A worked example of the other shape — a named wrapper whose event value is a
+flat handler array, with no inner `hooks`. Antigravity's CLI is the real CLI
+that reads this form:
+
+```json
+"hooks": {
+  "file": "~/.gemini/config/hooks.json",
+  "container": { "wrapper": "perch", "extra": { "enabled": true } },
+  "entry": "flat",
+  "events": {
+    "session-start": "SessionStart",
+    "prompt-submit": "PreInvocation",
+    "stop": "Stop"
+  }
+}
+```
+
+which produces:
+
+```json
+{
+  "perch": {
+    "enabled": true,
+    "SessionStart": [{ "type": "command", "command": "<shim> <agent> SessionStart", "timeout": 5 }],
+    "Stop": [{ "type": "command", "command": "<shim> <agent> Stop", "timeout": 5 }]
+  }
+}
+```
+
+#### The one-shot form
+
+An agent's `command` starts an interactive session in a pane. Answering one
+prompt and printing a reply is a different invocation, and the app needs it for
+text jobs — commit messages, AI command search, prompt refine. Declare it and
+your agent appears as an AI provider automatically; there is no second list to
+add it to.
+
+```json
+"oneShot": {
+  "args": ["exec", "{modelArgs}", "{prompt}"],
+  "modelArgs": ["-m", "{model}"],
+  "listModelsArgs": ["models"]
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `args` | required | The argv after the binary. `{prompt}` is replaced by the prompt and **must** appear, or the whole form is dropped. `{modelArgs}` is a splice point: it expands to `modelArgs` below, or to nothing at all when no model is set. |
+| `modelArgs` | `[]` | Included only when a model is named; `{model}` is replaced by it. It is a separate list, and `args` says where it goes, because CLIs disagree — `claude` takes `--model`, `codex` takes `-m` before the prompt. |
+| `listModelsArgs` | none | A subcommand that prints the available models, one per line. Omit it and the app scrapes `--help` instead. |
+
+The binary is the agent's `program`. The prompt is always its own argv entry —
+never concatenated into a string, never passed through a shell — so a prompt
+that looks like a flag stays a prompt. Non-string tokens in either list are
+dropped rather than coerced.
+
+
+#### Companions
+
+Some CLIs need a second file before they will run a hook at all. Codex is the
+example: it refuses to run a handler that is not trusted in
+`~/.codex/config.toml`, and it does so **silently** — no warning, nothing in
+its log, the hook simply never fires.
+
+Declare the path as `companion` on the descriptor and register a transform
+from your server entry:
+
+```js
+export function activate({ host }) {
+  host.agentHooks.provideCompanion("codex", ({ hookFile, handlers, current }) => {
+    // `current` is the file's existing text ("" when absent). Return what it
+    // should become. `handlers` is what was just installed — each with
+    // `rawEvent`, `command`, `timeoutSeconds`, `group` and `handler` — and is
+    // EMPTY on uninstall, which is how you know to remove your entries.
+    return rewrite(current, hookFile, handlers);
+  });
+}
+```
+
+The app does the reading and the writing, under the same backup and
+temp-then-rename rules as the hook file, so a transform is a pure string
+function. It is fenced accordingly: the path comes from the manifest and must
+be in the hook file's own directory, output is capped at 64KB, and a transform
+that throws, hangs or returns anything else is logged and skipped rather than
+failing the install. Register one for an agent you did not contribute and
+nothing happens.
 
 ### `contributes.configuration`
 
@@ -329,7 +534,7 @@ modifiers + `KeyX`/`Digit1`/named keys, e.g. `"ctrl+shift+KeyG"`.
 ctx.registerFileViewer({
   id: string,
   extensions: string[],       // lowercase, no dot: ["md", "markdown"] — [] = openViewerTab-only
-  mode?: "default" | "preview",   // default "default"
+  mode?: "default" | "preview" | (() => "default" | "preview"), // default "default"; a thunk is re-read on every lookup
   editorFallback?: boolean,       // default true; "default"-mode only
   component: React.ComponentType<FileViewerHostProps>,
 });
@@ -352,173 +557,20 @@ interface FileViewerHostProps {
   openInEditor?: (path: string) => void;
   showMenu?: (x: number, y: number, items: MenuItem[]) => void;
   setDirty?: (dirty: boolean) => void;   // closing a dirty tab confirms first
+  reloadKey?: number;                    // bumped when an explicit open re-targets this tab
   fontSize?: number;                     // the configured terminal font size, px
 }
 ```
 
-### Agents — `contributes.agents`
+Reference: any of the preview extensions; `git-scm` for `extensions: []`
+viewers opened only via `ctx.app.openViewerTab`.
 
-An extension can add agents to the app's own registry (**Settings → AI Providers**),
-so a plugin can teach the app about an agent core has never heard of without
-the user defining one by hand. Declared, not activated: these are read from
-the manifest, so a contributed agent is detected and offered for launching
-whether or not your extension has a client or server entry.
+#### Context menus — `showMenu`
 
-```json
-"contributes": {
-  "agents": [
-    {
-      "id": "opencode",
-      "label": "OpenCode",
-      "program": "opencode",
-      "command": "opencode",
-      "resume": "opencode --continue",
-      "skipPermissionsArgs": "--yolo",
-      "docsUrl": "https://example.com/opencode",
-      "icon": "hubot",
-      "hooks": {
-        "file": "~/.opencode/settings.json",
-        "events": { "session-start": "SessionStart", "stop": "Stop" }
-      }
-    }
-  ]
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `id` | Required. Namespaced with your extension id when merged (`<publisher>.<name>.<id>`), so two extensions cannot collide. |
-| `program` | The foreground command a window running it reports — how a window is recognised as this agent. Omit for launch-only. |
-| `command` | The full launch line. Omit for detection-only. An entry with neither is dropped. |
-| `resume` | The line that picks the agent back up in the same folder (`claude --continue`). Typed into a window that was running the agent when terminals are restored after a restart, if **Resume agents** is on. Omit and a restored window stays at its shell prompt. |
-| `skipPermissionsArgs` | Appended for the agent's no-prompts mode (also to `resume`). Empty means it has none, and no "skip permissions" choice is offered for it. |
-| `hooks` | How the app should write this agent's hook config — see **The hooks descriptor** below. Omit it for an agent whose CLI has none; a malformed one costs the agent its hooks, not its row. |
-| `oneShot` | How to run this CLI for a single prompt — see **The one-shot form** below. Declaring it also lists this agent as an AI provider under Settings → AI Providers. |
-| `docsUrl` | Where to read about it, or how to install it — the row's link, and the only useful action for an agent whose CLI is absent. |
-| `icon` | A codicon name for the row. Unknown or omitted falls back to a generic robot. |
-
-Contributed agents are **not editable** in Settings — whoever contributed
-them owns the command line — but the user can enable and disable them like
-any other. The settings document records only that choice: an agent's
-identity, including its hook descriptor, always comes from the manifest, and
-an entry in the document that no installed extension contributes is dropped
-rather than shown as a dead row. An agent whose `program` is not on `PATH` is
-shown dimmed rather than offered as if it would run.
-
-The app itself ships **no** agents. Claude Code and OpenAI Codex come from the
-bundled `agents` extension, which is an ordinary extension using exactly the
-contribution documented here — uninstall it and the list is empty.
-
-#### The hooks descriptor
-
-An agent's `hooks` says which file to write, in what shape, and what that CLI
-calls each event. Only `file` and `events` are required; every other field
-defaults to the commonest shape.
-
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `file` | required | The config file to write. `~` is expanded. A path outside `$HOME` is refused and the descriptor is dropped. |
-| `events` | required | Maps the app's normalized event names (see the table further down) to what this CLI calls them. An event you leave out is one the app will never install or claim. An empty map drops the descriptor. |
-| `ownership` | `"merged"` | `"merged"` — the file holds other things and the app only adds its own part. `"whole-file"` — the file is the app's, so the UI warns that replacing it discards what was there. |
-| `container` | `{"key": "hooks"}` | Where the event map lives: under a top-level key, or `{"wrapper": "<name>", "extra": {…}}` for a CLI that wants a named wrapper object carrying its own fields. |
-| `entry` | `"nested"` | The shape of one event's value. `"nested"` — a list of entries each with its own `hooks` array. `"flat"` — a list of handlers directly. |
-| `matcherEvents` | `[]` | Raw event names that take `matcher: "*"`. Putting a matcher on an event that does not accept one is how a config file gets rejected at startup. |
-| `extraFields` | `{}` | Top-level fields the CLI's parser requires. Written only when absent — a value the user put there is theirs. |
-| `companion` | none | A second file to write alongside the hooks; see **Companions** below. Must sit in the same directory as `file`. |
-
-The app writes only its own entries, recognised by the command being its own
-hook shim and nothing else. A hand-written hook in the same file is never
-read, rewritten or removed, whatever it points at, and every write is preceded
-by a timestamped backup and performed as a temp-file rename.
-
-A worked example of the other shape — a named wrapper whose event value is a
-flat handler array, with no inner `hooks`. Antigravity's CLI is the real CLI
-that reads this form:
-
-```json
-"hooks": {
-  "file": "~/.gemini/config/hooks.json",
-  "container": { "wrapper": "perch", "extra": { "enabled": true } },
-  "entry": "flat",
-  "events": {
-    "session-start": "SessionStart",
-    "prompt-submit": "PreInvocation",
-    "stop": "Stop"
-  }
-}
-```
-
-which produces:
-
-```json
-{
-  "perch": {
-    "enabled": true,
-    "SessionStart": [{ "type": "command", "command": "<shim> <agent> SessionStart", "timeout": 5 }],
-    "Stop": [{ "type": "command", "command": "<shim> <agent> Stop", "timeout": 5 }]
-  }
-}
-```
-
-#### The one-shot form
-
-An agent's `command` starts an interactive session in a pane. Answering one
-prompt and printing a reply is a different invocation, and the app needs it for
-text jobs — commit messages, AI command search, prompt refine. Declare it and
-your agent appears as an AI provider automatically; there is no second list to
-add it to.
-
-```json
-"oneShot": {
-  "args": ["exec", "{modelArgs}", "{prompt}"],
-  "modelArgs": ["-m", "{model}"],
-  "listModelsArgs": ["models"]
-}
-```
-
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `args` | required | The argv after the binary. `{prompt}` is replaced by the prompt and **must** appear, or the whole form is dropped. `{modelArgs}` is a splice point: it expands to `modelArgs` below, or to nothing at all when no model is set. |
-| `modelArgs` | `[]` | Included only when a model is named; `{model}` is replaced by it. It is a separate list, and `args` says where it goes, because CLIs disagree — `claude` takes `--model`, `codex` takes `-m` before the prompt. |
-| `listModelsArgs` | none | A subcommand that prints the available models, one per line. Omit it and the app scrapes `--help` instead. |
-
-The binary is the agent's `program`. The prompt is always its own argv entry —
-never concatenated into a string, never passed through a shell — so a prompt
-that looks like a flag stays a prompt. Non-string tokens in either list are
-dropped rather than coerced.
-
-
-#### Companions
-
-Some CLIs need a second file before they will run a hook at all. Codex is the
-example: it refuses to run a handler that is not trusted in
-`~/.codex/config.toml`, and it does so **silently** — no warning, nothing in
-its log, the hook simply never fires.
-
-Declare the path as `companion` on the descriptor and register a transform
-from your server entry:
-
-```js
-export function activate({ host }) {
-  host.agentHooks.provideCompanion("codex", ({ hookFile, handlers, current }) => {
-    // `current` is the file's existing text ("" when absent). Return what it
-    // should become. `handlers` is what was just installed — each with
-    // `rawEvent`, `command`, `timeoutSeconds`, `group` and `handler` — and is
-    // EMPTY on uninstall, which is how you know to remove your entries.
-    return rewrite(current, hookFile, handlers);
-  });
-}
-```
-
-The app does the reading and the writing, under the same backup and
-temp-then-rename rules as the hook file, so a transform is a pure string
-function. It is fenced accordingly: the path comes from the manifest and must
-be in the hook file's own directory, output is capped at 64KB, and a transform
-that throws, hangs or returns anything else is logged and skipped rather than
-failing the install. Register one for an agent you did not contribute and
-nothing happens.
-
-`showMenu` opens the app's own context menu at a point. Its items:
+`showMenu`, passed to file viewers here and also to
+[sidebar panels](#sidebar-panels--registersidebarpanel) and
+[status bar items](#status-bar-items--registerstatusbaritem), opens the app's
+own context menu at a point. Its items:
 
 ```ts
 interface MenuItem {
@@ -535,11 +587,32 @@ interface MenuItem {
 ```
 
 A menu closes on any click, including a `checked` toggle — so a toggle that
-should stay visible after flipping has to reopen the menu itself (the JIRA
-extension's "Skip permission prompts" row does exactly that).
+should stay visible after flipping has to reopen the menu itself.
 
-Reference: any of the preview extensions; `git-scm` for `extensions: []`
-viewers opened only via `ctx.app.openViewerTab`.
+### File-open interceptors — `registerFileOpenInterceptor`
+
+```ts
+ctx.registerFileOpenInterceptor(
+  (path: string) => Promise<boolean>,   // true = handled, open nothing else
+);
+```
+
+Gets a shot at every open that would otherwise reach the editor: a FILES-tree
+click, `ctx.app.openFileTab`, a terminal link, the quick switcher, `perch open`
+(`ctx.app.openInEditor` bypasses it). It runs **after**
+`"default"`-mode viewer matching (so image/media/pdf keep their paths) and
+before the editor the `editor` setting selects. Resolve `true` once you've
+opened something yourself, typically your own `extensions: []` viewer via
+`ctx.app.openViewerTab`; resolve `false` to pass. Interceptors run in
+registration order and the first `true` wins.
+
+It must **fail open**: a thrown error or rejection counts as `false` and falls
+through to the next interceptor, then the editor, so a broken interceptor can
+never make files unopenable. It is awaited on every open, so keep it fast and
+cheap. This is the seam for decisions an extension list can't express, such as
+content-sniffing a file server-side. There is no id and nothing to refresh;
+it's removed on deactivation. Reference: `file-guard` (binary and oversized
+files get a guard tab instead of nvim).
 
 ### Sidebar panels — `registerSidebarPanel`
 
@@ -552,6 +625,7 @@ ctx.registerSidebarPanel({
   defaultCollapsed?: boolean,       // accordion locations only
   order?: number,                   // accordion locations only: default placement weight
   focusBinding?: string,            // default binding for the focus command
+  defaultTab?: string,              // home as a pane of another panel of this extension
   component: React.ComponentType<SidebarPanelHostProps>,
 });
 ```
@@ -561,15 +635,15 @@ Locations:
 - **`"tab"`** — its own full-height sidebar tab in the icon strip (SOURCE
   CONTROL, SEARCH). The auto-registered "Sidebar: Focus *title*" command
   reveals/switches to the tab, or hides the sidebar if it's already active
-  (VS Code's toggle). The command only exists if `focusBinding` is given.
+  (VS Code's toggle). The command only exists if `focusBinding` or `defaultTab` is given.
 - **`"explorer"`** — an accordion section inside the Explorer tab, beside
-  the built-in SESSIONS/FILES sections. It participates fully in the
+  the built-in PROJECTS/FILES sections. It participates fully in the
   accordion's drag-reorder, collapse, and splitter-resize persistence under
   its namespaced id; `defaultCollapsed` sets the state for users with no
   stored entry. The focus command is **always** registered (unbound unless
   `focusBinding` is given) and expands the section, then focuses its first
   focusable row.
-- **`"run"`** — an accordion section inside the Run tab (TASKS, PORTS).
+- **`"run"`** — an accordion section inside the Run tab (TASKS).
   Same accordion semantics as `"explorer"`. The Run tab has no built-in
   sections: it appears in the strip only while some extension contributes a
   visible run panel.
@@ -589,12 +663,13 @@ interface SidebarPanelHostProps {
 `actionsTarget` is the panel header's actions container — portal refresh/
 sync buttons into it (`createPortal`) so they sit beside the title instead
 of inside the scrollable body. `confirmDialog` is the app's shared confirm
-dialog, for destructive actions (the ports panel's *Kill process*).
+dialog, for destructive actions (e.g. killing a process). `showMenu` opens the app's
+context menu; see [Context menus](#context-menus--showmenu) for its items.
 
 Badge counts on `"tab"` panels are set later via
 [`ctx.app.setSidebarBadge`](#the-ctxapp-host-api), not at registration.
 
-References: `search` (tab), `ports` (explorer).
+References: `search` (tab), `tasks` (run), `command-history` / `snippets` (commands).
 
 ### Sidebar tabs — `registerSidebarTab`
 
@@ -667,6 +742,55 @@ extension items show, and no menu opens when none is visible. `isVisible` runs
 on every open; one that throws hides its item. Compare `tabId` with your
 handles' `id` to offer actions for your own tabs only.
 
+### File menu items — `registerFileMenuItem`
+
+```ts
+ctx.registerFileMenuItem({
+  id: string,
+  label: string,
+  icon?: string,                    // codicon name for the menu's leading gutter
+  order?: number,                   // ascending among extension items; unset sorts last
+  isVisible: (path: string, isDir: boolean) => boolean,
+  onClick: (path: string) => void,
+});
+```
+
+Adds an item to the FILES tree's right-click menu for a single file or folder
+row, after the built-in items behind a separator. `path` is absolute. The menu
+is built on every open, so `isVisible` can read whatever state you keep; one
+that throws hides only its own item. The bulk menu shown for a multi-row
+selection is not a contribution point. Reference: `prompts` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry.
+
+### Tab group menu items — `registerTabGroupMenuItem`
+
+```ts
+ctx.registerTabGroupMenuItem({
+  id: string,
+  label: string,
+  icon?: string,
+  order?: number,                   // ascending among extension items; unset sorts last
+  isVisible: (ctx: TabGroupContext) => boolean,
+  onClick: (ctx: TabGroupContext) => void,
+});
+
+interface TabGroupContext {
+  sessionName: string;
+  cwd: string | null;               // the session's active window's directory; null with no live window
+}
+```
+
+Adds an item to a tab-group chip's windows dropdown (the chip's arrow button),
+below the window list and *New Window* behind a separator. It is that dropdown,
+not the chip's right-click menu, because the dropdown is where per-session
+actions live; the right-click menu is about the group itself. Same per-open
+evaluation and fail-safe `isVisible` as file menu items. Check
+`typeof ctx.registerTabGroupMenuItem === "function"` (and the same for
+`registerFileMenuItem`) if you support older hosts. Reference: `prompts` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry ("New Prompt Here", scoped to the group's `cwd`).
+
 ### Window actions — `registerWindowAction`
 
 ```ts
@@ -687,12 +811,12 @@ interface WindowActionContext {
 }
 ```
 
-An icon button on SESSIONS-tree window rows (next to the built-in kill
+An icon button on PROJECTS-tree window rows (next to the built-in kill
 button), shown only where `isVisible` returns true — `command` lets an
 action target e.g. only windows running `claude`. `isVisible` re-evaluates
 on the session list's own ~3s poll, so it's reactive for free.
 `showInTabBar: true` also renders it in the tab bar when the matching
-terminal window's tab is focused. Reference: `live-preview`.
+terminal window's tab is focused.
 
 ### File decorations — `registerFileDecorationProvider`
 
@@ -753,7 +877,7 @@ interface SessionDecoration {
 }
 ```
 
-Renders a clickable badge on SESSIONS window rows (styled like the core
+Renders a clickable badge on PROJECTS-tree window rows (styled like the core
 `.window-decoration-badge` pill). A window row can carry one badge per
 provider. `onClick` receives the badge's bounding rect — position your own
 popover from it, rendered into a root **you** own (via the
@@ -780,21 +904,21 @@ per-method contracts — write/fit/selection/link-hover/IME/etc.). This is
 the deepest extension point in the app: implementing an engine means
 satisfying every handle method TerminalView calls. One handle method is
 optional: `setSoftKeyboardSuppressed(suppressed)` — set/remove
-`inputmode="none"` on your hidden input element (both bundled engines do
-exactly that on `term.textarea`); it backs the accessory context's
+`inputmode="none"` on your hidden input element (the bundled xterm engine
+does exactly that on `term.textarea`); it backs the accessory context's
 soft-keyboard suppression, and the host calls it defensively plus
 re-applies the standing value after engine creation.
 
 Resolution: the `terminalEngine` setting stores a namespaced engine id (or
 `"auto"`, which picks xterm on mobile pointers and ghostty elsewhere when
 that optional engine is installed, else xterm).
-TerminalView resolves it against the registry **after the
-extensions-settled gate**; an unknown/stale id falls back to the required
+TerminalView resolves it against the registry **once the extension list
+is known**, activating only the engine's own extension; an unknown/stale id falls back to the required
 `xterm-engine`, and an empty registry renders an explicit error surface.
 Runtime helpers your engine will need (cell math, link candidates, the
 synthetic-selection marker) come from the
 [`@perch/engine-support` shim](#sharing-the-host-runtime).
-References: `xterm-engine`, `ghostty-engine`.
+References: `xterm-engine`, `ghostty-engine` (in the `perch-extensions` registry).
 
 ### Editors — `registerEditor`
 
@@ -859,6 +983,7 @@ interface TerminalAccessoryContext {
   focused: boolean;        // is this the focused terminal
   mobilePointer: boolean;  // matchMedia("(pointer: coarse) and (hover: none)")
   command: string;         // the pane's foreground command
+  lastCommandEvent: TerminalCommandEvent | null; // latest shell-integration event, or null
   stickyCtrl: boolean;     // the app's sticky-Ctrl state for this terminal
   toggleStickyCtrl(): void;
   sendInput(data: string): void;   // raw bytes to the pty
@@ -897,10 +1022,32 @@ accessory is the only on-screen text input, so users lose OS
 autocomplete/dictation/IME — and call `setSoftKeyboardSuppressed(false)`
 in `deactivate()` so disabling your extension restores normal behavior.
 
+`lastCommandEvent` comes from shell integration and stays `null` until the
+first event, or for good when the user hasn't sourced the snippet:
+
+```ts
+interface TerminalCommandEvent {
+  pane: string;
+  sessionName: string;
+  event: "start" | "end";
+  command: string;
+  cwd: string;
+  exitCode?: number;    // "end" only
+  durationMs?: number;  // "end" only
+}
+```
+
+The same object is also dispatched app-wide as a `perch:command-event`
+`CustomEvent` on `window` (`detail` is the event), for code that isn't an
+accessory, such as a panel that refetches history when a command finishes.
+It is relayed by each open terminal view that receives it, so debounce rather
+than count. Remove the listener in `deactivate()`. Reference:
+`command-history`.
+
 #### Opting out of the sidebar swipe — `data-no-sidebar-swipe`
 
 On touch devices a fast horizontal flick anywhere toggles the sidebar
-(left→right opens, right→left closes). The host already skips flicks that
+(left→right opens, right→left closes) or the right drawer when it has tabs. The host already skips flicks that
 start inside a horizontally scrollable element, so tab strips and terminal
 hscroll keep their gestures. UI whose own gesture is a *free* horizontal
 drag rather than a scroll — a draggable floating control, a slider, a
@@ -910,6 +1057,105 @@ gesture. The host listens on `document` in the capture phase, so an
 extension cannot preempt it from its own handlers; this attribute is the
 seam. The bundled touch-keys extension uses it on its floating one-handed
 toggle and key cluster.
+
+### App overlays — `registerAppOverlay`
+
+```ts
+ctx.registerAppOverlay({
+  id: string,
+  component: React.ComponentType<{ context: AppOverlayContext }>,
+});
+
+interface AppOverlayContext {
+  mobilePointer: boolean;  // matchMedia("(pointer: coarse) and (hover: none)")
+  containerRef: React.RefObject<HTMLDivElement | null>; // the overlay layer
+}
+```
+
+Renders your component **once**, over the editor area, on top of whatever tab
+is active: a terminal, Settings, a viewer. That is the difference from a
+terminal accessory, which mounts per terminal and only inside a terminal tab.
+There is deliberately no `focused` or per-tab state.
+
+The host draws every overlay into one `.app-overlay-layer`: absolutely
+positioned over the editor area (right of the sidebar), `pointer-events: none`,
+and stacked above tab content (including terminal accessories) but below menus,
+dialogs and the quick switcher. Because the layer ignores the pointer, **your
+component must set `pointer-events: auto` on its own interactive parts**, and
+should leave the rest transparent so tabs underneath keep working.
+`containerRef` is that layer, for positioning or clamping against the editor
+bounds. Gate visibility yourself (return `null`), e.g. on `mobilePointer` or
+your own setting. Reference: `one-hand` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry (a bottom swipe bar that runs commands through
+`ctx.app.executeCommand`).
+
+### Status bar items — `registerStatusBarItem`
+
+```ts
+ctx.registerStatusBarItem({
+  id: string,
+  title?: string,                   // name in the Status Bar show/hide list; default: extension display name
+  placement?: "left" | "right",     // default "right"
+  order?: number,                   // ascending within the group, default 0; ties break on id
+  visibilitySetting?: string,       // a boolean key from your own contributes.configuration
+  component: React.ComponentType<{ context: StatusBarItemContext }>,
+});
+
+interface StatusBarItemContext {
+  mobilePointer: boolean;           // phone/tablet: the bar is compact
+  showMenu(x: number, y: number, items: MenuItem[]): void;
+  confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
+  openPopover(anchor: DOMRect, content: React.ReactNode): void;
+  closePopover(): void;
+}
+```
+
+A compact readout, with an optional click action, in the app's bottom status
+bar (22px tall, shown while Settings → UI → *Show status bar* is on). The
+context is small on purpose: a menu (`showMenu`, see
+[Context menus](#context-menus--showmenu)), a confirm, a popover. Anything richer
+belongs in a sidebar panel the item can
+[reveal](#the-ctxapp-host-api). Core's own terminal count closes the right
+group, after any right-placed extension items.
+
+Render a `<button className="status-bar-item">` (the host's own item styling;
+put a codicon and a short number inside) and mark it
+`data-menu-trigger="true"` whenever it opens a menu or popover. Clicks on
+such an element don't count as outside clicks, so a second click toggles the
+popover closed instead of dismissing it and immediately reopening it.
+
+- **Popovers.** `openPopover(rect, content)` shows `content` in a floating
+  panel anchored above the bar, clamped to the viewport. Pass the trigger's
+  `getBoundingClientRect()`. The host owns positioning and dismissal (outside
+  click, Escape, window blur), and the popover closes by itself when the item
+  goes away. Calling it again while **this** item's popover is open closes it,
+  so a button toggles without tracking state; another item's call replaces it.
+  `content` is kept as the node it was at click time, so pass a **component**
+  (`<MyPopover />`) that subscribes to its own data rather than a tree closing
+  over the item's current state, which would freeze when the popover opened.
+- **Confirm.** Use `confirmDialog` rather than `window.confirm` for a
+  destructive action in a popover: the native dialog blurs the window, and blur
+  closes the popover.
+- **Phones.** The bar stays on phones, compact (`.status-bar.compact`), so your
+  item renders there too. Drop it to its icon and number: either branch on
+  `mobilePointer`, or put wordy parts in an element with the `full-only` class,
+  which the compact bar hides. Long-pressing an item on touch picks it up to
+  drag, so don't give an item a long-press gesture of its own.
+- **User control.** Users drag any item to reorder it or move it between
+  groups, and switch items off from the bar's right-click menu, the gear menu's
+  **Status Bar** list, or a long-press on an empty stretch of the bar on a phone.
+  The arrangement and the plain hidden list are stored per device, so
+  `placement` and `order` are only defaults. With `visibilitySetting`, that
+  boolean setting **is** the item's switch: the list reads and writes it, and
+  the item renders unless the value is `false`, so an extension that already
+  offers "show this in the status bar" keeps one control rather than two. Your
+  component doesn't need to check it.
+
+References: `ports` (popover with a confirmed kill), `git-scm` (`visibilitySetting:
+"gitScm.statusBar"`), `examples/hello-extension` (no-build), and `system-stats` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry (`full-only` in a compact bar).
 
 ### Quick-switcher providers — `registerQuickSwitcherProvider`
 
@@ -966,8 +1212,10 @@ the user around (git-scm's status, search's scope).
 ```ts
 ctx.app.openFileTab(path: string, line?: number): void
 ```
-Opens a path through the same dispatch a FILES-tree click uses (nvim, or
-whichever `"default"`-mode viewer claims it); `line` jumps there in nvim.
+Opens a path through the same dispatch a FILES-tree click uses (whichever
+`"default"`-mode viewer claims it, else a file-open interceptor such as
+`file-guard`, else the editor the `editor` setting selects); `line` jumps
+there when that editor supports it.
 
 ```ts
 ctx.app.openViewerTab(viewerId: string, path: string, opts?: { title?: string }): void
@@ -976,6 +1224,17 @@ Opens (or re-activates) a tab for one of **this extension's own**
 registered viewers directly, bypassing extension matching — the route for
 viewers registered with `extensions: []` (git-scm's diff view). Re-calling
 for an open `(viewerId, path)` tab updates its title in place.
+
+```ts
+ctx.app.closeViewerTab(viewerId: string, path: string): void
+```
+Closes a tab of one of **this extension's own** viewers, the counterpart of
+`openViewerTab`. It closes **without** the unsaved-changes confirm, even if the
+viewer reported `setDirty(true)`. It's meant for a draft-style tab your own save
+flow has just dealt with (save, then close). No-op when no such
+`(viewerId, path)` tab is open. Reference: `prompts` and `text-editor` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry.
 
 ```ts
 ctx.app.refreshFiles(): void
@@ -990,6 +1249,19 @@ Sets/clears the count badge on one of this extension's own `"tab"` sidebar
 panels (short id, un-namespaced). No-ops if the panel isn't registered.
 
 ```ts
+ctx.app.setSidebarPanelVisible(panelId: string, visible: boolean): void
+```
+Hides or shows one of this extension's own panels (short id, un-namespaced)
+for **context**: a panel with nothing to show right now, like TASKS with no
+active directory. A hidden panel isn't rendered in whatever tab it currently
+lives in, and a tab left with no visible sections (the Run tab, say) drops out
+of the strip. This is separate from the user's own hide in the gear menu's
+Panes list, and the two are ORed: you can't show a panel the user hid. It
+notifies the whole sidebar on every call, so call it when the value changes,
+not on every context event. No-ops if the panel isn't registered.
+References: `tasks`, `command-history`.
+
+```ts
 ctx.app.revealSidebarPanel(panelId: string): void
 ```
 Reveals one of this extension's own sidebar panels (short id, un-namespaced):
@@ -998,6 +1270,22 @@ focuses its accordion section. This is what the panel's auto-registered
 "Sidebar: Focus &lt;title&gt;" command does, minus that command's
 toggle-hide-when-already-active branch — a command that opens a panel's UI
 should never end with it hidden. No-ops if the panel isn't registered.
+
+```ts
+ctx.app.newWorktree(opts?: { runCommandIndex?: number }): void
+ctx.app.cleanUpWorktrees(): void
+```
+The PROJECTS tree's own worktree flows, for commands that start them. Both
+reveal the PROJECTS panel first, wherever it lives. `newWorktree` opens the
+tree's create-worktree form on the active project (or the first repository
+project); `runCommandIndex` preselects one of the configured run agents from
+**Settings → AI Providers**, and omitting it preselects none. `cleanUpWorktrees`
+starts *Clean Up Worktrees* on the active repository project (or the first with
+linked worktrees): it lists the worktrees that are safe to remove (folder
+already gone, or clean and merged, with no session) and removes them once the
+user confirms, keeping their branches. A no-op when no project has worktrees.
+To create or remove a worktree **without** UI, use
+[`host.worktrees`](#server-api) from a server hook. Reference: `worktrees`.
 
 ```ts
 ctx.app.openSessionWindow(sessionName: string, opts?: { createCwd?: string }): void
@@ -1016,7 +1304,7 @@ Kills a session and closes its tabs. Prefer this over killing the session from
 your server hook: window-tabs attach to synthetic grouped
 `perch-view-*` sessions whose shared windows outlive the real session, so
 killing it behind the app's back leaves them as live but orphaned tabs. Unlike the
-sidebar's own Kill Session, this runs **no confirmation of its own** — the
+sidebar's own Close Project (confirmed per `confirmBeforeKill`), this runs **no confirmation of its own** — the
 caller owns the prompt, so an extension that already confirmed a larger
 destructive action doesn't double-prompt. Confirm before calling.
 
@@ -1053,6 +1341,26 @@ Read-only queries against the *active* icon theme's resolver — the same
 icons the FILES tree shows — so a panel can render file rows that match.
 `IconResult` is `{ kind: "none" }` or a resolvable icon (see
 `extensions/_shared/FileIcon.tsx` for a ready-made renderer).
+
+```ts
+ctx.app.getThemeColors(): Record<string, string>
+ctx.app.getTokenColors(): TokenColorRule[]
+ctx.app.onDidChangeColorTheme(cb: () => void): () => void
+
+interface TokenColorRule {
+  scope?: string | string[];
+  settings?: { foreground?: string; fontStyle?: string };
+}
+```
+The active color theme's raw workbench `colors` and TextMate `tokenColors`
+rules, for an extension that runs its own scope-resolving highlighter rather
+than styling with the app's CSS variables. Both are empty (`{}` / `[]`) when no
+theme is active or it defines neither. `onDidChangeColorTheme` fires with no
+arguments once a theme finishes loading or the user switches it; call the
+getters again. It returns an unsubscribe and is dropped on deactivation.
+Reference: `text-editor` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry (Monaco and Shiki themes built from these).
 
 ```ts
 ctx.app.openInEditor(path: string, line?: number): void
@@ -1093,6 +1401,8 @@ interface AgentWindow {
   agentId: string;          // registry id, as GET /api/agents lists it
   label: string;            // "Claude Code"
   program: string;          // the registry program that matched
+  iconUrl: string;          // the agent's own mark, a loadable URL ("" if none)
+  icon: string;             // codicon fallback
   windowIndex: number;
   windowId: string;         // stable id, the same value listPanes() gives
   windowPid: number;        // the window's own process: its shell
@@ -1114,6 +1424,32 @@ throwing. Server hooks get the same pair as
 process map cached for about two seconds, so polling costs one scan rather
 than one per window. Reference: `agent-usage-monitor` in the
 [perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry.
+
+```ts
+ctx.app.executeCommand(commandId: string): void
+ctx.app.getCommands(): { id: string; label: string }[]
+```
+Runs a command by id, and lists the ones it can run. Ids are a built-in
+command's (`"tab.next"`, `"quickSwitcher.toggle"`) or an extension command's
+**namespaced** id (`ext.<extensionId>.<id>`). Only commands that can be
+dispatched globally are runnable: terminal-, files- and sessions-scoped
+built-ins are left out of `getCommands` and ignored by `executeCommand`, as is
+an unknown id. `getCommands` is a snapshot of every runnable global built-in
+plus every registered extension command; call it again when you need a fresh
+list. Useful for letting the user bind your own gesture or button to any
+command. Reference: `one-hand` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
+registry.
+
+```ts
+ctx.app.focusActiveTerminal(): void
+```
+Gives keyboard focus back to the focused terminal, for extension UI (a dialog,
+an overlay) that took focus and should hand it back on close, so the user can
+keep typing at the prompt (press Enter on a command your extension just typed
+there, say). No-op when no terminal tab is focused. Reference: `ai-command` in
+the [perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
 registry.
 
 ```ts
@@ -1178,9 +1514,9 @@ export function activate({ router, log, getSettings, host, ai, secrets }) {
 | `getSettings()` | `Promise<Record<string, unknown>>` — this extension's current configuration values (defaults + user overrides), read fresh per call. |
 | `host.ports.list()` | `Promise<ListeningPort[]>` — listening ports attributed to terminal sessions (`{ port, address, process?, pid?, session }`). The same attribution data the WS tunnel's security gate uses; consume it rather than re-scanning `/proc`. |
 | `host.ports.find(port)` | `Promise<ListeningPort \| null>` — one port's fresh attribution (kill-confirmation flows). |
-| `ai.run(prompt, opts?)` | `Promise<string>` — prompt in, text out, through whatever the user configured in **Settings → AI Providers** (an agent that answers a single prompt, a keyed API, a custom command). Your extension never sees a provider, a binary or a key. `opts.profileId` picks one configured AI (see `listProfiles`, and the `"ai-profile"` config format above); `opts.model` overrides that profile's model for one call; `opts.cwd` is the directory a CLI provider runs in — pass the project, since some CLIs refuse to run outside a trusted directory. Rejects with an `AiError` whose `code` separates "not configured yet" (`missing-binary`/`missing-key`/`missing-model`/`missing-command`) from a real failure (`provider-failed`/`empty-reply`), so the first can be surfaced as guidance instead of an error. |
-| `ai.listProfiles()` | `Promise<{ id, label, provider, model, isDefault }[]>` — the AIs the user has configured and enabled, for an extension that builds its own picker. Prefer the `"ai-profile"` config property, which renders one for you. |
-| `host.agents.list()` | `Promise<AgentSummary[]>` — the AI agents the user has configured and enabled, in their own order, from the one core registry behind **Settings → AI Providers**. Each entry is `{ id, label, program, command, hooks }`: `program` is the foreground command a window running it reports (match a window's `command` against it to find the agent's window), `command` is the full launch line (offer it as a "start work with" preset), and `hooks` is a boolean — whether core can install hooks for it at all (the descriptor itself stays in core, since it names a file in the user's home). Read this instead of declaring an agent-programs or agent-presets setting of your own. |
+| `ai.run(prompt, opts?)` | `Promise<string>` — prompt in, text out, through whatever the user configured in **Settings → AI Providers** (an agent that answers a single prompt, a keyed API, a custom command). Your extension never sees a provider, a binary or a key. `opts.profileId` picks one configured AI (see `listProfiles`, and the `"ai-profile"` config format above); `opts.model` overrides that profile's model for one call; `opts.cwd` is the directory a CLI provider runs in — pass the project, since some CLIs refuse to run outside a trusted directory. Rejects with an `AiError` whose `code` separates "not configured yet" (`missing-binary`/`missing-key`/`missing-model`/`missing-command`) from a real failure (`provider-failed`/`empty-reply`) or a provider that can't do this (`unsupported`), so the first can be surfaced as guidance instead of an error. Also on `host.ai`. |
+| `ai.listProfiles()` | `Promise<{ id, label, provider, program, model, isDefault }[]>` — the AIs the user has configured and enabled, for an extension that builds its own picker. Prefer the `"ai-profile"` config property, which renders one for you. Also on `host.ai`. |
+| `host.agents.list()` | `Promise<AgentSummary[]>` — the AI agents the user has configured and enabled, in their own order, from the one core registry behind **Settings → AI Providers**. Each entry is `{ id, label, program, command, skipPermissionsArgs, resume, hooks, oneShot, iconUrl, icon }`: `program` is the foreground command a window running it reports (match a window's `command` against it to find the agent's window), `command` is the full launch line (offer it as a "start work with" preset), and `hooks` is a boolean — whether core can install hooks for it at all (the descriptor itself stays in core, since it names a file in the user's home). Read this instead of declaring an agent-programs or agent-presets setting of your own. |
 | `host.agents.forWindow(session, windowIndex)` | `Promise<AgentWindow \| null>` - which agent runs in that terminal and which process it is; `host.agents.forSession(session)` returns one entry per window that has one. Matched by the window's foreground command, else by a descendant process named after an agent's `program`, so a wrapper (or an agent under a shell prompt) is still found, whichever terminal backend runs the window. `agentPid` is for reading the agent's own files, never for signalling it. See [`ctx.app.agentForWindow`](#the-ctxapp-host-api) for the shape. |
 | `host.agents.launchCommand(id)` | `Promise<string \| null>` - the line that starts one enabled agent (ids are `<extensionId>.<agentId>`, e.g. `perch.agents.claude`), with the user's global Yolo/Manual choice from **Settings → AI Providers** already applied: the agent's `skipPermissionsArgs` is appended only under Yolo. `null` for an unknown or disabled id, or an agent with no launch command. Use this, not `list()`'s `command`, whenever a server hook types an agent into a window itself - it is the same rule the client-side launch presets apply, and there is no other place a server hook can read the global choice from. |
 | `host.sessions.list()` | `Promise<TerminalSession[]>` - every terminal session with its windows, the same listing as `GET /api/sessions` (paths `~`-shortened). Each window carries a stable `id`. |
@@ -1195,6 +1531,7 @@ export function activate({ router, log, getSettings, host, ai, secrets }) {
 | `host.worktrees.create({ cwd, branch, base?, mode, location? })` | `Promise<{ path, branch }>` - `mode: "new"` creates `branch` off `base` (default HEAD), `"existing"` checks an existing branch out. `location` is a template over `{repo}` and `{branch}`, default `{repo}/.worktrees/{branch}`; an in-repo location is added to `.git/info/exclude`. Stops at the checkout - no session is created. Refusals reject with an error whose `status` is 400 (not a repo, no branch) or 409 (the target already exists). |
 | `host.worktrees.remove({ cwd, path, force? })` | `Promise<{ removed }>` - removes a worktree's checkout and keeps its branch. Only a path git reports as a worktree of that repository, never the main one (404/400 otherwise). Kill any session inside it first. |
 | `host.agentHooks.subscribe({ events, onEvent })` | Subscribe to normalized AI agent hook events — core installs the hooks, receives them at one endpoint and fans them out (see [Agent hooks](#agent-hooks)). Returns an unsubscribe; all of an extension's subscriptions are dropped when its hook unmounts. |
+| `host.agentHooks.provideCompanion(agentId, transform)` | Registers a transform for the `companion` file named by the hooks descriptor of an agent **this extension** contributes (`agentId` is the bare manifest id). Core runs it after writing that agent's hooks, passing `{ hookFile, handlers, current }`, and writes back the string it returns or resolves; `handlers` is empty on uninstall. A throw, hang or oversized result is logged and skipped. Registering for an agent you didn't contribute does nothing. See [Companions](#companions). |
 | `secrets.get(name)` | `Promise<string \| null>` — one of this extension's stored credentials, or null. Also on `host.secrets`. |
 | `secrets.set(name, value)` | `Promise<void>` — stores a credential under `name` (1-64 chars of `[A-Za-z0-9._-]`); a null or blank `value` clears it. |
 | `secrets.list()` | `Promise<string[]>` — the names this extension has stored, **never** the values. The shape a "set / not set" UI needs, and the one that's safe to send to a client. |
@@ -1277,13 +1614,13 @@ Caveats:
   module after a disable. It may be async; the host does not wait for it,
   and a throw or rejection is logged, never surfaced to the user's disable.
   A later re-enable calls `activate` again on the same module. See
-  `git-scm/server.js` for a worked example of process-group management and
-  timers.
+  `git-scm/server.js` for process-group management; no bundled server entry
+  exports `deactivate()` today.
 - `cwd`-style parameters may arrive `~`-shortened (the client displays
   them that way) — expand before touching the filesystem.
 
 References: `ports/server.js` (minimal, `host`-driven),
-`subagent-viewer/server.js` (filesystem watcher with TTL caches),
+`subagent-viewer/server.js` (on-demand filesystem reads with TTL caches),
 `git-scm/server.js` (the full works).
 
 ---
@@ -1291,12 +1628,13 @@ References: `ports/server.js` (minimal, `host`-driven),
 ## Agent hooks
 
 An AI agent's own hooks (Claude Code's `Stop`, Codex's `PermissionRequest`,
-Antigravity's `PreInvocation`) are core's business, not yours. Core knows each
-agent's config file and schema, generates the snippet, installs it on an
+or Antigravity's `PreInvocation` when an extension contributing Antigravity is
+installed) are core's business, not yours. Core reads each agent's config file
+and hook schema from its `contributes.agents` hooks descriptor, generates the snippet, installs it on an
 explicit press in **Settings → AI Providers**, receives every event at one
 loopback-only endpoint, normalizes it, and hands it to whoever subscribed.
-An extension ships no snippet, no schema, no route and no settings component
-for any of that — it subscribes:
+An extension that only consumes events ships no snippet, no schema, no route
+and no settings component for any of that — it subscribes:
 
 ```js
 const unsubscribe = host.agentHooks.subscribe({
@@ -1313,9 +1651,9 @@ works for every agent:
 | Event | Fires when |
 | --- | --- |
 | `session-start` | The agent started a session in that pane. |
-| `prompt-submit` | A turn began (Antigravity's `PreInvocation` maps here). |
+| `prompt-submit` | A turn began (Antigravity's `PreInvocation` maps here, when an extension contributes Antigravity). |
 | `tool-start` / `tool-end` | One tool call began or finished. **Only delivered while the user has turned on per-tool-call hooks** in Settings → AI Providers — they fire once per tool call, so they are off by default. Subscribe if you want them, and keep working without them. |
-| `permission` | The agent is waiting on a permission prompt. Antigravity never sends this: its CLI has no permission event at all. |
+| `permission` | The agent is waiting on a permission prompt. Antigravity (when contributed by an installed extension) never sends this: its CLI has no permission event at all. |
 | `stop` | The turn ended. |
 | `subagent-stop` | A subagent finished (Claude Code, Codex). |
 
@@ -1323,7 +1661,7 @@ Each `onEvent` receives:
 
 | Field | Meaning |
 | --- | --- |
-| `event` | One of the names above, or **`null`** for a raw event core has no mapping for. A `null` event is delivered, not dropped — with `rawEvent` intact, so an extension that knows what it means can act on it and core never has to guess. Antigravity's `PostInvocation` is the live example: it fires when the model's tool calls finish, which is neither `tool-end` nor `stop`. |
+| `event` | One of the names above, or **`null`** for a raw event core has no mapping for. A `null` event is delivered, not dropped — with `rawEvent` intact, so an extension that knows what it means can act on it and core never has to guess. Antigravity's `PostInvocation` is the live example (when an extension contributing Antigravity is installed): it fires when the model's tool calls finish, which is neither `tool-end` nor `stop`. |
 | `rawEvent` | What the agent called it (`"Stop"`, `"PreInvocation"`). Always present. |
 | `agent` | The registry id of the agent whose hook fired. Informational: hooks live in one config file per CLI, so two presets sharing a CLI share one installed hook, and this names whichever of them was installed last. **Correlate by `paneId`, not by this.** |
 | `paneId` | The id of the window the agent is running in, from `$PERCH_WINDOW` in its own environment. The correlation key: it is the one identifier every agent's hook can supply, which is why keying on the agent's own session id only ever worked for Claude Code. Empty when the hook did not run in one of the app's terminals. |
@@ -1365,13 +1703,15 @@ extension loads):
 | `ensureContrastRatio(fg, bg, ratio)` / `Rgb` | WCAG minimum-contrast math (ghostty's renderer shims use it; xterm has it natively). |
 | `whenMatches(when, command)` | The comma-separated program-list matcher (touch-key `when` clauses; same rule as core local echo). |
 | `sendWithInkSafeEnters(data, send)` | Splits text at `\r` with 80ms gaps so Ink-based TUIs don't drop input. |
+| `joinedSelectionText(term, range)` / `unwrapParagraphs(text)` | Selection copy text with soft-wrapped rows joined, and paragraph unwrapping for copied prose. |
 
 The rule of thumb: anything with **identity or shared state** (React, the
 selection Symbol, the link detector) must come through a shim; small
 **stateless** helpers live in `extensions/_shared/` as plain source
 (`Icon.tsx`, `FileIcon.tsx`, `useListNavigation.ts`,
 `useMarqueeSelection.ts`, `clipboard.ts`, `injectStylesheet.ts`,
-`types.ts`, `terminalEngineTypes.ts`) — each extension's build inlines its
+`types.ts`, `terminalEngineTypes.ts`, `fileApi.ts`, `useLongPressMenu.ts`,
+`agentTarget.ts`) — each extension's build inlines its
 own copy, and structural typing keeps host-passed values compatible.
 
 If you bundle with your own tooling instead of `build.mjs`, replicate the

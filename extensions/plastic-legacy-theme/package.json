@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.1.0",
   "displayName": "Plastic Legacy",
-  "description": "Built-in color theme (bundled — hadialqattan.plastic-legacy, MIT, see LICENSE.txt), extracted from the app's own default palette, with the upstream theme's syntax-highlighting (tokenColors) rules included.",
+  "description": "Built-in color theme (bundled - hadialqattan.plastic-legacy, MIT, see LICENSE.txt), extracted from the app's own default palette, with the upstream theme's syntax-highlighting (tokenColors) rules included.",
   "icon": "./icon.svg",
   "contributes": {
     "themes": [

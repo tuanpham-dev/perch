@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.2.2",
   "displayName": "Git",
-  "description": "Built-in VS Code-style Source Control panel: stage, commit, amend, push/pull/fetch, branch switching, stash, an AI-written commit message, a COMMITS history pane, a status-bar branch readout, and diff view (bundled — see extensions/build.mjs).",
+  "description": "Built-in VS Code-style Source Control panel: stage, commit, amend, push/pull/fetch, branch switching, stash, an AI-written commit message, a COMMITS history pane, a status-bar branch readout, and diff view (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "contributes": {
     "configuration": {
@@ -15,19 +15,19 @@
           "default": 3000,
           "minimum": 0,
           "maximum": 30000,
-          "description": "How often (ms) to poll the active directory's git status, kept running in the background so the sidebar badge stays current even when the SOURCE CONTROL panel isn't open. 0 disables polling — status only refreshes on the refresh button, active-directory change, and after an operation."
+          "description": "How often (ms) to poll the active directory's git status, kept running in the background so the sidebar badge stays current even when the SOURCE CONTROL panel isn't open. 0 disables polling - status only refreshes on the refresh button, active-directory change, and after an operation."
         },
         "gitScm.fetchInterval": {
           "type": "integer",
           "default": 0,
           "minimum": 0,
           "maximum": 3600000,
-          "description": "How often (ms) to run a non-interactive `git fetch` in the background so ahead/behind counts stay current without manually pulling. 0 (default) disables background fetch. A non-zero value below 60000 is treated as 60000. Never prompts for credentials — a repo whose remote needs auth just fails the fetch silently; use Pull or the More Actions menu's Fetch entry for an interactive attempt."
+          "description": "How often (ms) to run a non-interactive `git fetch` in the background so ahead/behind counts stay current without manually pulling. 0 (default) disables background fetch. A non-zero value below 60000 is treated as 60000. Never prompts for credentials - a repo whose remote needs auth just fails the fetch silently; use Pull or the More Actions menu's Fetch entry for an interactive attempt."
         },
         "gitScm.fileTreeDecorations": {
           "type": "boolean",
           "default": true,
-          "description": "Show git status badges and row colors in the FILES tree (the branch pill stays either way). Off skips the per-repo status scan — the expensive part on large repos."
+          "description": "Show git status badges and row colors in the FILES tree (the branch pill stays either way)."
         },
         "gitScm.statusBar": {
           "type": "boolean",
@@ -56,7 +56,7 @@
           "type": "string",
           "format": "ai-profile",
           "default": "",
-          "description": "Which configured AI writes commit messages. \"App default\" follows Settings \u2192 AI's own default; pick another to give this one job a different (often cheaper or faster) model."
+          "description": "Which configured AI writes commit messages. \"App default\" follows the default AI in Settings \u2192 AI Providers; pick another to give this one job a different (often cheaper or faster) model."
         },
         "gitScm.aiModel": {
           "type": "string",
@@ -67,7 +67,7 @@
         "gitScm.aiCommitInstruction": {
           "type": "string",
           "default": "Write a git commit message for the staged changes below. Reply with ONLY the commit message - no preamble, no commentary, no code fences. First line: an imperative subject under 72 characters, capitalized, with no trailing period. If the change needs explaining, add a blank line and then a body of prose paragraphs wrapped at 76 characters that says what changed and why, not how. Describe only what the diff actually shows.",
-          "description": "The instruction sent to the AI when you press the sparkle button in the commit box. The staged diff, its file statistics, and recent commit subjects are appended to it. Which AI runs it is set in Settings → AI Providers, not here."
+          "description": "The instruction sent to the AI when you press the sparkle button in the commit box. The staged diff, its file statistics, and recent commit subjects are appended to it. Which AI runs it is chosen above."
         }
       }
     }

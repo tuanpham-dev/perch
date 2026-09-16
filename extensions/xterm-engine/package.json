@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "xterm.js Terminal Engine",
-  "description": "The xterm.js terminal rendering engine — the app's required rendering floor: always present, and the fallback whenever the selected engine is unavailable (bundled — see extensions/build.mjs).",
+  "description": "The xterm.js terminal rendering engine - the app's required rendering floor: always present, and the fallback whenever the selected engine is unavailable (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "contributes": {
     "terminalEngines": [{ "id": "xterm", "label": "xterm.js" }]

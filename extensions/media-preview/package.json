@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "Media Preview",
-  "description": "Built-in audio/video viewer tab (bundled — see extensions/build.mjs).",
+  "description": "Built-in audio/video viewer tab (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "perch": {
     "client": "./dist/client.js"

@@ -50,7 +50,7 @@
         "hello.shout": {
           "type": "boolean",
           "default": false,
-          "description": "Shout the greeting (adds \"!!!\")"
+          "description": "Shout the greeting (uppercase, adds \"!!!\")"
         },
         "hello.repeatCount": {
           "type": "integer",
@@ -65,7 +65,7 @@
           "enumItemLabels": ["Neutral", "Excited", "Formal"],
           "enumDescriptions": [
             "Just the greeting, plainly",
-            "Adds an exclamation and an emoji",
+            "Adds an emoji",
             "Adds a formal closing"
           ],
           "default": "neutral",
