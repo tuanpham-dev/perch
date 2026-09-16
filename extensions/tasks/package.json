@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "Tasks",
-  "description": "Built-in TASKS run section: package.json scripts from every workspace package, run in reusable named terminal windows with running indicators (bundled — see extensions/build.mjs).",
+  "description": "Built-in TASKS run section: package.json scripts from every workspace package, run in reusable named terminal windows with running indicators (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "perch": {
     "client": "./dist/client.js",

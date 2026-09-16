@@ -9,7 +9,7 @@ The default terminal font group: IBM's open-source monospace typeface, plus a Ne
 
 ## Source
 
-IBM Plex Mono is licensed under the SIL Open Font License 1.1 — see `fonts/LICENSE-OFL.txt`. Perplexed's license is in `fonts/LICENSE-Perplexed.txt`.
+IBM Plex Mono is licensed under the SIL Open Font License 1.1 — see `LICENSE-OFL.txt`. Perplexed's license is in `LICENSE-Perplexed.txt`.
 
 ## Notes
 

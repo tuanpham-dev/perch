@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "CSV Preview",
-  "description": "Built-in editable CSV/TSV grid preview (bundled — see extensions/build.mjs).",
+  "description": "Built-in editable CSV/TSV grid preview (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "contributes": {
     "configuration": {

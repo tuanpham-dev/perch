@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "Snippets",
-  "description": "Built-in SNIPPETS run section: saved, parameterized commands ({param} placeholders prompt on run) typed into the active pane from the sidebar, command palette, or quick switcher. Synced across devices via settings (bundled — see extensions/build.mjs).",
+  "description": "Built-in SNIPPETS section of the Commands tab: saved, parameterized commands ({param} placeholders prompt on run) typed into the active pane from the sidebar, command palette, or quick switcher. Synced across devices via settings (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "perch": {
     "client": "./dist/client.js",
@@ -17,7 +17,7 @@
         "snippets.items": {
           "type": "string",
           "default": "",
-          "description": "The saved snippets, as JSON (edited with the SNIPPETS panel in the Run sidebar tab)."
+          "description": "The saved snippets, as JSON (edited with the SNIPPETS panel in the Commands sidebar tab)."
         }
       }
     }

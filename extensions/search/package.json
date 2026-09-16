@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "Search",
-  "description": "Built-in VS Code-style SEARCH panel: search and replace across all files in the active folder (bundled — see extensions/build.mjs).",
+  "description": "Built-in VS Code-style SEARCH panel: search and replace across all files in the active folder (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "contributes": {
     "configuration": {

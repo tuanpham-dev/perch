@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "IBM Plex Mono",
-  "description": "Built-in terminal font group (bundled — see fonts/LICENSE-OFL.txt): IBM Plex Mono with core latin + latin-ext coverage (English plus accented European text) across regular, italic, medium, and bold, plus Perplexed (see LICENSE-Perplexed.txt) — VS Code's own supplementary glyph fallback font — riding along as part of the same selectable group.",
+  "description": "Built-in terminal font group (bundled - see fonts/LICENSE-OFL.txt): IBM Plex Mono with core latin + latin-ext coverage (English plus accented European text) across regular, italic, medium, and bold, plus Perplexed (see LICENSE-Perplexed.txt) - VS Code's own supplementary glyph fallback font - riding along as part of the same selectable group.",
   "icon": "./icon.svg",
   "contributes": {
     "fonts": [

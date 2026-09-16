@@ -61,7 +61,7 @@ function PushNotificationToggle() {
           disabled={state.kind === "busy"}
           onChange={(e) => toggle(e.target.checked)}
         />
-        <span>Push notifications on this device when a pane rings the bell</span>
+        <span>Push notifications on this device (terminal bell, finished commands)</span>
       </label>
       {state.kind === "error" && <div className="settings-hint">{state.message}</div>}
     </>
@@ -232,7 +232,7 @@ export default function BehaviorSection() {
         <span className="settings-label">Default projects folder</span>
         <input
           className="dialog-input"
-          placeholder="Server default"
+          placeholder="Home folder (~)"
           value={settings.defaultProjectsFolder}
           onChange={(e) => set("defaultProjectsFolder", e.target.value)}
         />

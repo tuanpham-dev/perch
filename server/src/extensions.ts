@@ -636,9 +636,7 @@ export async function setExtensionEnabled(id: string, enabled: boolean): Promise
 // Mounted routers, keyed by extension id — present only while the
 // extension's server hook is active. Disabling/uninstalling deletes the
 // entry so requests 404 immediately; the imported module itself stays
-// resident in the process until restart (ESM has no unload), which is why
-// the client shows a "restart the server" hint after disabling one — see
-// README.
+// resident in the process until restart (ESM has no unload).
 const serverHooks = new Map<string, Router>();
 
 // host.events.onApiMutation subscriptions, keyed by extension id so

@@ -4,7 +4,7 @@ The two agent CLIs the app assumes most people have: **Claude Code** and
 **OpenAI Codex**. It contributes them through `contributes.agents`, which is the
 only way an agent reaches the registry - core itself ships none.
 
-Uninstall this and Settings → AI Providers is empty: nothing is detected as an agent,
+Uninstall this and the Agents group in Settings → AI Providers is empty: nothing is detected as an agent,
 and "Start work" offers nothing to launch. That is the architecture working, not
 a fault.
 

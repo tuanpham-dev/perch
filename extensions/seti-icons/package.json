@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "Seti Icons",
-  "description": "Built-in file-icon theme (bundled — VS Code's Seti icon theme, MIT, see LICENSE.txt).",
+  "description": "Built-in file-icon theme (bundled - VS Code's Seti icon theme, MIT, see LICENSE.txt).",
   "icon": "./icon.svg",
   "contributes": {
     "iconThemes": [

@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.2",
   "displayName": "Ports",
-  "description": "Built-in PORTS explorer section: listening ports inside your terminals, with open-in-browser, copy-URL, tunnel-command, and kill-process actions (bundled — see extensions/build.mjs).",
+  "description": "Built-in Ports status-bar readout and its popover: listening ports inside your terminals, with open-in-browser, copy-URL, tunnel-command, and kill-process actions (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "contributes": {
     "configuration": {

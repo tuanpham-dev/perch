@@ -4,7 +4,7 @@
   "publisher": "perch",
   "version": "1.0.0",
   "displayName": "Subagent Viewer",
-  "description": "Live Claude Code subagent activity: running-agent count badges on session windows, with a read-only details popover — read from Claude Code's own on-disk transcripts, nothing injected into the session (bundled — see extensions/build.mjs).",
+  "description": "Live Claude Code subagent activity: running-agent count badges on session windows, with a read-only details popover - read from Claude Code's own on-disk transcripts, nothing injected into the session (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "perch": {
     "client": "./dist/client.js",
