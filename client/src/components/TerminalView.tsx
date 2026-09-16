@@ -41,6 +41,14 @@ import { isOpenGesture, openUrl } from "../terminalLinks";
 import type { MenuItem } from "../types";
 import { oversizeReason, uploadMaxBytes } from "../upload";
 
+// localEchoWhen gates local echo and image paste/drop uploads. Unlike a touch
+// key's `when` (whenMatches: empty = always), an empty value here turns both
+// off: matching every program would put the echo overlay over vim/less and
+// hijack image pastes in every pane.
+function localEchoWhenMatches(when: string, command: string): boolean {
+  return when.trim() !== "" && whenMatches(when, command);
+}
+
 // Expands the pasteDropUploadDir setting for one upload: {cwd} is the pane's
 // working directory, {gitroot} the git repo root containing it (the repo-less
 // fallback to cwd itself comes from the /api/fs/git-root endpoint). Brace
@@ -600,7 +608,7 @@ export default function TerminalView({
       };
 
       const localEchoActive = () =>
-        !!localEcho && mobilePointerRef.current && whenMatches(localEchoWhenRef.current, liveCommand);
+        !!localEcho && mobilePointerRef.current && localEchoWhenMatches(localEchoWhenRef.current, liveCommand);
 
       // The local-echo fork every raw-byte input path shares. Touch keys
       // route through here too (not sendInput directly): a bar arrow that
@@ -1910,7 +1918,7 @@ export default function TerminalView({
       // an image item gets preventDefault/stopPropagation, never a plain
       // text paste.
       const onPaste = (e: ClipboardEvent) => {
-        if (!whenMatches(localEchoWhenRef.current, liveCommand)) return;
+        if (!localEchoWhenMatches(localEchoWhenRef.current, liveCommand)) return;
         const items = e.clipboardData?.items;
         if (!items) return;
         const imageItems = Array.from(items).filter((it) => it.type.startsWith("image/"));
@@ -1941,12 +1949,12 @@ export default function TerminalView({
       // files is unambiguously a file drop, whereas intercepting every
       // non-image paste would break ordinary text paste.
       const onDragOver = (e: DragEvent) => {
-        if (!whenMatches(localEchoWhenRef.current, liveCommand)) return;
+        if (!localEchoWhenMatches(localEchoWhenRef.current, liveCommand)) return;
         if (!Array.from(e.dataTransfer?.items ?? []).some((it) => it.kind === "file")) return;
         e.preventDefault();
       };
       const onDrop = (e: DragEvent) => {
-        if (!whenMatches(localEchoWhenRef.current, liveCommand)) return;
+        if (!localEchoWhenMatches(localEchoWhenRef.current, liveCommand)) return;
         const files = Array.from(e.dataTransfer?.files ?? []);
         if (files.length === 0) return;
         e.preventDefault();

@@ -228,9 +228,11 @@ export default function TerminalSection() {
         />
       </label>
       <div className="settings-hint">
-        On mobile, typed input renders instantly and buffers until Enter
-        while the pane's foreground command matches this comma-separated
-        list (case-insensitive, exact match). Empty disables local echo.
+        On mobile, typed input shows instantly while the pane's foreground
+        command matches this comma-separated list (case-insensitive, exact
+        match) - every keystroke is still sent right away. The same list
+        decides which panes turn a pasted image or dropped file into an
+        upload, on every device. Empty turns both off.
       </div>
     </>
   );
