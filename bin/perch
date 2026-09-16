@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+// Perch CLI entry point. Kept at this path (and without an extension)
+// because install.sh symlinks ~/.local/bin/perch here and the system
+// service runs it by this name; the CLI itself is cli/perch/main.ts.
+// Node resolves the ~/.local/bin symlink for the entry script, so __dirname
+// is the repo's bin/.
+const major = Number(process.versions.node.split(".")[0]);
+if (major < 23) {
+  console.error(`Perch needs Node.js 23 or newer (found ${process.version}) - install it from https://nodejs.org`);
+  process.exit(1);
+}
+import(require("node:path").join(__dirname, "..", "cli", "perch", "main.ts"));
