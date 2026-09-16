@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+client/dist/
+extensions/*/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Editor / OS
+.DS_Store
+.vscode/
+*.swp
+
+# TypeScript
+*.tsbuildinfo
