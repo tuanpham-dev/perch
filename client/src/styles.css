@@ -1,0 +1,4597 @@
+/* Palette: Plastic Legacy (hadialqattan.plastic-legacy) — hard-coded rendering
+   floor for an unresolvable color theme; the selectable, identical version
+   ships as the perch.plastic-legacy-theme bundled extension. */
+:root {
+  --bg: #21252b;
+  --fg: #a9b2c3;
+  --fg-bright: #d4d7d9;
+  --fg-inactive: #5f6672;
+  --panel-bg: #181a1f;
+  --border: #0d1117;
+  --input-bg: #0d1117;
+  --accent: #1085ff;
+  --fg-accent: #1085ff;
+  --button: #e06c75;
+  --error: #d74e42;
+  --hover: #a9b2c31a;
+  --selection: #a9b2c333;
+
+  /* Granular surface vars for extension color themes (see theme.ts's
+     workbench-key mapping). Each defaults to the base tone it already
+     equals today, so introducing them is a pure refactor — a theme can
+     override any subset and the rest keep falling back to a base tone. Not
+     every var(--accent)/var(--hover) usage below was moved onto one of
+     these: drag-reorder indicators and one-off accent buttons (e.g. the
+     ports panel's copy button) intentionally stay on the base tones, since
+     they're a different existing color choice, not this concept. */
+  --tab-bar-bg: var(--panel-bg);
+  --tab-inactive-bg: var(--panel-bg);
+  --tab-inactive-fg: var(--fg-inactive);
+  --tab-active-bg: var(--bg);
+  --tab-active-fg: var(--fg-bright);
+  --tab-active-border: var(--accent);
+  --tab-border: var(--border);
+
+  --list-hover-bg: var(--hover);
+  --list-active-bg: var(--selection);
+  --list-active-fg: #ffffff;
+  --sidebar-header-bg: var(--bg);
+
+  --statusbar-bg: var(--panel-bg);
+  --statusbar-fg: var(--fg-inactive);
+  --statusbar-border: var(--border);
+
+  /* The custom title bar (TitleBar.tsx); --titlebar-bg also feeds the page's
+     theme-color (theme.ts syncThemeColorMeta). */
+  --titlebar-bg: var(--bg);
+  --titlebar-fg: var(--fg);
+  /* VS Code's own commandCenter.* defaults, as a share of the text color so
+     they hold on light themes too. */
+  --commandcenter-bg: color-mix(in srgb, var(--fg) 4%, transparent);
+  --commandcenter-fg: var(--titlebar-fg);
+  --commandcenter-border: color-mix(in srgb, var(--fg) 15%, transparent);
+  --commandcenter-active-bg: color-mix(in srgb, var(--fg) 7%, transparent);
+  --commandcenter-active-border: color-mix(in srgb, var(--fg) 25%, transparent);
+
+  --scrollbar-thumb-bg: var(--hover);
+  --scrollbar-thumb-hover-bg: var(--selection);
+
+  --input-border: var(--border);
+  --focus-border: var(--accent);
+
+  --button-bg: var(--button);
+  --button-fg: #ffffff;
+  /* VS Code's own extensionButton.* defaults (Disable/Uninstall on an
+     extension's page) — not button.secondaryBackground, which is a
+     different, more opaque control used elsewhere (e.g. dialog buttons). */
+  --button-secondary-bg: rgba(169, 178, 195, 0.1);
+  --button-secondary-fg: #cccccc;
+  --button-secondary-border: rgba(204, 204, 204, 0.15);
+  --button-secondary-hover-bg: rgba(212, 217, 225, 0.1);
+
+  --badge-bg: var(--hover);
+  --badge-fg: var(--fg-inactive);
+
+  --git-modified-fg: #e2c08d;
+  --git-added-fg: #73c991;
+  --git-untracked-fg: #73c991;
+  --git-renamed-fg: #4fc1ff;
+  --status-idle-bg: #e5c07b;
+  --status-active-bg: #98c379;
+  --warning: #e5c07b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, Ubuntu, "Droid Sans", sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ---- Scrollbars (VS Code style) ---- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb-bg) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+}
+
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-hover-bg);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.app {
+  display: flex;
+  /* Column shell: the sidebars/editor row, then the status bar spanning the
+     full width beneath both sidebars (VS Code's own arrangement). */
+  flex-direction: column;
+  /* Sized from the actually-visible viewport, most reliable source first:
+     --app-height is set from the visualViewport API (App.tsx), which
+     tracks the on-screen keyboard and browser URL bar on every platform —
+     including installed PWAs, where the interactive-widget viewport meta
+     and dvh don't dependably shrink when the keyboard opens. dvh covers
+     the moment before the effect runs; vh is the legacy fallback. */
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ---- Title bar ---- */
+
+/* Only exists while the installed app's browser title bar is hidden (see
+   TitleBar.tsx). The browser's window controls overlay this strip, so the
+   bar pads itself clear of them by the insets useWindowControlsOverlay
+   measured; the empty space drags the window, the way a native one does. */
+.titlebar {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: var(--tb-height);
+  padding-left: var(--tb-start);
+  padding-right: var(--tb-end);
+  background: var(--titlebar-bg);
+  color: var(--titlebar-fg);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  user-select: none;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.titlebar button {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.titlebar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* The command center, centered on the window - an off-center title reads as
+   a layout bug - with each button group riding right beside it (VS Code's
+   arrangement). The groups hang off the wrapper's edges so only the box
+   itself decides the centering; --cc-max keeps the groups clear of the
+   window controls. Once that gets too small, .cc-inline lays all three out
+   as a plain row. */
+.titlebar-center {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 100%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+}
+
+.titlebar-group-start {
+  position: absolute;
+  right: calc(100% + 4px);
+}
+
+.titlebar-group-end {
+  position: absolute;
+  left: calc(100% + 10px);
+}
+
+.titlebar-command-center {
+  width: 38vw;
+  max-width: var(--cc-max);
+  height: calc(var(--tb-height) - 10px);
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--commandcenter-bg);
+  color: var(--commandcenter-fg);
+  border: 1px solid var(--commandcenter-border);
+  border-radius: 5px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.titlebar-command-center:hover {
+  background: var(--commandcenter-active-bg);
+  border-color: var(--commandcenter-active-border);
+}
+
+.titlebar-command-center:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.titlebar-command-center .codicon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.titlebar-command-center-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar.cc-inline .titlebar-center {
+  position: static;
+  transform: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+}
+
+.titlebar.cc-inline .titlebar-group-start,
+.titlebar.cc-inline .titlebar-group-end {
+  position: static;
+}
+
+.titlebar.cc-inline .titlebar-command-center {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.titlebar.inactive .titlebar-center {
+  opacity: 0.6;
+}
+
+/* ?wco=left|right QA emulation only: where the OS controls would sit. */
+.titlebar-emulated-controls {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  outline: 1px dashed var(--fg-inactive);
+  outline-offset: -3px;
+  pointer-events: none;
+}
+
+.titlebar-emulated-controls[data-side="left"] {
+  left: 0;
+  width: var(--tb-start);
+}
+
+.titlebar-emulated-controls[data-side="right"] {
+  right: 0;
+  width: var(--tb-end);
+}
+
+/* ---- Status bar ---- */
+
+.status-bar {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  /* Two groups: extension items can sit at either end, core's own readouts
+     close the right one. */
+  justify-content: space-between;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--statusbar-bg);
+  color: var(--statusbar-fg);
+  border-top: 1px solid var(--statusbar-border);
+  font-size: 12px;
+  user-select: none;
+}
+
+/* Prose that a compact bar drops — an item marks its wordy parts with this
+   and needs to know nothing else about the mode. */
+.status-bar.compact .full-only {
+  display: none;
+}
+
+.status-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  min-width: 0;
+  /* An empty group still has to be a drop target, or an item could never be
+     moved into it. */
+  min-height: 100%;
+}
+
+/* The left group takes whatever the right one leaves and scrolls when its
+   items outgrow that - the same treatment the sidebar tab strip gets. The
+   scrollbar is hidden: a plain mouse wheel over the group scrolls it
+   (StatusBar.tsx), and on touch a finger drags it. */
+.status-bar-group[data-side="left"] {
+  flex: 1 1 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Core's readouts keep their natural width so the left group knows how much
+   room it really has. The floor keeps an emptied right group droppable. */
+.status-bar-group[data-side="right"] {
+  flex: 0 1 auto;
+  min-width: 24px;
+  justify-content: flex-end;
+}
+
+/* On a phone even the compact right group can overflow, so it scrolls too. */
+.status-bar.compact .status-bar-group[data-side="right"] {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.status-bar-group::-webkit-scrollbar {
+  display: none;
+}
+
+.status-bar-slot-wrap {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.status-bar-slot {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  /* Without this a long-pressed item comes alive and then refuses to follow
+     the finger: Chrome hands the gesture to the compositor and fires
+     pointercancel, having never dispatched a single touchmove to us — so a
+     non-passive touchmove listener has nothing to preventDefault, whenever
+     it is registered. Same fix the other drag handles in this file need
+     (.panel-splitter, .terminal-scrollbar, .touch-key-editor-grip). It also
+     means the browser won't scroll an overflowing group from a swipe that
+     starts ON an item, so StatusBar.tsx scrolls the group itself when a
+     touch moves before the long press fires. */
+  touch-action: none;
+}
+
+.status-bar-slot.dragging {
+  opacity: 0.4;
+}
+
+.status-bar-drop-indicator {
+  width: 2px;
+  align-self: stretch;
+  margin: 2px 1px;
+  background: var(--accent);
+}
+
+body.status-bar-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* Anchored above the bar (it sits 22px from the bottom, so it opens upward
+   and right-aligns) — same surface and z-index rung as .context-menu. */
+.status-bar-popover {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 280px;
+  /* The rows carry a flexible cwd column, so without a cap a deep path
+     stretches the panel across half the window. */
+  max-width: min(460px, calc(100vw - 16px));
+  overflow: hidden;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+/* A list inside the popover scrolls within the panel's clamped height
+   rather than growing it (the panel's own max-height comes from the
+   measured anchor). */
+.status-bar-popover-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+.status-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status-bar-item .codicon {
+  font-size: 13px;
+}
+
+.status-bar-item:hover:not(:disabled) {
+  background: var(--list-hover-bg);
+  color: var(--fg);
+}
+
+.status-bar-item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.status-bar-item:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* ---- Sidebar ---- */
+
+.sidebar {
+  flex-shrink: 0;
+  background: var(--panel-bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+/* On a real touch device (no mouse, coarse pointer — same test TerminalView
+   uses for its own mobile branches) the sidebar has no room to permanently
+   share the screen with the terminal, so it floats over the content instead
+   of squeezing it, and a tap outside — the backdrop — auto-hides it again,
+   same as the swipe-to-close gesture above. */
+@media (pointer: coarse) and (hover: none) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 801;
+    /* Overrides the resize-driven inline width — a floating drawer keeps a
+       comfortable, fixed reading width regardless of the desktop resize
+       state stored in localStorage. */
+    width: min(85vw, 320px) !important;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
+  }
+
+  /* The right drawer slides in from the opposite edge. */
+  .sidebar-right {
+    left: auto;
+    right: 0;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 800;
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  /* The bar stays on a phone, but compact: every item drops its prose and
+     shows just its icon and number (see .full-only below). */
+  .status-bar {
+    gap: 2px;
+  }
+
+  /* Both edge affordances are redundant on touch: the flick gesture opens
+     either drawer, and a 4px/24px edge target is a poor one. */
+  .sidebar-reopen-right,
+  body.sidebar-tab-dragging .sidebar-drop-edge {
+    display: none;
+  }
+
+  /* The floating sidebar no longer shares flex space with .main, so the
+     drag-to-resize handle next to it has nothing to resize. */
+  .resize-handle {
+    display: none;
+  }
+
+  /* Swipe left→right reopens the sidebar on touch (see the flick handler in
+     App.tsx), so the collapsed reopen strip is redundant — and a 4px tap
+     target on the screen edge is a poor one anyway. */
+  .sidebar-reopen {
+    display: none;
+  }
+}
+
+.resize-handle {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 1px;
+  cursor: col-resize;
+  background: var(--border);
+}
+
+/* Hover/drag indicator matches .bottom-panel-resize's 5px bar: a
+   pseudo-element overhangs the 1px line on both sides so the layout
+   doesn't shift and the grab target grows with it. */
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -2px;
+  right: -2px;
+}
+
+.resize-handle:hover::after,
+body.resizing .resize-handle::after {
+  background: var(--accent);
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.sidebar-reopen {
+  flex-shrink: 0;
+  width: 4px;
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.sidebar-reopen:hover {
+  background: var(--accent);
+}
+
+/* The right (secondary) sidebar. Same component, mirrored chrome: its
+   divider sits on its left edge - the resize handle App renders before it
+   is that 1px line, so the sidebar draws no border of its own, same as the
+   left one - and the reopen strip's border flips with it. */
+
+.sidebar-reopen-right {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+/* Drop zone standing in for a sidebar that isn't on screen: inert and
+   invisible until a sidebar tab is actually being dragged, at which point
+   it becomes a full-height target on that edge. */
+.sidebar-drop-edge {
+  display: none;
+}
+
+body.sidebar-tab-dragging .sidebar-drop-edge {
+  display: block;
+  flex-shrink: 0;
+  width: 24px;
+  background: var(--list-hover-bg);
+  border-inline: 1px dashed var(--border);
+}
+
+body.sidebar-tab-dragging .sidebar-drop-edge:hover {
+  background: var(--accent);
+}
+
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.mode-button {
+  color: var(--fg-inactive);
+}
+
+.mode-button.active {
+  color: var(--list-active-fg);
+  background: var(--list-active-bg);
+}
+
+.sidebar-topbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The layout toggles and the back/forward pair, pinned under the panels:
+   one group left, one right. Out of the topbar so the tab strip keeps the
+   whole width it needs to scroll through contributed tabs. */
+.sidebar-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-footer-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sidebar-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: none;
+  border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
+  background: none;
+  color: var(--fg-inactive);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.sidebar-tab-badge {
+  position: absolute;
+  bottom: 1px;
+  right: -1px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.sidebar-tab:hover {
+  background: var(--list-hover-bg);
+  color: var(--fg);
+}
+
+.sidebar-tab.active {
+  color: var(--fg-bright);
+  background: var(--list-active-bg);
+}
+
+.sidebar-tab.dragging {
+  opacity: 0.4;
+}
+
+.sidebar-tab.drop-indicator-left {
+  border-left-color: var(--accent);
+}
+
+.sidebar-tab.drop-indicator-right {
+  border-right-color: var(--accent);
+}
+
+/* A section header dragged over a tab icon — this tab would become its new
+   home. Outline (not background) so it reads as a target rather than a
+   selection. */
+.sidebar-tab.panel-drop-target {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Drop indicator for a tab dragged past the last tab in a strip. */
+.sidebar-tabs-end-indicator {
+  flex-shrink: 0;
+  width: 2px;
+  align-self: stretch;
+  background: var(--accent);
+}
+
+.sidebar-tab:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* Shown by a sidebar that is open but holds no tabs yet — the right one
+   before anything has been moved into it. */
+.sidebar-empty {
+  padding: 12px;
+  color: var(--fg-inactive);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Wrapper around whatever the active tab shows — the accordion, or a single
+   full-height extension panel. Carries the tab id so a dragged tab can be
+   dropped into it (becoming one of that tab's sections). */
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-body.tab-drop-target::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  background: var(--list-hover-bg);
+  opacity: 0.5;
+}
+
+.sidebar-panels {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.sidebar-panel:not(.collapsed) {
+  min-height: 60px;
+}
+
+.panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  cursor: pointer;
+  background: var(--sidebar-header-bg);
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.panel-header:hover {
+  background: var(--list-hover-bg);
+}
+
+.panel-header.dragging {
+  opacity: 0.4;
+}
+
+.panel-header.drop-indicator-top {
+  border-top-color: var(--accent);
+}
+
+.panel-header.drop-indicator-bottom {
+  border-bottom-color: var(--accent);
+}
+
+.panel-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* A pane normally scrolls itself (a flex: 1; overflow-y: auto root, like
+     .file-tree). One that forgets to - an extension pane whose root only
+     sets flex-direction: column - used to have its tail silently clipped,
+     with no way to reach it by wheel or finger. Scrolling here is the
+     fallback: a self-scrolling pane fills this box exactly and never
+     overflows it, so it never gets a second scrollbar. Horizontal stays
+     clipped - rows ellipsize, they don't pan. */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.panel-splitter {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  height: 1px;
+  cursor: row-resize;
+  background: var(--border);
+  /* Without this, a touch drag only moves a short distance before the
+     browser's own native scroll gesture claims it and cancels our pointer
+     sequence (same fix every other drag handle in this file already needs
+     on touch — .terminal-scrollbar, .touch-key-editor-grip, .touch-key-fab). */
+  touch-action: none;
+}
+
+/* Same 5px hover/drag bar as .resize-handle, vertical axis. */
+.panel-splitter::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -2px;
+  bottom: -2px;
+}
+
+.panel-splitter:hover::after,
+body.resizing-row .panel-splitter::after {
+  background: var(--accent);
+}
+
+body.resizing-row {
+  cursor: row-resize;
+  user-select: none;
+}
+
+.sidebar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-ext-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ext-tab-header {
+  cursor: default;
+}
+
+.ext-tab-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.branch-pill {
+  flex-shrink: 0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  /* It's a button (click opens lazygit) but should keep reading as a pill. */
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.branch-pill:hover {
+  background: var(--selection);
+  color: var(--fg-bright);
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.icon-button:hover {
+  background: var(--list-hover-bg);
+}
+
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* A toggle-style icon button that's currently "on" — the sidebar topbar's
+   terminal-panel toggle, which reflects whether the panel is showing. */
+.icon-button.active {
+  color: var(--fg-bright);
+  background: var(--list-hover-bg);
+}
+
+.icon-flip-x {
+  display: inline-block;
+  transform: scaleX(-1);
+}
+
+.icon-flip-y {
+  display: inline-block;
+  transform: scaleY(-1);
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  outline: none;
+}
+
+.session-list-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+}
+
+/* Hover has to stay readable on top of two other surfaces: the active
+   project's block tint, and the active row itself — which in most themes is
+   the same value as the hover colour, so hovering it used to do nothing at
+   all. Lifting hover past that value by blending it toward the foreground
+   keeps it visible on every theme, light or dark. */
+.session-row:hover,
+.session-row.active:hover {
+  background: var(--list-hover-bg);
+  background: color-mix(in srgb, var(--list-hover-bg), var(--fg) 10%);
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  /* --row-depth is set per row by ProjectList: 0 for a project row, 1 for a
+     worktree row under it. One variable indents every level of the tree, so
+     adding a level is a number, not a new rule. */
+  padding: 5px 12px 5px calc(8px + var(--row-depth, 0) * 14px);
+  background: none;
+  border: none;
+  color: var(--fg-bright);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  /* Long-press opens the app context menu (useLongPressMenu); suppress the
+     mobile native text-callout so it doesn't pop up alongside it. */
+  -webkit-touch-callout: none;
+}
+
+.row-add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  margin-right: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.row-add-button .codicon {
+  font-size: 13px;
+}
+
+.session-row:hover .row-add-button {
+  visibility: visible;
+}
+
+.row-add-button:hover {
+  background: var(--list-hover-bg);
+  color: var(--fg-bright);
+}
+
+.chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  color: var(--fg-inactive);
+}
+
+.chevron .codicon {
+  font-size: 13px;
+}
+
+/* ---- Icon scale inside the PROJECTS tree ----
+   The type ladder here runs 11.5 / 13 / 12.5px, so icons drawn for a 14px
+   row now sit a size too large beside it. Scoped to .session-list: the file
+   tree, tab bar and menus share these classes and keep their own scale. */
+
+.session-list .chevron {
+  width: 12px;
+  min-width: 12px;
+}
+
+.session-list .chevron .codicon {
+  font-size: 11px;
+}
+
+.chevron:hover {
+  color: var(--fg-bright);
+}
+
+.window-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  /* The deepest level, so the quietest: dimmed by blending toward the
+     background rather than by a fixed grey, which keeps it legible on light
+     themes as well as dark ones. */
+  color: var(--fg-inactive);
+  color: color-mix(in srgb, var(--fg) 70%, var(--bg));
+  /* Terminal rows sit one step in from their parent: 36px directly under a
+     project, one more indent under a worktree. */
+  padding: 4px 12px 4px calc(36px + var(--row-depth, 0) * 16px);
+  background: none;
+  border: none;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  /* Long-press opens the app context menu (useLongPressMenu); suppress the
+     mobile native text-callout so it doesn't pop up alongside it. */
+  -webkit-touch-callout: none;
+}
+
+.window-item:hover {
+  background: var(--list-hover-bg);
+  background: color-mix(in srgb, var(--list-hover-bg), var(--fg) 10%);
+}
+
+.session-item:focus-visible,
+.window-item:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.window-item.active-window .window-label {
+  color: var(--list-active-fg);
+  font-weight: 600;
+}
+
+.window-label {
+  white-space: nowrap;
+}
+
+.activity-dot {
+  width: 6px;
+  height: 6px;
+  min-width: 6px;
+  border-radius: 50%;
+  background: var(--status-idle-bg);
+}
+
+.item-cwd {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+/* Session-list window row's running-subagent-count badge
+   (plans/subagent-activity-viewer.md) — opens AgentsPanel on click. */
+.window-decoration-badge {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 8px;
+  background: var(--status-active-bg);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.window-kill-button,
+.window-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.window-kill-button .codicon,
+.window-action-button .codicon {
+  font-size: 13px;
+}
+
+.window-item:hover .window-kill-button,
+.window-item:hover .window-action-button {
+  visibility: visible;
+}
+
+.window-kill-button:hover,
+.window-action-button:hover {
+  background: var(--list-hover-bg);
+  color: var(--fg-bright);
+}
+
+.dir-item .session-name {
+  font-size: 13px;
+  color: var(--fg);
+}
+
+/* Background lives on the row, not the item: .session-row also contains the
+   fixed-width .row-add-button as a sibling, so a background on .session-item
+   alone (flex: 1) would stop short of the row's right edge instead of
+   spanning full width. Declared after .session-row:hover so hovering the
+   active row still reads as solid active-color, not two-toned. */
+.session-row.active {
+  background: var(--list-active-bg);
+}
+
+/* Re-stated after .session-row.active, which is deliberately declared after
+   :hover — without this the active row would swallow its own hover. */
+.session-row.active:hover {
+  background: var(--list-hover-bg);
+  background: color-mix(in srgb, var(--list-hover-bg), var(--fg) 10%);
+}
+
+.session-item.active {
+  color: var(--list-active-fg);
+}
+
+/* ---- Project rows read as captions ----
+   A project row names a group rather than being an item in it, so it takes
+   the treatment the pane header above it already uses: small, bold, upper
+   case. See plans/worktrees-into-projects.md. */
+
+.project-item .session-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--fg-inactive);
+  color: color-mix(in srgb, var(--fg) 76%, var(--bg));
+}
+
+/* The label is uppercased; the path beside it is not. Paths are
+   case-sensitive, so shouting one would misrepresent the folder it names. */
+.project-item .item-cwd {
+  text-transform: none;
+  font-size: 11px;
+}
+
+/* Uppercase bold is wider than the same name in lowercase, so on a narrow
+   sidebar the two halves of the row started fighting and the *name* lost.
+   The name is the row's identity and the path is context, so the name sizes
+   to its content and the path gives way first. */
+.project-item .session-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.session-item.active .session-name {
+  color: var(--list-active-fg);
+}
+
+/* ---- The active project's block ----
+   Its project row, its worktrees and every terminal under them sit on one
+   raised surface, so "where am I" reads as a shape rather than as a single
+   highlighted row buried among its own children. Derived from the theme's
+   own hover colour, so all six installed themes get a sane tint. */
+
+.session-list-ul > li[data-block] {
+  background: var(--list-hover-bg);
+  background: color-mix(in srgb, var(--list-hover-bg) 45%, transparent);
+  /* Clips a hovered first or last row back to the block's rounded ends. */
+  overflow: hidden;
+}
+
+.session-list-ul > li[data-block="start"],
+.session-list-ul > li[data-block="solo"] {
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
+}
+
+.session-list-ul > li[data-block="end"],
+.session-list-ul > li[data-block="solo"] {
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+/* ---- Air between projects ----
+   Every row of a project — its worktrees and terminals — is a sibling <li>
+   of the next project's caption, so without this the tree reads as one
+   undifferentiated column. The gap goes above each project row but the
+   first, which separates the groups without leaving a stray margin at the
+   top of the list. */
+
+.session-list-ul > li[data-kind="project"]:not(:first-child) {
+  margin-top: 10px;
+}
+
+.session-dot {
+  width: 7px;
+  height: 7px;
+  min-width: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--fg-inactive);
+}
+
+/* ---- Worktree rows (the PROJECTS tree's middle level) ---- */
+
+/* The middle level. It inherits .session-item's size, so it is pulled back
+   here to sit between the project caption above it and the terminals below. */
+.worktree-item {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--fg);
+}
+
+.worktree-icon {
+  flex: none;
+  color: var(--fg-inactive);
+}
+
+/* The codicon stylesheet sizes every glyph via `.codicon[class*="codicon-"]`,
+   which outranks a single class — so anything resizing a codicon has to be
+   at least as specific, or it silently does nothing. */
+.session-list .codicon.worktree-icon {
+  font-size: 11px;
+}
+
+/* Keeps a session-less worktree's label aligned with its siblings', which
+   have a real chevron in this slot. */
+.chevron-empty {
+  visibility: hidden;
+}
+
+/* A multi-line settings input (the worktree run-command list), matching
+   .dialog-input's chrome but able to breathe. */
+.settings-textarea {
+  font-family: var(--mono-font, monospace);
+  font-size: 12px;
+  resize: vertical;
+  min-height: 48px;
+}
+
+/* The create-worktree popover, anchored to the "+" it was opened from and
+   dismissed by a press outside it. Same surface as .context-menu, which is
+   what it sits next to and replaces in the flow. */
+.worktree-popover {
+  position: fixed;
+  z-index: 1000;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.worktree-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.worktree-form-error {
+  font-size: 12px;
+  color: var(--error);
+  word-break: break-word;
+}
+
+.worktree-form-modes {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+.worktree-form-modes label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.worktree-form-input {
+  background: var(--input-bg);
+  color: var(--input-fg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  padding: 3px 6px;
+  font-size: 13px;
+  font-family: inherit;
+  min-width: 0;
+}
+
+.worktree-form-input:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+
+.worktree-form-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.worktree-form-buttons button {
+  flex: 1;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: 2px;
+  border: 1px solid var(--button-border, transparent);
+  background: var(--button-bg);
+  color: var(--button-fg);
+  cursor: pointer;
+}
+
+.worktree-form-buttons button[type="button"] {
+  background: var(--button-secondary-bg, var(--list-hover-bg));
+  color: var(--button-secondary-fg, var(--fg));
+}
+
+.worktree-form-buttons button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.worktree-dirty {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning, #cca700);
+}
+
+.worktree-tag {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--list-active-bg);
+  color: var(--fg-inactive);
+}
+
+.worktree-tag-warn {
+  color: var(--error);
+}
+
+.session-dot.attached {
+  background: var(--status-active-bg);
+  border-color: var(--status-active-bg);
+}
+
+.session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-empty {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fg-inactive);
+}
+
+.pin-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  min-width: 11px;
+  color: var(--fg-inactive);
+}
+
+/* pin-indicator is set on the Icon itself, not on a wrapper around one, so
+   the glyph and the class are the same element. */
+.session-list .codicon.pin-indicator {
+  font-size: 10px;
+}
+
+/* ---- Files panel content ---- */
+
+/* Focusable (tabIndex -1) purely so it can receive paste events when the click
+   landed on empty space rather than a row — never a visible focus target. */
+.file-tree:focus {
+  outline: none;
+}
+
+.file-tree {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 40px;
+  /* Anchors .marquee-rect, whose left/top are in this container's own
+     content space (scrollTop-relative) — see useMarqueeSelection.ts. */
+  position: relative;
+  /* Rows are edge-to-edge with no gap between them, so a list taller than
+     the viewport otherwise leaves literally zero empty pixels to arm a
+     marquee drag from at any scroll position (the viewport is always
+     100% covered by row content). This reserves a strip of genuine empty
+     space at the very bottom, reachable by scrolling to the end, so a new
+     drag can always be started even in a fully-scrolled long list. */
+  padding-bottom: 48px;
+}
+
+/* Rubber-band drag-to-select rectangle — shared look with the git panel's
+   copy (extensions/git-scm/src/style.css). Positioned by JS in content-
+   space, not viewport-space, so it stays pinned to what it's selecting
+   through an edge-triggered autoscroll. */
+.marquee-rect {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.file-tree.drag-over {
+  background: var(--list-hover-bg);
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+.file-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 3px 12px 3px 6px;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* File rows are a div, not a native <button> (see FileTree.tsx's comment
+     on why), so they're text-selectable by default — without this, a
+     Shift+click (used for range-select / the secondary-click shortcut)
+     triggers the browser's native "extend text selection to here" gesture
+     instead of just our click handler. */
+  user-select: none;
+  /* Long-press opens the app context menu (useLongPressMenu); suppress the
+     mobile native text-callout so it doesn't pop up alongside it. */
+  -webkit-touch-callout: none;
+}
+
+.file-tree-dir:hover,
+.file-tree-dir.drag-over {
+  background: var(--list-hover-bg);
+}
+
+.file-tree-dir.drag-over {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+.file-tree-file {
+  color: var(--fg-bright);
+}
+
+.file-tree-file:hover {
+  background: var(--list-hover-bg);
+}
+
+/* Shared by both row kinds — verified on dir (button) and file (div) rows,
+   not just one, since .file-tree-row is a class both share. */
+.file-tree-row.selected {
+  background: var(--list-active-bg);
+}
+
+.file-tree-row.selected:hover {
+  background: var(--list-active-bg);
+}
+
+.file-tree-row:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* Groups the preview button + git badge as one flex item, pushed right as a
+   unit — nested inside .file-tree-row itself (not a sibling wrapper) so the
+   row's own hover background stays one continuous element spanning the full
+   width, and the preview icon lands immediately left of the badge. */
+.file-tree-row-trailer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.file-tree-preview-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.file-tree-preview-button .codicon {
+  font-size: 14px;
+}
+
+.file-tree-row:hover .file-tree-preview-button {
+  visibility: visible;
+}
+
+.file-tree-preview-button:hover {
+  background: var(--list-hover-bg);
+  color: var(--fg-bright);
+}
+
+.file-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-file .file-tree-name {
+  margin-left: 0;
+}
+
+.chevron-spacer {
+  display: inline-block;
+  width: 14px;
+  min-width: 14px;
+}
+
+/* font-family is set inline per-icon now (utils/iconThemes.ts resolves it
+   per icon theme, including Seti — now the perch.seti-icons bundled
+   extension rather than a static built-in). Also doubles as the sizing box
+   for an SVG icon theme's <img> (Material Icon Theme's style), which gets
+   the same className directly rather than a font glyph. */
+.file-tree-folder-icon,
+.file-tree-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  min-width: 17px;
+  font-size: 17px;
+  line-height: 1;
+  text-align: center;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+
+.file-tree-git-badge {
+  flex-shrink: 0;
+  /* Right-aligns directory rows, where the badge is a direct row child with
+     no .file-tree-row-trailer wrapper (only files can have a preview icon).
+     Inert for file rows: nested inside the trailer there, which is already
+     sized to fit its content, so this has no leftover space to consume. */
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+/* A row whose entry is on the clipboard in "cut" mode, awaiting paste
+   elsewhere — matches VS Code Explorer's cut-row dimming convention. */
+.file-tree-row.cut {
+  opacity: 0.5;
+}
+
+/* Rows being dragged elsewhere in the tree (drag = move, Ctrl+drag = copy) —
+   dimmed for the duration of the drag, same treatment as a cut row above,
+   which is likewise "this is on its way somewhere else". */
+.file-tree-row.dragging {
+  opacity: 0.5;
+}
+
+.file-tree-empty,
+.file-tree-error {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fg-inactive);
+}
+
+.file-tree-error {
+  color: var(--error);
+}
+
+/* The FILES tree's filename search. Wraps the search row and the tree so the
+   row stays pinned while the results scroll under it — .file-tree itself is
+   the scroller (flex: 1), so it can't also host a sticky sibling. */
+.file-tree-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-tree-search {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 6px;
+}
+
+.file-tree-search-icon {
+  flex-shrink: 0;
+  display: flex;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.file-tree-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.file-tree-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.file-tree-search-note {
+  padding: 6px 12px;
+  font-size: 11.5px;
+  color: var(--fg-inactive);
+}
+
+/* ---- Main / tabs ---- */
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* Positioning context for .app-overlay-layer (registerAppOverlay). The
+     per-tab content hosts are position:fixed (viewport-relative), so they're
+     unaffected by this. */
+  position: relative;
+}
+
+/* App-global overlay layer: extensions' registerAppOverlay components render
+   here, once, over whatever tab is active (right of the sidebar, the editor
+   area). pointer-events:none so it never blocks tab content — each overlay
+   opts its own interactive surfaces back into pointer-events. z-index 40 sits
+   above the content hosts (z-index 0, including any per-terminal accessory
+   like the floating touch-keys toggle) but below menus/dialogs/quick-switcher
+   (z-index 1000+). */
+.app-overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--tab-bar-bg);
+  min-height: 35px;
+}
+
+.tab-strip {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tab-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Per-tab controls (e.g. the image viewer's zoom toolbar) portal in here —
+   VS Code/code-server editor-actions placement, right of the tab strip.
+   Empty and invisible for tab types (terminals) that don't use it. */
+.tab-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 0 6px;
+}
+
+/* Extension window-action buttons (e.g. "Preview Claude session") for the
+   bar's own active tab — see App.tsx's tabExtrasFor. Sits left of
+   .tab-bar-actions; unlike the SESSIONS-row equivalent (.window-action-button,
+   hover-revealed) this is the tab bar's only affordance for the action, so
+   it stays visible rather than hiding until hover. */
+.tab-bar-extras {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-left: 1px solid var(--tab-border);
+}
+
+.tab-bar-window-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tab-bar-window-action .codicon {
+  font-size: 15px;
+}
+
+.tab-bar-window-action:hover {
+  background: var(--list-hover-bg);
+  color: var(--fg-bright);
+}
+
+/* Chrome-style "+" right after the last tab, inside the scrolling strip
+   (not the fixed .tab-bar-actions area) so it scrolls with the tabs. */
+.tab-new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: center;
+  margin: 0 6px;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tab-new-btn .codicon {
+  font-size: 15px;
+}
+
+.tab-new-btn:hover {
+  background: var(--list-hover-bg);
+  color: var(--fg-bright);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 12px;
+  background: var(--tab-inactive-bg);
+  border-right: 1px solid var(--tab-border);
+  border-left: 1px solid transparent;
+  color: var(--tab-inactive-fg);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  -webkit-touch-callout: none;
+}
+
+.tab.active {
+  background: var(--tab-active-bg);
+  color: var(--tab-active-fg);
+  box-shadow: inset 0 1px 0 var(--tab-active-border);
+}
+
+.tab.dragging {
+  opacity: 0.4;
+}
+
+.tab.drop-indicator-left {
+  border-left-color: var(--accent);
+}
+
+.tab.drop-indicator-right {
+  border-right-color: var(--accent);
+}
+
+.tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: inherit;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.tab-close .codicon {
+  font-size: 14px;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  visibility: visible;
+}
+
+.tab-close:hover {
+  background: var(--list-hover-bg);
+}
+
+/* Chrome-style tab-group chip — one per session with tabGroupsBySession on.
+   Fixed dark text: the palette (utils/groupColor.ts) is chosen to read
+   legibly with it regardless of which color is picked. */
+.tab-group-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin: 6px 2px;
+  padding: 0 10px;
+  border-radius: 4px;
+  /* Reserved, transparent by default — drag-a-chip's drop-indicator rules
+     below only need to swap the color, same pattern as .tab's own left/
+     right border (unlike .tab, the chip has no border otherwise). 3px, not
+     .tab's 2px: a chip's own background is one of 8 saturated palette
+     colors (not a neutral bar background), so the indicator needs more
+     width to stay noticeable against all of them. */
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  color: #1e2227;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.tab-group-chip:hover {
+  filter: brightness(1.1);
+}
+
+.tab-group-chip.dragging {
+  opacity: 0.4;
+}
+
+/* Not var(--accent) (#1085ff) — nearly identical to the "blue" group color
+   (#1a73e8), so it'd be invisible against that chip. Reuses the chip's own
+   dark text color instead — already validated to read against every entry
+   in the (bright/mid-saturation) group-color palette. */
+.tab-group-chip.drop-indicator-left {
+  border-left-color: #1e2227;
+}
+
+.tab-group-chip.drop-indicator-right {
+  border-right-color: #1e2227;
+}
+
+.tab-group-chip:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.tab-group-chip .codicon {
+  font-size: 13px;
+}
+
+.tab-group-chip-window-btn {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  margin-left: -4px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tab-group-chip-window-btn:hover {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.tab-group-chip-label {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-group-chip .activity-dot {
+  background: #1e2227;
+}
+
+/* A grouped tab's top-edge accent line — color is contrast-adjusted at
+   render time (TabBar.tsx) against the resolved tab-bar background, so a
+   light color theme can't wash it out. */
+.tab.grouped {
+  box-shadow: inset 0 2px 0 var(--group-color);
+}
+
+.tab.grouped.active {
+  box-shadow:
+    inset 0 2px 0 var(--group-color),
+    inset 0 1px 0 var(--tab-active-border);
+}
+
+/* ---- Split layout (editor groups) ---- */
+/* See plans/vscode-editor-group-splits.md. .split-branch mirrors a SplitNode
+   branch 1:1 as a nested flex container (row = side-by-side, column =
+   stacked); .split-leaf is one editor group — its own tab bar plus a content
+   slot .terminals-equivalent (.split-leaf-content) that App.tsx's per-tab
+   render switch fills exactly like the old singular .terminals did. */
+
+.split-branch {
+  background: var(--bg);
+}
+
+.split-leaf {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* No border of its own: every edge already has a 1px line from whatever
+     sits there (the sidebar's resize handle or reopen strip, a .split-sash,
+     the bottom panel, the status bar, the title bar), and a second one here
+     doubled each of them. */
+}
+
+.split-leaf-inactive .tab-bar {
+  opacity: 0.6;
+}
+
+.split-leaf-content {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* A tab's actual content (terminal/viewer/settings) — App.tsx renders these
+   in a flat list, positioned to exactly cover their own group's
+   .split-leaf-content rect (measured via ResizeObserver), rather than
+   nesting them inside .split-leaf-content itself. See App.tsx's
+   groupContentRects comment for why: nesting there would remount content
+   on every split-tree reshape. z-index:0 keeps these below chrome drawn on
+   top during a drag (.split-drop-overlay, z-index:50) regardless of DOM
+   order. */
+.split-content-host {
+  z-index: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* These hosts sit on top of the split tree as DOM siblings, not descendants
+   — during a tab drag, SplitLayout's hitTest walks up from
+   document.elementFromPoint() looking for .split-leaf/.tab-strip ancestors,
+   which a content host's own descendants don't have. Disabling pointer
+   events on the hosts while dragging lets elementFromPoint see through to
+   the split-leaf tree underneath, so drop zones work over a pane's actual
+   rendered content, not just its tab bar. */
+body.tab-dragging .split-content-host {
+  pointer-events: none;
+}
+
+/* A visible 1px line inset in a slightly wider flex-basis hit target — same
+   thin-line-plus-generous-hitbox shape as the sidebar's own .resize-handle,
+   just needing a distinct pseudo-element since a sash can be either
+   orientation (row split = drag width, column split = drag height) where
+   the sidebar handle is always horizontal. */
+.split-sash {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 4px;
+  background: transparent;
+}
+
+.split-sash-row {
+  cursor: col-resize;
+}
+
+.split-sash-column {
+  cursor: row-resize;
+}
+
+.split-sash::after {
+  content: "";
+  position: absolute;
+  background: var(--border);
+}
+
+.split-sash-row::after {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.split-sash-column::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.split-sash:hover::after,
+.split-sash.dragging::after {
+  background: var(--accent);
+}
+
+/* On hover/drag the 1px line fattens to the same 5px bar as
+   .bottom-panel-resize (still centered by the translate above). */
+.split-sash-row:hover::after,
+.split-sash-row.dragging::after {
+  width: 5px;
+}
+
+.split-sash-column:hover::after,
+.split-sash-column.dragging::after {
+  height: 5px;
+}
+
+/* Drag-to-split's 5-zone drop overlay (T12/T13) — a translucent accent
+   rectangle filling whichever zone (center/left/right/top/bottom) of a
+   group's content area the dragged tab is currently hovering, computed and
+   positioned by SplitLayout's coordinator from the live DOM rect. Tab-level
+   dragging/drop-indicator styling is already covered by the .tab.dragging /
+   .tab.drop-indicator-left/right rules above, now driven externally by the
+   coordinator instead of TabBar's own (removed) internal state. */
+.split-drop-overlay {
+  z-index: 50;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  border: 2px solid var(--accent);
+  box-sizing: border-box;
+}
+
+/* ---- Terminals ---- */
+
+.terminal-host {
+  position: absolute;
+  inset: 0;
+  padding: 6px 0 0 8px;
+  /* Column flex so the touch key bar occupies real space below the
+     terminal body instead of overlaying its last rows. */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Positioning context for the terminal's overlays (search bar, scrollbar,
+   reconnect badge) — they anchor here rather than to the host so they stay
+   above the touch key bar when it's visible. */
+.terminal-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.terminal-host.hidden {
+  display: none;
+}
+
+/* The div handed to ghostty-web's term.open() — it appends its canvas and
+   hidden IME textarea here and makes the div itself focusable/editable-ish
+   (tabindex, contenteditable, role=textbox) for keyboard input. Kept as a
+   dedicated child of .terminal-body so the sibling widgets (search bar,
+   scrollbar, touch key bar) stay outside ghostty's key/paste listeners.
+   The focus outline and any contenteditable caret must not render over the
+   canvas. */
+.terminal-host .terminal-screen {
+  position: relative;
+  height: 100%;
+  outline: none;
+  caret-color: transparent;
+  /* Touch gestures are handled by TerminalView (swipe-to-scroll); without
+     this, the browser claims them for page pan / pull-to-refresh first. */
+  touch-action: none;
+}
+
+/* Zero-lag local echo overlay (plans/codeman-mobile-features.md): typed
+   characters render here instantly while input is buffered until Enter.
+   Absolutely positioned within .terminal-body, each char spans exactly one
+   engine-measured cell (localEcho.ts sets left/top/width/height inline —
+   no letter-spacing here, it'd double up with that per-cell width). */
+.local-echo-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.local-echo-char {
+  position: absolute;
+  overflow: hidden;
+  white-space: pre;
+  font-family: var(--terminal-font, monospace);
+  font-size: var(--terminal-font-size, 14px);
+  /* line-height set inline per-span (localEcho.ts) to the measured cell
+     height in px — the engine's lineHeight setting means "x times the
+     font's own measured natural line height", not CSS's "x times
+     font-size", so a var(--terminal-line-height) value here would resolve
+     to the wrong number even at the default of 1. */
+  font-variant-ligatures: none;
+  color: var(--fg-bright);
+}
+
+/* The in-progress IME word (not yet committed by the OS) — underlined
+   like native composition rendering, so it stays visually distinct from
+   already-committed pending text. */
+.local-echo-char-composing {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+/* Cells between the overlay text's end and its high-water mark
+   (LocalEcho.maxCells): opaque blanks hiding a locally-deleted char whose
+   real erase is still round-tripping. --local-echo-cover-bg is set per
+   terminal from the active theme's background (TerminalView); --bg is
+   only the fallback when the theme doesn't declare one. */
+.local-echo-char-cover {
+  background: var(--local-echo-cover-bg, var(--bg));
+}
+
+/* ?inputdebug tracer (inputDebug.ts) — floats above everything including
+   the touch key bar; pointer-events none so typing under it still works. */
+.input-debug-overlay {
+  position: fixed;
+  left: 4px;
+  right: 4px;
+  bottom: 96px;
+  z-index: 1000;
+  pointer-events: none;
+  font-family: monospace;
+  font-size: 9px;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #7ee787;
+  background: rgba(0, 0, 0, 0.78);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+/* xterm.js's own IME composition preview box — a known-buggy overlay even
+   in xterm's own shipped CSS ("TODO: Composition position got messed up
+   somewhere"). Every composed word (which is most Android/Gboard typing,
+   not just CJK IME) briefly shows this at a wrong, unrelated position —
+   observed nowhere near the real cursor — flashing in front of the local
+   echo overlay above, which already renders the correct in-progress text
+   at the right place. Made invisible rather than left to fight our own
+   overlay for the same job it does correctly.
+   opacity (not display: none) is required: CompositionHelper.
+   updateCompositionElements reads this element's own getBoundingClientRect()
+   on every render to size the REAL hidden IME textarea
+   (textarea.style.width/height = Math.max(rect.width/height, 1)) —
+   display: none collapses that rect to zero, shrinking the actual typing
+   target to 1x1px and silently breaking all input. opacity preserves
+   layout (and thus a real, non-zero rect) while hiding the pixels. */
+.xterm .composition-view {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Link hover tooltip — shows the link's target, which can differ from the
+   visible cell text (a resolved file path's :line suffix, a trimmed URL). */
+.terminal-link-tooltip {
+  position: absolute;
+  z-index: 30;
+  display: none;
+  max-width: min(80vw, 480px);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--fg-bright);
+  font-family: var(--terminal-font, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Copy/Open toolbar shown above (or below, if clipped) a touch long-press
+   selection (plans/mobile-touch-select-copy-open.md) — touch-only, positioned
+   via inline left/top computed in TerminalView from the engine's live cell
+   metrics; horizontally centered on the selection's first cell via the
+   inline translateX(-50%). */
+.touch-select-toolbar {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.touch-select-toolbar button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-bright);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.touch-select-toolbar button:active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Drag handles (T8) anchored at the selection's start (bottom-left) and end
+   (bottom-right) cells — a 32px square touch target (never shrunk, even
+   though the visible dot is much smaller) hanging mostly below the text line
+   via the negative margin on ::before, so a finger can grab it without
+   occluding the character it's adjusting. touch-action: none stops the
+   browser from treating the drag as a page scroll. */
+.touch-select-handle {
+  position: absolute;
+  z-index: 21;
+  width: 32px;
+  height: 32px;
+  transform: translateX(-50%);
+  touch-action: none;
+  display: flex;
+  justify-content: center;
+}
+
+.touch-select-handle::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* The app's own overlay scrollbar over the terminal's history. Draggable, like
+   code-server's Monaco-based scrollbar; themed and present on touch devices,
+   which the engine's own scrollbar is not, so that one is hidden. */
+.terminal .xterm-scrollable-element > .scrollbar {
+  display: none;
+}
+
+.terminal-scrollbar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  /* Without this, touch browsers intercept the drag as a page/native
+     scroll or pull gesture instead of handing pointer events to us. */
+  touch-action: none;
+}
+
+@media (pointer: coarse) {
+  /* Wider hit area for touch; a 14px column is too thin for a finger. */
+  .terminal-scrollbar {
+    width: 22px;
+  }
+}
+
+.terminal-scrollbar.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.terminal-scrollbar-thumb {
+  position: absolute;
+  left: 4px;
+  right: 2px;
+  background: var(--hover);
+  border-radius: 2px;
+  cursor: default;
+  transition: background 0.1s;
+}
+
+.terminal-scrollbar:hover .terminal-scrollbar-thumb {
+  background: var(--selection);
+}
+
+body.scrollbar-dragging,
+body.scrollbar-dragging .terminal-scrollbar-thumb {
+  cursor: default;
+}
+
+body.scrollbar-dragging .terminal-scrollbar-thumb {
+  background: var(--accent);
+}
+
+body.scrollbar-dragging {
+  user-select: none;
+}
+
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-inactive);
+}
+
+.reconnect-overlay {
+  display: none;
+  position: absolute;
+  top: 8px;
+  right: 20px;
+  z-index: 20;
+  padding: 3px 10px;
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--fg-bright);
+}
+
+.terminal-host.reconnecting .reconnect-overlay {
+  display: block;
+}
+
+.terminal-search-bar {
+  position: absolute;
+  top: 8px;
+  right: 20px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.terminal-search-input {
+  width: 180px;
+  padding: 4px 6px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+
+.terminal-search-input:focus {
+  border-color: var(--focus-border);
+}
+
+.terminal-search-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+  color: var(--fg-inactive);
+  cursor: pointer;
+}
+
+.terminal-search-btn:hover {
+  background: var(--hover);
+  color: var(--fg-bright);
+}
+
+/* ---- Context menu ---- */
+
+/* Wrapper only — it holds no layout of its own, so a single contains()
+   check covers the root menu and every submenu nested inside it. */
+.context-menu-root {
+  display: contents;
+}
+
+/* A submenu is the same surface, positioned beside its parent row. */
+.context-menu-item-chevron {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--fg-inactive);
+  font-size: 12px;
+}
+
+.context-menu-item.submenu-open {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: none;
+  border: none;
+  color: var(--fg-bright);
+  font-size: 13px;
+  text-align: left;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* flex: 1 (rather than relying solely on the parent's justify-content:
+   space-between) so the leading check gutter below can sit before the label
+   without throwing off the label/shortcut spacing. */
+.context-menu-item-label {
+  flex: 1;
+}
+
+.context-menu-item-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.context-menu-item.disabled {
+  color: var(--fg-inactive);
+  cursor: default;
+}
+
+.context-menu-item.disabled:hover {
+  background: none;
+  color: var(--fg-inactive);
+}
+
+.context-menu-item-shortcut {
+  color: var(--fg-inactive);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.context-menu-item.danger .context-menu-item-shortcut {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.context-menu-item-trailing {
+  /* Always in the layout, painted only on hover. Toggling `display` instead
+     made the row demand the icon plus the row's 16px gap the moment the
+     pointer touched it — which re-sized the widest row, and with it the whole
+     menu: Open Recent jumped from 808px to 842px wide as the pointer crossed
+     any row, every label sliding with it. */
+  display: inline-flex;
+  visibility: hidden;
+  align-items: center;
+  margin-left: auto;
+  /* The icon is 16px, exactly as tall as the row's other content, so the 1px
+     that rounds out the hover chip is the whole difference between a 26px and
+     a 28px row — enough to nudge everything below a hovered row down. Paint
+     the padding, don't let it count toward the row's height. */
+  padding: 1px;
+  margin-block: -1px;
+  border-radius: 3px;
+  color: var(--fg-inactive);
+}
+
+.context-menu-item:hover .context-menu-item-trailing,
+.context-menu-item:focus .context-menu-item-trailing {
+  visibility: visible;
+}
+
+.context-menu-item-trailing:hover {
+  color: var(--list-active-fg);
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+/* A trailing action shares the row-end slot with the shortcut hint; when
+   both exist the hint keeps its place and the trailing button sits after
+   it, but in practice recent-project rows carry no shortcut hints. */
+.context-menu-item-shortcut + .context-menu-item-trailing {
+  margin-left: 6px;
+}
+
+.context-menu-item:hover {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+
+.context-menu-item.danger {
+  color: var(--error);
+}
+
+.context-menu-item.danger:hover {
+  background: var(--list-active-bg);
+  color: var(--error);
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border);
+}
+
+/* Tab-group color picker row (tab-group chip's context menu) */
+.context-menu-swatches {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.swatch.selected {
+  border-color: var(--fg-bright);
+}
+
+/* ---- Dialogs ---- */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 17, 23, 0.5);
+}
+
+.dialog {
+  min-width: 400px;
+  max-width: 560px;
+  padding: 18px 20px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-bright);
+  margin-bottom: 14px;
+}
+
+.dialog-message {
+  color: var(--fg-bright);
+  font-size: 13px;
+  margin-bottom: 12px;
+  /* Messages carry their own line breaks (Remove Worktree's paragraphs, Clean
+     Up Worktrees' lists) - keep them, and let a long path wrap instead of
+     widening the dialog. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.dialog-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+
+.dialog-input:focus {
+  border-color: var(--focus-border);
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* The pick-from-list dialog (ctx.app.pickItem / pickIcon): filter input
+   above a scrolling list, highlight follows the arrow keys. */
+.dialog.dialog-pick {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  min-width: 0;
+}
+
+.dialog-pick-list {
+  margin-top: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.dialog-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.dialog-pick-row.active {
+  background: var(--list-hover-bg);
+  color: var(--fg-bright);
+}
+
+.dialog-pick-row.current .dialog-pick-label {
+  font-weight: 600;
+}
+
+.dialog-pick-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.dialog-pick-label {
+  flex-shrink: 0;
+}
+
+.dialog-pick-detail {
+  color: var(--fg-inactive);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dialog-pick-empty {
+  padding: 10px 8px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.dialog.folder-picker {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+}
+
+.folder-picker-list {
+  margin-top: 8px;
+  height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.folder-picker-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.folder-picker-entry:hover,
+.folder-picker-entry:focus,
+.folder-picker-entry.selected {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+  outline: none;
+}
+
+.folder-picker-entry .codicon {
+  color: var(--fg-inactive);
+}
+
+.folder-picker-empty {
+  padding: 8px;
+  color: var(--fg-inactive);
+  font-size: 12.5px;
+}
+
+.folder-picker-error {
+  margin-top: 6px;
+  color: var(--error-fg, #f48771);
+  font-size: 12.5px;
+}
+
+.folder-picker-new {
+  cursor: default;
+}
+
+.folder-picker-new-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg, transparent);
+  color: inherit;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.new-folder-button {
+  margin-right: auto;
+}
+
+.dialog-button {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.dialog-button.primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+.dialog-button.primary:hover {
+  filter: brightness(1.1);
+}
+
+.dialog-button.secondary {
+  background: transparent;
+  color: var(--fg-bright);
+  border-color: var(--fg-inactive);
+}
+
+.dialog-button.secondary:hover {
+  background: var(--list-hover-bg);
+}
+
+.dialog-button:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+/* Every .dialog-button needs .primary or .secondary — the base class sets
+   only geometry, so a bare one falls through to the browser's own grey-on-
+   black chrome, which no theme can reach. This makes a disabled one read as
+   disabled either way, matching .icon-button's own convention. */
+.dialog-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dialog-button.primary:disabled:hover {
+  filter: none;
+}
+
+.dialog-button.secondary:disabled:hover {
+  background: transparent;
+}
+
+.auth-gate-error {
+  color: var(--error);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+/* ---- Settings tab ---- */
+
+.settings-host {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.settings-host.hidden {
+  display: none;
+}
+
+.settings-nav {
+  flex-shrink: 0;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 8px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  text-align: left;
+  padding: 5px 12px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-nav-item:hover {
+  background: var(--list-hover-bg);
+}
+
+.settings-nav-item.active {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+
+.settings-nav-divider {
+  height: 1px;
+  margin: 8px 4px;
+  background: var(--border);
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 28px 40px;
+}
+
+/* Phone-width Settings: the fixed-width side nav would squeeze the content
+   to nothing, so it becomes a horizontally scrollable strip on top and the
+   content takes the full width below. KeyboardShortcutsView reuses
+   settings-host/content and inherits the same treatment. */
+@media (max-width: 640px) {
+  .settings-host {
+    flex-direction: column;
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    width: auto;
+    gap: 4px;
+    padding: 8px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settings-nav-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .settings-nav-divider {
+    width: 1px;
+    height: auto;
+    margin: 4px 6px;
+    flex-shrink: 0;
+  }
+
+  .settings-content {
+    padding: 16px 12px 32px;
+  }
+
+  .settings-select {
+    width: 100%;
+  }
+}
+
+.settings-section-title {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+.settings-subsection-title {
+  margin: 20px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+.settings-subsection-title:first-child {
+  margin-top: 0;
+}
+
+.settings-footer {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-build {
+  margin-top: 10px;
+  font-size: 11px;
+  opacity: 0.55;
+  user-select: text;
+}
+
+.keybinding-filter {
+  width: 100%;
+  max-width: 420px;
+  margin-bottom: 12px;
+}
+
+.keybinding-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.keybinding-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--fg-inactive);
+}
+
+.keybinding-header-command {
+  flex: 1;
+  min-width: 0;
+}
+
+.keybinding-header-binding,
+.keybinding-header-when {
+  flex-shrink: 0;
+  width: 160px;
+}
+
+.keybinding-header-source {
+  flex-shrink: 0;
+  width: 56px;
+}
+
+.keybinding-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--fg-bright);
+}
+
+.keybinding-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.keybinding-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keybinding-chip {
+  flex-shrink: 0;
+  width: 160px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--badge-bg);
+  color: var(--fg-bright);
+}
+
+.keybinding-chip.recording {
+  border-color: var(--focus-border);
+  color: var(--focus-border);
+  font-family: inherit;
+}
+
+.keybinding-chip.empty {
+  color: var(--fg-inactive);
+  background: none;
+  border-style: dashed;
+}
+
+.keybinding-conflict {
+  flex-shrink: 0;
+  color: var(--warning);
+  display: inline-flex;
+  align-items: center;
+}
+
+.keybinding-conflict .codicon {
+  font-size: 14px;
+}
+
+.keybinding-when-cell {
+  position: relative;
+  flex-shrink: 0;
+  width: 160px;
+  min-width: 0;
+}
+
+.keybinding-when-display {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--fg-inactive);
+  cursor: pointer;
+}
+
+.keybinding-when-display:hover {
+  color: var(--fg-bright);
+}
+
+.keybinding-when-input {
+  width: 100%;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.keybinding-when-input.invalid {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.keybinding-when-suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  width: 260px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 2px;
+  padding: 4px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.keybinding-when-suggest-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.keybinding-when-suggest-item.active {
+  background: var(--list-active-bg);
+}
+
+.keybinding-when-suggest-key {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--fg-bright);
+}
+
+.keybinding-when-suggest-desc {
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.keybinding-source {
+  flex-shrink: 0;
+  width: 56px;
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.keybinding-row-actions {
+  flex-shrink: 0;
+  width: 94px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.keybinding-header-actions {
+  flex-shrink: 0;
+  width: 94px;
+}
+
+.keybinding-action {
+  color: var(--fg-inactive);
+}
+
+.keybinding-action:hover {
+  color: var(--fg-bright);
+}
+
+.keybinding-empty {
+  padding: 12px 8px;
+  font-size: 13px;
+  color: var(--fg-inactive);
+}
+
+.tab-type-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+}
+
+/* Fixed box (mirrors .file-tree-file-icon) so an SVG icon theme's <img> can't
+   blow up the tab height; sized down slightly from the tree's 17px to match
+   the tab bar's 13px title. */
+.tab-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  font-size: 15px;
+  line-height: 1;
+  text-align: center;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--fg-bright);
+}
+
+.settings-label {
+  font-weight: 600;
+}
+
+.settings-number {
+  width: 100px;
+}
+
+.settings-select {
+  width: 320px;
+  /* Native selects hug their dropdown arrow to the border edge regardless of
+     padding, so the arrow is drawn manually here to give it breathing room
+     from the edge. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235f6672' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.checkbox-row {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.checkbox-row input {
+  accent-color: var(--focus-border);
+  margin-top: 2px;
+}
+
+/* A hint captions the control ABOVE it, so the pair is kept tight and the
+   separating space goes after the hint instead. Previously the row's own
+   12px sat between a field and its hint while nothing separated that hint
+   from the next field, so every hint read as the caption of the field below
+   it — see the Terminal section, where the right-click explanation butted
+   straight up against "When copying a selection". */
+.settings-row:has(+ .settings-hint) {
+  margin-bottom: 0;
+}
+
+.settings-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--fg-inactive);
+  margin-top: 3px;
+  margin-bottom: 16px;
+}
+
+/* Hints name real files (an agent's hook config, a worktree) and a long path
+   has nowhere to break, which pushed the panel past the screen edge at phone
+   width. Break inside it rather than overflow. */
+.settings-hint code {
+  overflow-wrap: anywhere;
+}
+
+/* A hint nested INSIDE a row (AiSection, BehaviorSection) is one of that
+   row's own stacked children, already spaced by its 4px gap — the pairing
+   above is about a hint that FOLLOWS a row as its sibling. Left exactly as
+   it was before that rule existed. */
+.settings-row > .settings-hint {
+  margin-top: 2px;
+  margin-bottom: 0;
+}
+
+/* A hint that's actually a problem — a key that failed to save, a CLI
+   provider that isn't installed. Same size and position as a plain hint;
+   only the color says "this needs attention" rather than "small print".
+   (The class was already in use with no rule behind it, so those messages
+   were rendering as ordinary grey hints.) */
+.settings-hint.settings-error {
+  color: var(--error);
+}
+
+.extension-install-button {
+  display: inline-block;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+.extension-error {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--error);
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.extension-filter-row {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.extension-filter-search {
+  flex: 1;
+  min-width: 160px;
+}
+
+.extension-filter-select {
+  width: auto;
+  min-width: 140px;
+}
+
+.extension-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.extension-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--panel-bg);
+}
+
+.extension-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.extension-row-title {
+  font-weight: 600;
+  color: var(--fg-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-row-builtin {
+  font-weight: normal;
+  color: var(--fg-inactive);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-left: 4px;
+}
+
+.extension-row-description {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-row-footer {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--fg-inactive);
+  overflow: hidden;
+}
+
+.extension-row-publisher {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-verified-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.extension-row-contributes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.extension-row-contributes span {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 10.5px;
+}
+
+.extension-row-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-bright);
+  flex-shrink: 0;
+}
+
+/* ---- Extensions sidebar tab (ExtensionsPanel) ---- */
+
+.extensions-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.extensions-panel-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.extensions-panel-toolbar .extension-filter-search {
+  flex: 1 1 auto;
+  min-width: 100px;
+}
+
+.extensions-panel-toolbar .extension-install-button {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+.extensions-registries {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+.extensions-registry-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.extensions-registry-source {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--fg-bright);
+}
+
+.extensions-registry-error {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.extensions-registry-default {
+  flex-shrink: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-inactive);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.extensions-registry-add {
+  display: flex;
+  gap: 6px;
+}
+
+.extensions-registry-add .dialog-input {
+  flex: 1;
+}
+
+.extensions-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.extensions-panel-section-title {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-inactive);
+}
+
+.extension-row-clickable {
+  cursor: pointer;
+}
+
+.extension-row-clickable:hover {
+  background: var(--list-hover-bg);
+}
+
+.extension-row-clickable:focus-visible,
+.extensions-panel-section-header:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* A disabled extension's row reads as dimmed/inactive at a glance, same as a
+   collapsed/inactive item elsewhere in the app — the icon additionally loses
+   color so a colorful icon doesn't fight the otherwise-muted row. */
+.extension-row-disabled {
+  opacity: 0.5;
+}
+
+.extension-row-disabled .extension-icon {
+  filter: grayscale(1);
+}
+
+.extension-icon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  object-fit: contain;
+  font-size: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-inactive);
+}
+
+.extension-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Same compact sizing as .extension-page-actions, so a row's Install/Update
+   button lines up with the page's action buttons rather than the taller
+   base .dialog-button. */
+.extension-row-actions .dialog-button {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+/* ---- Extensions panel section headers (VS Code-style collapsible groups) ---- */
+
+.extensions-panel-section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 12px 0 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.extensions-panel-section-header:first-child {
+  margin-top: 0;
+}
+
+.extensions-panel-section-chevron {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--fg-inactive);
+}
+
+.extensions-panel-section-header .extensions-panel-section-title {
+  margin: 0;
+  flex: 1;
+}
+
+.extensions-panel-section-badge {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.extensions-panel-section-loading {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+/* ---- Extension detail page (ExtensionPageView) ---- */
+
+.extension-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+.extension-page-header {
+  display: flex;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.extension-page-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: contain;
+  font-size: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-inactive);
+}
+
+.extension-page-title-block {
+  flex: 1;
+  min-width: 0;
+}
+
+.extension-page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--fg-bright);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extension-page-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+.extension-publisher {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.extension-page-description {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.extension-page-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Smaller font + tighter padding than the base .dialog-button, matching VS
+   Code's own compact extension-page action buttons — applied to every button
+   in the row (primary and secondary alike) so Install/Update lines up at the
+   same height as Disable/Enable/Uninstall. */
+.extension-page-actions .dialog-button {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+/* Filled, bordered secondary buttons (Disable/Enable, Extension Settings,
+   Uninstall, and its Yes/Cancel confirm) — scoped to this row rather than
+   every .dialog-button.secondary in the app, since Settings/dialog Cancel
+   buttons elsewhere keep their existing outlined look. */
+.extension-page-actions .dialog-button.secondary {
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-fg);
+  border-color: var(--button-secondary-border);
+}
+
+.extension-page-actions .dialog-button.secondary:hover {
+  background: var(--button-secondary-hover-bg);
+}
+
+.extension-page-tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  margin-top: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.extension-page-tab {
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-inactive);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.extension-page-tab:hover {
+  color: var(--fg);
+}
+
+.extension-page-tab.active {
+  color: var(--fg-bright);
+  border-bottom-color: var(--accent);
+}
+
+.extension-page-body {
+  padding: 16px 0;
+}
+
+/* Mirrors markdown-preview's .markdown-body (extensions/markdown-preview/src/style.css)
+   so a README reads identically whether it's opened as a Markdown file or
+   viewed on an extension's page. */
+.extension-page-readme {
+  max-width: 860px;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.extension-page-readme :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--fg-bright);
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 24px 0 12px;
+}
+
+.extension-page-readme h1 {
+  font-size: 1.8em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.extension-page-readme h2 {
+  font-size: 1.4em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.extension-page-readme h3 {
+  font-size: 1.2em;
+}
+
+.extension-page-readme p {
+  margin: 12px 0;
+}
+
+.extension-page-readme a {
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+
+.extension-page-readme a:hover {
+  text-decoration: underline;
+}
+
+.extension-page-readme strong {
+  color: var(--fg-bright);
+  font-weight: 600;
+}
+
+.extension-page-readme :is(ul, ol) {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.extension-page-readme li {
+  margin: 4px 0;
+}
+
+.extension-page-readme blockquote {
+  margin: 12px 0;
+  padding: 4px 14px;
+  border-left: 3px solid var(--border);
+  color: var(--fg-inactive);
+}
+
+.extension-page-readme code {
+  background: var(--button-secondary-bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.9em;
+}
+
+.extension-page-readme :not(pre) > code {
+  color: var(--warning);
+}
+
+.extension-page-readme pre {
+  background: var(--button-secondary-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.extension-page-readme pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+.extension-page-readme table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.95em;
+}
+
+.extension-page-readme :is(th, td) {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+}
+
+.extension-page-readme th {
+  background: var(--panel-bg);
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+.extension-page-readme hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+.extension-page-readme img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.extension-page-fallback p {
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.extension-page-config-table {
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.extension-page-config-table th,
+.extension-page-config-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.extension-page-config-table th {
+  color: var(--fg-inactive);
+  font-weight: 600;
+}
+
+/* ---- Upload progress banner ---- */
+
+.upload-banner {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2100;
+  width: 260px;
+  padding: 8px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.upload-banner-label {
+  font-size: 12px;
+  color: var(--fg-bright);
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-banner-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hover);
+  overflow: hidden;
+}
+
+.upload-banner-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.1s linear;
+}
+
+/* ---- Error banner ---- */
+
+.error-banner {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2100;
+  max-width: 380px;
+  padding: 8px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  color: var(--error);
+  cursor: pointer;
+}
+
+/* Browser-opener bridge fallback (App.tsx's openUrlBanner) — shown when a
+   server-relayed URL open couldn't auto-open (popup blocked). */
+.open-url-banner {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 380px;
+  padding: 8px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.open-url-banner a {
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-url-banner a:hover {
+  text-decoration: underline;
+}
+
+.open-url-banner-dismiss {
+  flex: none;
+  padding: 0 2px;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  cursor: pointer;
+}
+
+.quick-switcher-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(13, 17, 23, 0.5);
+}
+
+.quick-switcher {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.quick-switcher-input {
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--input-border);
+  color: var(--fg-bright);
+  font-size: 14px;
+  outline: none;
+}
+
+.quick-switcher-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.quick-switcher-empty {
+  padding: 12px 10px;
+  color: var(--fg-inactive);
+  font-size: 12.5px;
+}
+
+.quick-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.quick-switcher-item.selected {
+  background: var(--list-hover-bg);
+  color: var(--fg-bright);
+}
+
+.quick-switcher-item.disabled {
+  color: var(--fg-inactive);
+  cursor: default;
+}
+
+.quick-switcher-item.disabled.selected {
+  background: none;
+}
+
+.quick-switcher-loading {
+  cursor: default;
+  color: var(--fg-inactive);
+}
+
+.quick-switcher-binding {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--fg-inactive);
+  background: var(--input-bg);
+}
+
+.quick-switcher-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: var(--input-bg);
+  color: var(--fg-inactive);
+}
+
+.quick-switcher-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Bottom terminal panel (plans/bottom-terminal-panel.md) ──────────────
+   Sits below the editor's split tree as the last child of .main (a column
+   flexbox), at a fixed, drag-resizable pixel height while SplitLayout above
+   keeps flex:1. The editor's content hosts are positioned from
+   ResizeObserver-measured rects, so they follow the panel's height on their
+   own — nothing here has to tell them to. */
+.bottom-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+
+/* The panel's top edge — same thin-line-in-a-generous-hitbox shape as the
+   sidebar's .resize-handle, drawn over the border above. */
+.bottom-panel-resize {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 5px;
+  cursor: row-resize;
+  z-index: 1;
+}
+
+.bottom-panel-resize:hover {
+  background: var(--accent);
+}
+
+/* Shorter than the editor's 35px .tab-bar — the shared .tab styles have no
+   height of their own (align-items: stretch), so this alone compacts the
+   panel's tabs without touching editor tabs. */
+.bottom-panel-header {
+  display: flex;
+  align-items: stretch;
+  background: var(--tab-bar-bg);
+  min-height: 28px;
+}
+
+.bottom-panel-title {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  flex-shrink: 0;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.panel-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.panel-action:hover:not(:disabled) {
+  background: var(--list-hover-bg);
+}
+
+.panel-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.bottom-panel-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* One per tab; only the active one is displayed (the rest keep their
+   terminals mounted behind display:none, so a tab switch is instant and
+   scrollback survives — same trade-off App.tsx makes for editor tabs). */
+.bottom-panel-panes {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+.bottom-panel-pane {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Which pane keyboard input goes to — only worth showing once a tab actually
+   has more than one pane (the component gates the class on that). */
+.bottom-panel-pane.active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--accent);
+  pointer-events: none;
+}
+
+/* "Required" chip on a required builtin's extension page — rendered where
+   Disable/Uninstall would otherwise appear. */
+.extension-required-label {
+  align-self: center;
+  padding: 3px 10px;
+  border-radius: 3px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 12px;
+}
+
+/* Engine-resolution failure surface (TerminalView) — only reachable with a
+   corrupt install, since xterm-engine is a required builtin. */
+.terminal-engine-missing {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--error);
+  font-size: 14px;
+}
+
+/* ---- Settings list entries: one expandable row per configured thing ----
+   Shared by Settings → AI Providers (the configured-AI list) and
+   Settings → AI Providers (the agent registry) - the same shape in both:
+   an enable checkbox, a name that doubles as the expander, row actions,
+   and the entry's own fields underneath while it is open. */
+
+.settings-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+
+.settings-entry {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+}
+
+.settings-entry.expanded {
+  border-color: var(--focus-border);
+}
+
+.settings-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+}
+
+/* The name doubles as the expander, so it takes the row's slack and stays
+   left-aligned while the default radio and Remove hold the right end. */
+.settings-entry-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-entry-name > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings → AI Providers ------------------------------------------------------
+   A catalog rather than an editor: a master switch, a permissions choice, and
+   one row per agent the app knows about. */
+
+/* A label-and-hint block on the left, its control held at the right end.
+   Wraps to stacked at narrow widths so the control never squeezes the text
+   into a column. */
+.settings-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-split > .settings-hint {
+  flex: 1 1 260px;
+  margin-bottom: 0;
+}
+
+/* Two named states, both visible - "off" for permissions means "ask me",
+   which a cleared checkbox does not say out loud. */
+.settings-segmented {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.settings-segment {
+  padding: 3px 10px;
+  border: none;
+  background: var(--input-bg);
+  color: var(--fg-inactive);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-segment + .settings-segment {
+  border-left: 1px solid var(--input-border);
+}
+
+/* The app's own selected-row treatment (as Settings' nav uses), not a status
+   colour: the first cut painted the active half in the working-agent green,
+   which swallowed its own label. */
+.settings-segment.active {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+
+.settings-segment:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A group heading inside one settings section - Settings → AI Providers holds
+   two (Agents, API providers) and needs them told apart from the rows under
+   them without either looking like a page of its own.
+   A rule ABOVE, never below: the group's own content follows immediately, and
+   a closing rule under the last group would double up with the one the
+   settings footer already draws - which is exactly the double line that had
+   to be fixed at the bottom of the agent list. The first heading in a section
+   has nothing above it to separate from, so it drops the rule and the extra
+   space. */
+.settings-group-heading {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-group-heading:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* The heading's own label carries a count chip on the right rather than
+   sitting beside the text, so two groups' headings line up with each other. */
+.settings-group-heading > .settings-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* The count chip beside a group heading's label. */
+.settings-count {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 16px;
+}
+
+/* A separator ABOVE each row and none below the last: the settings footer
+   draws its own rule a few pixels further down, and closing the list as well
+   put two lines side by side. */
+.agent-row {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+/* Not installed: the row stays readable and its link stays usable, but it
+   reads as unavailable rather than as something that would run. */
+.agent-row.missing .agent-row-label,
+.agent-row.missing .agent-row-command {
+  opacity: 0.55;
+}
+
+.agent-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The agent's glyph, in a soft square like the rest of the app's list
+   iconography. Dimmed with the row when the agent is not installed. */
+.agent-row-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-inactive);
+  font-size: 14px;
+}
+
+.agent-row-icon img {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.agent-row.missing .agent-row-icon {
+  opacity: 0.55;
+}
+
+.agent-row-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 1px;
+}
+
+.agent-row-label {
+  font-size: 13px;
+}
+
+.agent-row-command,
+.agent-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.agent-row-meta {
+  margin: 0;
+}
+
+/* The row's link is an <a>, so it needs the underline taken off explicitly,
+   and it sits beside text rather than in a toolbar - smaller than the app's
+   standard icon button.
+
+   The size has to be set on the GLYPH, not on this anchor: the codicon
+   stylesheet gives every `.codicon[class*='codicon-']` its own
+   `font: normal normal normal 16px/1 codicon`, which overrides whatever the
+   container's font-size is. Setting it here alone looked like it worked and
+   changed nothing on screen. */
+.agent-row-head a.icon-button {
+  width: 16px;
+  height: 16px;
+  color: var(--fg-inactive);
+  text-decoration: none;
+}
+
+.agent-row-head a.icon-button .codicon {
+  font-size: 11px;
+}
+
+.agent-row-head a.icon-button:hover {
+  color: var(--fg);
+}
+
+.agent-row-detail {
+  padding: 6px 0 2px;
+}
+
+/* Keeps the row's controls aligned when an agent has no link to offer. */
+.icon-button-placeholder {
+  width: 16px;
+  flex-shrink: 0;
+}
+
+/* Settings → AI Providers: the generated hook snippet and its buttons. The snippet
+   is a config file's worth of JSON, so it scrolls on its own rather than
+   stretching the panel, and wraps its buttons at phone width. */
+
+.agent-hook-snippet {
+  max-height: 220px;
+  margin: 4px 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--fg-inactive);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
+}
+
+.agent-hook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ai-profile-default {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--fg-inactive);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-entry-editor {
+  padding: 0 8px 8px;
+  border-top: 1px solid var(--border);
+}

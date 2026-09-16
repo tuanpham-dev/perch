@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "useDefineForClassFields": true,
+    "types": ["vite/client", "vite-plugin-pwa/client"]
+  },
+  "include": ["src", "vite.config.ts"],
+  // sw.ts runs in a service worker, not a window — its `self` is
+  // ServiceWorkerGlobalScope, incompatible with this config's DOM lib (the
+  // app's own global `self`/`window`). Typechecked separately by
+  // tsconfig.sw.json instead; Vite/esbuild still bundles it fine without
+  // tsc's involvement (esbuild doesn't type-check).
+  "exclude": ["src/sw.ts"]
+}
