@@ -1,0 +1,34 @@
+{
+  "name": "perch-mux",
+  "private": true,
+  "version": "0.1.0",
+  "description": "perch's terminal daemon: sessions and windows with reboot persistence",
+  "type": "module",
+  "bin": {
+    "perch-mux": "src/cli.ts"
+  },
+  "exports": {
+    "./client": "./src/client/connection.ts",
+    "./protocol": "./src/protocol/messages.ts",
+    "./config": "./src/util/config.ts",
+    "./windows": "./src/platform/windows.ts",
+    "./spawn-env": "./src/util/spawn-env.ts"
+  },
+  "engines": {
+    "node": ">=23"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 'test/*.test.ts'"
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
+    "commander": "^15.0.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2"
+  }
+}
