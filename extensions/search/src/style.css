@@ -1,0 +1,317 @@
+.search-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+.search-empty {
+  padding: 8px 12px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.search-error {
+  margin: 6px 8px 0;
+  padding: 6px 8px;
+  background: var(--error);
+  color: #ffffff;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.search-input-row {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 0 4px;
+}
+
+.search-replace-toggle {
+  flex-shrink: 0;
+  align-self: center;
+  /* Narrower than the standard 22px icon-button — VS Code's own toggle
+     arrow is a slim hit target, not a full square button. */
+  width: 16px;
+}
+
+/* Matches search-replace-toggle's own width so the replace row's input
+   lines up exactly under the search row's input. */
+.search-replace-spacer {
+  flex-shrink: 0;
+  width: 16px;
+}
+
+.search-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-text-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.search-text-input:focus {
+  border-color: var(--focus-border);
+}
+
+.search-input-wrap .search-text-input {
+  padding-right: 78px;
+}
+
+.search-input-toggles {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.search-toggle.active {
+  background: var(--list-active-bg);
+  color: var(--fg-accent, var(--accent));
+}
+
+.search-details-row {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 6px 0 4px;
+}
+
+/* Left padding matches the search/replace rows' own indent (row padding-
+   left 4px + toggle width 16px + row gap 4px = 24px) so these labels and
+   inputs line up under the search/replace fields above instead of sitting
+   flush against the panel edge. */
+.search-globs {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 6px 6px 24px;
+}
+
+.search-glob-label {
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.search-glob-label:not(:first-child) {
+  margin-top: 4px;
+}
+
+.search-glob-input {
+  padding: 4px 8px;
+}
+
+.search-exclude-wrap .search-text-input {
+  padding-right: 28px;
+}
+
+.search-exclude-toggle {
+  gap: 0;
+}
+
+.search-globs-hint {
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.search-confirm {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 8px 0;
+  padding: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+}
+
+.search-confirm-text {
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.search-confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.search-confirm-cancel,
+.search-confirm-replace {
+  padding: 4px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--input-border);
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.search-confirm-replace {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.search-summary {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.search-file-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  /* 22px icon-button actions render at, plus this row's own vertical
+     padding — border-box, so revealing actions on hover fits inside the
+     already-reserved height instead of growing the row and shifting
+     everything below it. */
+  min-height: 28px;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.search-group-header:hover {
+  background: var(--list-hover-bg);
+}
+
+.search-group-header:focus-visible,
+.search-match-row:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.search-group-name {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.search-group-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  direction: rtl;
+  text-align: left;
+}
+
+.search-group-count {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.search-group-actions {
+  flex-shrink: 0;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.search-group-header:hover .search-group-actions,
+.search-group-header:focus-visible .search-group-actions {
+  display: flex;
+}
+
+.search-match-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Extra left padding indents match rows under their file group header,
+     reading as its children rather than sitting flush with the header. */
+  padding: 2px 8px 2px 20px;
+  /* 22px icon-button actions render at, plus this row's own vertical
+     padding — border-box, so revealing actions on hover fits inside the
+     already-reserved height instead of growing the row and shifting rows
+     below it. */
+  min-height: 26px;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-family: var(--terminal-font, monospace);
+  font-size: 12px;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.search-match-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.search-match-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+.search-match-highlight {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.search-match-actions {
+  flex-shrink: 0;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.search-match-row:hover .search-match-actions,
+.search-match-row:focus-visible .search-match-actions {
+  display: flex;
+}
+
+.search-footer-notice {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+.search-footer-error {
+  color: var(--error);
+}

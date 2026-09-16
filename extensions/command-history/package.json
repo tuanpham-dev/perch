@@ -1,0 +1,13 @@
+{
+  "name": "command-history",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "Command History",
+  "description": "Built-in COMMANDS run section and \"!\" quick-switcher mode: per-pane shell command history (exit codes, durations) reported by shell integration, with re-run, insert, and copy (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "perch": {
+    "client": "./dist/client.js",
+    "server": "./server.js"
+  }
+}

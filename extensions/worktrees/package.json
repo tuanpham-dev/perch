@@ -1,0 +1,12 @@
+{
+  "name": "worktrees",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.2",
+  "displayName": "Worktrees",
+  "description": "Palette entry points for the PROJECTS tree's create-worktree form and Clean Up Worktrees. Worktrees themselves are core: they are the tree's middle level (project → worktree → terminal), with git listing, creation and removal owned by the server (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "perch": {
+    "client": "./dist/client.js"
+  }
+}

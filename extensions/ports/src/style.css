@@ -1,0 +1,412 @@
+/* ---- Ports panel ---- */
+
+.ports-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.ports-error {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--error);
+}
+
+.port-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.port-row {
+  display: flex;
+  align-items: center;
+  color: var(--fg-bright);
+}
+
+.port-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.port-item:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.port-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  padding: 5px 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.port-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-right: 6px;
+}
+
+.port-action-button {
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  visibility: hidden;
+}
+
+.port-row:hover .port-action-button,
+.port-item:focus-visible ~ .port-actions .port-action-button {
+  visibility: visible;
+}
+
+/* No hover on touch — keep actions reachable without a hover state. */
+@media (hover: none) {
+  .port-action-button {
+    visibility: visible;
+  }
+}
+
+.port-number {
+  font-family: monospace;
+  min-width: 44px;
+}
+
+.port-process {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+}
+
+.port-session {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+}
+
+.port-address {
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+.port-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.port-command-box {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: pre;
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border-radius: 2px;
+  font-size: 11px;
+  color: var(--fg);
+}
+
+.port-copy-button {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  background: var(--accent);
+  border: none;
+  border-radius: 2px;
+  color: #ffffff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.port-copy-button:hover {
+  filter: brightness(1.1);
+}
+
+/* ---- Port proxy viewer (open-in-app tab) ---- */
+
+.ports-proxy-host {
+  position: absolute;
+  inset: 0;
+}
+
+.ports-proxy-host.hidden {
+  display: none;
+}
+
+.ports-proxy-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* --- Element picker: pick -> comment -> queue -> send all (mirrors
+   live-preview's flow, and git-scm's DiffView.tsx pending-comment
+   treatment) --- */
+
+.ports-pick-popover {
+  position: absolute;
+  /* Above both the badge markers (9) and the pending-comments footer (10) —
+     a popover for a picked/expanded element near the bottom of the page
+     must win the stacking tie against that footer, not lose to it just
+     because the footer renders later in the DOM. */
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 260px;
+  max-width: calc(100% - 16px);
+  padding: 8px;
+  background: var(--sidebar-header-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fg-accent);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.ports-pick-selector {
+  color: var(--fg-accent);
+  font-family: var(--terminal-font, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Matches the app's own form-input convention (git-scm's
+   .git-credential-input, search extension's .search-text-input) rather
+   than an ad hoc style. */
+.ports-pick-popover textarea {
+  resize: vertical;
+  min-height: 48px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  padding: 5px 6px;
+  outline: none;
+}
+
+.ports-pick-popover textarea:focus {
+  border-color: var(--focus-border);
+}
+
+.ports-pick-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.ports-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--fg-accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ports-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ports-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  padding: 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ports-btn-ghost:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.ports-btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A queued comment's numbered badge, pinned to the center of its picked
+   element (the rect captured at pick time). Above the pending-comments
+   footer (10) — a marker whose element sits near the bottom of the page
+   would otherwise render under that footer and become unclickable once
+   it's showing. */
+.ports-comment-marker {
+  position: absolute;
+  z-index: 11;
+  transform: translate(-50%, -50%);
+}
+
+/* Weighted like the host app's own numbered badge convention
+   (client/src/styles.css's .window-decoration-badge on session rows), sized
+   a bit larger for standalone legibility. A solid border and drop shadow
+   are kept since this floats over arbitrary, unpredictable page
+   backgrounds and needs to stay legible against any of them. */
+.ports-comment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--fg-accent);
+  color: var(--bg);
+  border: 2px solid var(--bg);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* left/top come from usePopoverPosition's clamped, viewport-aware
+   placement (inline style) — this just narrows the base popover's
+   percentage-based max-width, which would otherwise resolve against the
+   wrong containing block now that this renders as a host-level sibling
+   rather than nested inside the badge. */
+.ports-pick-popover.ports-comment-popover {
+  max-width: 280px;
+}
+
+.ports-comment-text {
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ports-pending-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  max-height: 45%;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar-header-bg);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.ports-pending-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.ports-pending-count {
+  flex: 1;
+  color: var(--fg);
+}
+
+.ports-pending-error {
+  padding: 0 10px 6px;
+  color: var(--error);
+  flex-shrink: 0;
+}
+
+.ports-pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 8px;
+  overflow: auto;
+}
+
+.ports-pending-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.ports-pending-selector {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-accent);
+  font-family: var(--terminal-font, monospace);
+}
+
+.ports-pending-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+}
+
+
+/* ---- Status-bar popover ---- */
+
+/* The host clamps and positions the panel; this only lays out its contents,
+   which are the panel's own rows plus a footer carrying the one command that
+   forwards everything. */
+.ports-status-popover {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 50vh;
+}
+
+.ports-status-popover .port-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ports-status-popover-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.ports-status-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--fg-inactive);
+}
+
+/* A port a connected tunnel reports having bound locally — clicking it opens
+   localhost directly rather than the proxy. */
+.port-forwarded-dot,
+.port-forwarded-icon {
+  color: var(--status-active-bg);
+}

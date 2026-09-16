@@ -1,0 +1,293 @@
+/* ---- JSON / YAML tree ---- */
+
+.json-host {
+  position: absolute;
+  inset: 0;
+}
+
+.json-host.hidden {
+  display: none;
+}
+
+.json-scroll {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: var(--bg);
+  padding: 16px 20px;
+}
+
+.json-status {
+  padding: 8px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.json-error {
+  color: var(--error);
+}
+
+.json-banner {
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.json-banner-error {
+  background: var(--panel-bg);
+  border: 1px solid var(--error);
+  color: var(--error);
+}
+
+.json-raw {
+  margin: 0;
+  color: var(--fg-inactive);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.json-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.json-search-input-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 320px;
+}
+
+.json-search-input {
+  width: 100%;
+  padding: 4px 24px 4px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.json-search-input:focus {
+  border-color: var(--focus-border);
+}
+
+.json-search-clear {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--fg-inactive);
+  cursor: pointer;
+}
+
+.json-search-clear .codicon {
+  font-size: 12px;
+}
+
+.json-search-clear:hover {
+  background: var(--hover);
+  color: var(--fg-bright);
+}
+
+.json-search-count {
+  color: var(--fg-inactive);
+  font-size: 11.5px;
+}
+
+.json-search-results {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+}
+
+.json-search-result {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.json-search-result:hover {
+  background: var(--hover);
+}
+
+.json-search-result-path {
+  flex-shrink: 0;
+  color: var(--fg-accent);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.json-search-result-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+}
+
+.json-search-result-action {
+  flex-shrink: 0;
+  color: var(--fg-inactive);
+  font-size: 10.5px;
+}
+
+.json-tree-wrap {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12.5px;
+}
+
+/* Theme hooks passed to react-json-view-lite's StyleProps — the library's
+   own imported index.css supplies the structural bits (expand/collapse
+   triangle glyphs, base spacing, cursor); these add color on top, against
+   this app's palette instead of the library's built-in light/dark presets. */
+.json-tree {
+  color: var(--fg-bright);
+}
+
+.json-tree-child {
+  margin: 1px 0 1px 6px;
+}
+
+.json-tree-children {
+  /* Total indent per nesting level is this margin + padding PLUS
+     .json-tree-child's own margin-left above (they compound, since each
+     child's margin is relative to this container's already-shifted content
+     box) — kept tight (16px/level total) rather than react-json-view-lite's
+     roomier default spacing. */
+  margin-left: 4px;
+  padding-left: 6px;
+  /* var(--border) is near-black — darker than .json-scroll's own --bg, so
+     it read as a mismatched void instead of a guide line. --fg-inactive is
+     lighter than the background and actually visible as a guide. */
+  border-left: 1px solid var(--fg-inactive);
+}
+
+.json-tree-label {
+  color: var(--fg-accent);
+}
+
+.json-tree-label-clickable {
+  /* react-json-view-lite's own preset themes (defaultStyles/darkStyles)
+     bundle a cursor:pointer base class alongside their color classes, but a
+     fully custom StyleProps object like this one replaces the className
+     outright — none of that comes along for free, so every interactive
+     hook here needs its own cursor/hover treatment. */
+  cursor: pointer;
+}
+
+.json-tree-label-clickable:hover {
+  text-decoration: underline;
+}
+
+/* Read-only by design (see the plan's decision — react-json-view-lite has
+   no editing API), but every leaf value is click-to-copy via delegation in
+   JsonView's handleTreeClick. */
+.json-tree-null,
+.json-tree-boolean,
+.json-tree-number,
+.json-tree-string,
+.json-tree-other {
+  padding: 0 2px;
+  margin: 0 -2px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.json-tree-null:hover,
+.json-tree-boolean:hover,
+.json-tree-number:hover,
+.json-tree-string:hover,
+.json-tree-other:hover {
+  background: var(--hover);
+}
+
+.json-tree-null,
+.json-tree-boolean {
+  color: #c586c0;
+}
+
+.json-tree-undefined {
+  color: var(--fg-inactive);
+}
+
+.json-tree-number {
+  color: #e2c08d;
+}
+
+.json-tree-string {
+  color: #73c991;
+}
+
+.json-tree-other {
+  color: var(--fg);
+}
+
+.json-tree-value-copied {
+  opacity: 0.4;
+}
+
+.json-tree-punctuation {
+  color: var(--fg-inactive);
+}
+
+.json-tree-expand-icon,
+.json-tree-collapse-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  border-radius: 2px;
+  color: var(--fg-inactive);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.json-tree-expand-icon::after {
+  content: "+";
+}
+
+.json-tree-collapse-icon::after {
+  content: "\2212";
+}
+
+.json-tree-expand-icon:hover,
+.json-tree-collapse-icon:hover {
+  color: var(--fg-bright);
+}
+
+.json-tree-collapsed {
+  color: var(--fg-inactive);
+}
+

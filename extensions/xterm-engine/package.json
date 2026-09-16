@@ -1,0 +1,22 @@
+{
+  "name": "xterm-engine",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "xterm.js Terminal Engine",
+  "description": "The xterm.js terminal rendering engine — the app's required rendering floor: always present, and the fallback whenever the selected engine is unavailable (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "terminalEngines": [{ "id": "xterm", "label": "xterm.js" }]
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/addon-webgl": "0.19.0",
+    "@xterm/xterm": "6.0.0"
+  },
+  "perch": {
+    "client": "./dist/client.js",
+    "required": true
+  }
+}

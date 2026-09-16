@@ -1,0 +1,38 @@
+{
+  "name": "touch-keys",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "Touch Keys",
+  "description": "On-screen touch key bar for mobile: customizable keys (Esc, Tab, arrows, sticky Ctrl, voice input, file upload) docked below the terminal or as a movable floating toggle, with a drag-and-drop layout editor in its settings (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "Touch Keys",
+      "properties": {
+        "touchKeys.show": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "always", "never"],
+          "enumItemLabels": ["Auto (mobile devices only)", "Always show", "Never show"],
+          "description": "When the on-screen key bar shows for a focused terminal."
+        },
+        "touchKeys.style": {
+          "type": "string",
+          "default": "bar",
+          "enum": ["bar", "floating"],
+          "enumItemLabels": ["Fixed bar", "Floating toggle"],
+          "description": "Docked bar below the terminal, or a movable AssistiveTouch-style toggle over it."
+        },
+        "touchKeys.keys": {
+          "type": "string",
+          "default": "",
+          "description": "The key layout, as JSON (edited with the layout editor below — empty means the default layout)."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js"
+  }
+}

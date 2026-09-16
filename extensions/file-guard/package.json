@@ -1,0 +1,27 @@
+{
+  "name": "file-guard",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "File Guard",
+  "description": "Built-in guard for FILES-tree clicks on binary or oversized files: opens an info tab with a Download button instead of dumping the bytes into the editor (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "File Guard",
+      "properties": {
+        "fileGuard.maxSizeMB": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 1024,
+          "description": "Files larger than this (MB) open as a download page instead of in the editor."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js",
+    "server": "./server.js"
+  }
+}

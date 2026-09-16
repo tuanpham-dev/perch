@@ -1,0 +1,93 @@
+/* ---- Agents panel ---- */
+/* Read-only subagent list popover (plans/subagent-activity-viewer.md),
+   opened from a session-list window row's agent-count badge — positioned
+   like .context-menu above (fixed, clamped to viewport), not a permanent
+   sidebar section. */
+
+.agents-panel {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.agents-panel-title {
+  padding: 2px 4px 6px;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agents-panel-empty {
+  padding: 4px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.agents-panel-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.agents-panel-row:hover,
+.agents-panel-row:focus-visible {
+  background: var(--list-hover-bg);
+  outline: none;
+}
+
+.agents-panel-row-chevron {
+  flex-shrink: 0;
+  align-self: center;
+  color: var(--fg-inactive);
+  font-size: 14px;
+}
+
+.agents-panel-status {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  min-width: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--fg-inactive);
+}
+
+.agents-panel-status-running {
+  background: var(--status-active-bg);
+}
+
+.agents-panel-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.agents-panel-row-desc {
+  overflow: hidden;
+  color: var(--fg-bright);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-panel-row-meta {
+  overflow: hidden;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

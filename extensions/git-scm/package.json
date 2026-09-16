@@ -1,0 +1,79 @@
+{
+  "name": "git-scm",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.2.2",
+  "displayName": "Git",
+  "description": "Built-in VS Code-style Source Control panel: stage, commit, amend, push/pull/fetch, branch switching, stash, an AI-written commit message, a COMMITS history pane, a status-bar branch readout, and diff view (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "Git",
+      "properties": {
+        "gitScm.pollInterval": {
+          "type": "integer",
+          "default": 3000,
+          "minimum": 0,
+          "maximum": 30000,
+          "description": "How often (ms) to poll the active directory's git status, kept running in the background so the sidebar badge stays current even when the SOURCE CONTROL panel isn't open. 0 disables polling — status only refreshes on the refresh button, active-directory change, and after an operation."
+        },
+        "gitScm.fetchInterval": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 3600000,
+          "description": "How often (ms) to run a non-interactive `git fetch` in the background so ahead/behind counts stay current without manually pulling. 0 (default) disables background fetch. A non-zero value below 60000 is treated as 60000. Never prompts for credentials — a repo whose remote needs auth just fails the fetch silently; use Pull or the More Actions menu's Fetch entry for an interactive attempt."
+        },
+        "gitScm.fileTreeDecorations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show git status badges and row colors in the FILES tree (the branch pill stays either way). Off skips the per-repo status scan — the expensive part on large repos."
+        },
+        "gitScm.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the current branch, a \"*\" when the working tree is dirty, and the ahead/behind counts in the status bar. The same switch sits in the gear menu's Status Bar list, and Settings → UI turns the bar itself on and off. Clicking the readout opens the SOURCE CONTROL panel. Costs no extra polling - it reads the same status the sidebar badge does."
+        },
+        "gitScm.clickAction": {
+          "type": "string",
+          "default": "diff",
+          "enum": [
+            "diff",
+            "edit"
+          ],
+          "enumItemLabels": [
+            "Open Diff",
+            "Open in Editor"
+          ],
+          "description": "What clicking a file in the SOURCE CONTROL panel opens. Shift+click always opens the other one."
+        },
+        "gitScm.sendAutoSubmit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Submit a diff comment's context block to the agent immediately. Off (default) types it into the pane for you to review before pressing Enter."
+        },
+        "gitScm.aiProfile": {
+          "type": "string",
+          "format": "ai-profile",
+          "default": "",
+          "description": "Which configured AI writes commit messages. \"App default\" follows Settings \u2192 AI's own default; pick another to give this one job a different (often cheaper or faster) model."
+        },
+        "gitScm.aiModel": {
+          "type": "string",
+          "format": "ai-model",
+          "default": "",
+          "description": "Model for commit messages. Empty uses whatever model the AI above is configured with."
+        },
+        "gitScm.aiCommitInstruction": {
+          "type": "string",
+          "default": "Write a git commit message for the staged changes below. Reply with ONLY the commit message - no preamble, no commentary, no code fences. First line: an imperative subject under 72 characters, capitalized, with no trailing period. If the change needs explaining, add a blank line and then a body of prose paragraphs wrapped at 76 characters that says what changed and why, not how. Describe only what the diff actually shows.",
+          "description": "The instruction sent to the AI when you press the sparkle button in the commit box. The staged diff, its file statistics, and recent commit subjects are appended to it. Which AI runs it is set in Settings → AI Providers, not here."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js",
+    "server": "./server.js"
+  }
+}

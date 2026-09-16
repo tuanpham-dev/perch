@@ -1,0 +1,212 @@
+/* ---- Snippets panel ---- */
+
+.snippets-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.snippets-list {
+  overflow-y: auto;
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+}
+
+.snippets-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  min-height: 24px;
+}
+
+.snippets-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.snippets-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.snippets-name {
+  flex-shrink: 0;
+  color: var(--fg-bright);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.snippets-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  opacity: 0.7;
+  font-family: var(--mono-font, monospace);
+  font-size: 11px;
+}
+
+.snippets-actions {
+  display: none;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.snippets-row:hover .snippets-actions,
+.snippets-row:focus-within .snippets-actions {
+  display: inline-flex;
+}
+
+.snippets-action,
+.snippets-header-action {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 1px;
+  color: var(--fg);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.snippets-action:hover,
+.snippets-header-action:hover {
+  background: var(--list-active-bg, var(--list-hover-bg));
+}
+
+.snippets-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--fg-dim, var(--fg));
+  opacity: 0.8;
+}
+
+/* ---- Dialogs ---- */
+
+.snippets-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.snippets-dialog {
+  width: min(440px, calc(100vw - 32px));
+  background: var(--panel-bg, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 12px 14px;
+}
+
+.snippets-dialog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-bright);
+  margin-bottom: 10px;
+}
+
+.snippets-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.snippets-input {
+  background: var(--input-bg, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: var(--mono-font, monospace);
+}
+
+.snippets-input:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.snippets-hint {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+
+.snippets-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.snippets-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.snippets-button {
+  background: var(--input-bg, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.snippets-button.primary {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border-color: var(--accent);
+}
+
+.snippets-picker {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.snippets-picker-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 5px 6px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.snippets-picker-row:hover {
+  background: var(--list-hover-bg);
+}

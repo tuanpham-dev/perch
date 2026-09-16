@@ -1,0 +1,695 @@
+/* ---- CSV spreadsheet ---- */
+
+.csv-host {
+  position: absolute;
+  inset: 0;
+}
+
+.csv-host.hidden {
+  display: none;
+}
+
+.csv-status {
+  padding: 24px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.csv-status-error {
+  color: var(--error);
+}
+
+.csv-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+
+.csv-dirty-dot {
+  width: 6px;
+  height: 6px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.csv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  /* Separates the toolbar from the tab bar above it — both are
+     --panel-bg, so without this they visually merge into one block. */
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-bg);
+  overflow-x: auto;
+}
+
+.csv-toolbar-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.csv-toolbar-spacer {
+  flex: 1;
+}
+
+.csv-status-text {
+  flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+  font-size: 11.5px;
+}
+
+.csv-toolbar-btn-active {
+  color: var(--fg-accent);
+  background: var(--hover);
+}
+
+.csv-text-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 7px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg-inactive);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.csv-text-button:hover {
+  background: var(--hover);
+  color: var(--fg-bright);
+}
+
+.csv-text-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.csv-text-button .codicon {
+  font-size: 13px;
+}
+
+.csv-header-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 4px;
+  color: var(--fg-inactive);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.csv-delimiter-select {
+  flex-shrink: 0;
+  padding: 2px 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 11.5px;
+}
+
+.csv-hidden-panel-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.csv-hidden-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg-inactive);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.csv-hidden-badge:hover {
+  background: var(--hover);
+}
+
+.csv-hidden-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 50;
+  min-width: 180px;
+  margin-top: 4px;
+  padding: 4px 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.csv-hidden-panel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.csv-hidden-panel-item:hover {
+  background: var(--list-hover-bg);
+}
+
+.csv-hidden-panel-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csv-find-bar {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+.csv-find-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  color: var(--fg-inactive);
+}
+
+.csv-replace-row {
+  border-top: 1px solid var(--border);
+}
+
+.csv-find-input {
+  flex: 1;
+  max-width: 260px;
+  padding: 3px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.csv-find-input:focus {
+  border-color: var(--focus-border);
+}
+
+.csv-find-input-error {
+  border-color: var(--error);
+}
+
+.csv-find-error {
+  flex-shrink: 0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--error);
+  font-size: 11px;
+}
+
+.csv-find-count {
+  flex-shrink: 0;
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+.csv-warning {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  color: #e2c08d;
+  font-size: 11.5px;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.csv-reload-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+
+.csv-reload-banner-text {
+  color: #e2c08d;
+}
+
+.csv-formula-bar {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.csv-formula-label {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 56px;
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  background: var(--panel-bg);
+  color: var(--fg-inactive);
+  font-size: 11px;
+  font-family: "IBM Plex Mono", monospace;
+  white-space: nowrap;
+}
+
+.csv-formula-input {
+  flex: 1;
+  min-height: 26px;
+  max-height: 160px;
+  padding: 5px 10px;
+  resize: none;
+  overflow: hidden;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-family: "IBM Plex Mono", monospace;
+  outline: none;
+}
+
+.csv-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-inactive);
+  font-size: 13px;
+}
+
+.csv-scroll {
+  flex: 1;
+  overflow: auto;
+  outline: none;
+}
+
+.csv-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  text-align: left;
+}
+
+.csv-thead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.csv-th {
+  position: relative;
+  height: 100%;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+/* Sticky elements must never rely solely on a translucent background —
+   --hover/--selection are designed as tints layered over an opaque parent,
+   so on a position:sticky element they let whatever scrolls underneath show
+   through instead of occluding it. */
+.csv-th-pinned {
+  position: sticky;
+  z-index: 15;
+  background: var(--input-bg);
+}
+
+.csv-th-selected {
+  background: var(--selection);
+}
+
+.csv-th-pinned.csv-th-selected {
+  background: var(--input-bg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.csv-th-rownum {
+  position: sticky;
+  left: 0;
+  z-index: 25;
+  text-align: center;
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+.csv-th-rownum-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.csv-th-rownum-button:hover {
+  color: var(--fg-bright);
+}
+
+.csv-th-add {
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+.csv-col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 5px;
+  height: 100%;
+  z-index: 30;
+  cursor: col-resize;
+}
+
+.csv-col-resize-handle:hover {
+  background: var(--accent);
+}
+
+.csv-header-cell {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  width: 100%;
+  padding-right: 2px;
+}
+
+.csv-header-cell-selected {
+  background: var(--selection);
+}
+
+.csv-header-label-button {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  background: none;
+  border: none;
+  color: var(--fg-bright);
+  cursor: pointer;
+  text-align: left;
+}
+
+.csv-header-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.csv-header-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  margin-left: 6px;
+  background: var(--input-bg);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+}
+
+.csv-header-sort,
+.csv-header-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--fg-inactive);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.csv-header-cell:hover .csv-header-sort,
+.csv-header-cell:hover .csv-header-delete {
+  opacity: 0.7;
+}
+
+.csv-header-sort .csv-sort-active {
+  opacity: 1;
+}
+
+.csv-header-sort:hover,
+.csv-header-delete:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+
+.csv-sort-active {
+  color: var(--fg-accent);
+}
+
+.csv-row:hover .csv-td {
+  background: var(--hover);
+}
+
+.csv-td {
+  position: relative;
+  padding: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.csv-td-pinned {
+  position: sticky;
+  z-index: 5;
+  background: var(--bg);
+}
+
+.csv-row:hover .csv-td-pinned {
+  /* Same sticky-transparency fix as .csv-th-pinned above — opaque, not the
+     translucent --hover tint the unpinned row-hover state uses. */
+  background: var(--panel-bg);
+}
+
+.csv-td-rownum {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+  text-align: center;
+}
+
+.csv-td-rownum-selected {
+  background: var(--selection);
+}
+
+.csv-rownum-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 100%;
+}
+
+.csv-rownum-button {
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.csv-rownum-button-selected {
+  color: var(--fg-accent);
+  font-weight: 600;
+}
+
+.csv-rownum-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--fg-inactive);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.csv-row:hover .csv-rownum-delete {
+  opacity: 0.7;
+}
+
+.csv-rownum-delete:hover {
+  opacity: 1;
+  color: var(--error);
+  background: var(--hover);
+}
+
+.csv-cell-wrap {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.csv-cell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: cell;
+  user-select: none;
+}
+
+.csv-cell-empty {
+  color: var(--fg-inactive);
+}
+
+.csv-cell-range {
+  background: var(--selection);
+}
+
+.csv-cell-anchor {
+  background: var(--selection);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  z-index: 1;
+}
+
+.csv-cell-fill {
+  background: var(--hover);
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+.csv-cell-find-match {
+  background: var(--hover);
+}
+
+.csv-cell-find-current {
+  box-shadow: inset 0 0 0 2px var(--button);
+  z-index: 1;
+}
+
+.csv-cell-input {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
+  padding: 0 7px;
+  background: var(--bg);
+  border: none;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--fg-bright);
+  font-size: 12.5px;
+}
+
+/* Word wrap: data rows grow to fit content instead of clipping at
+   ROW_HEIGHT (client.tsx drops the inline height when this is active, so
+   these just need to stop *forcing* a fixed height). Virtualization assumes
+   a fixed row height too, so it's disabled (visStart/visEnd in client.tsx)
+   whenever this class is active — every .csv-cell here is guaranteed to be
+   actually mounted, not just a virtualized placeholder. */
+.csv-wrap .csv-cell-wrap {
+  height: auto;
+  min-height: 100%;
+}
+
+.csv-wrap .csv-cell {
+  position: static;
+  align-items: flex-start;
+  padding: 6px 8px;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-overflow: clip;
+}
+
+.csv-wrap .csv-rownum-cell {
+  align-items: flex-start;
+  padding-top: 6px;
+}
+
+.csv-fill-handle {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  z-index: 20;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--bg);
+  border-radius: 1px;
+  background: var(--accent);
+  cursor: crosshair;
+}
+
+.csv-add-row-bar {
+  position: sticky;
+  left: 0;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.csv-hint-bar {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-bg);
+  color: var(--fg-inactive);
+  font-size: 10.5px;
+}
+

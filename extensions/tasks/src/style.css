@@ -1,0 +1,182 @@
+/* ---- Tasks panel ---- */
+
+.tasks-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.tasks-error {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--error);
+}
+
+.tasks-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.tasks-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.tasks-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: var(--fg-bright);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tasks-group-header:hover {
+  background: var(--list-hover-bg);
+}
+
+.tasks-group-header:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.tasks-group-name {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+/* The active package's group — the one containing the window's cwd. */
+.tasks-group-header.active .tasks-group-name {
+  color: var(--accent);
+}
+
+.tasks-group-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+.tasks-scripts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tasks-row {
+  display: flex;
+  align-items: center;
+  color: var(--fg-bright);
+}
+
+.tasks-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.tasks-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  /* Indented under the group header, reading as its child. */
+  padding: 4px 8px 4px 20px;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* A lone package has no header to sit under. */
+.tasks-scripts.flat .tasks-item {
+  padding-left: 8px;
+}
+
+.tasks-item:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* Always in the layout, transparent when idle, so a task starting doesn't
+   shift every row's text sideways. */
+.tasks-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.tasks-dot.running {
+  background: var(--git-added-fg, #73c991);
+  animation: tasks-dot-pulse 2s ease-in-out infinite;
+}
+
+@keyframes tasks-dot-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tasks-dot.running {
+    animation: none;
+  }
+}
+
+.tasks-name {
+  flex-shrink: 0;
+}
+
+.tasks-command {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+.tasks-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding-right: 6px;
+}
+
+.tasks-action-button {
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  visibility: hidden;
+}
+
+.tasks-row:hover .tasks-action-button,
+.tasks-item:focus-visible ~ .tasks-actions .tasks-action-button {
+  visibility: visible;
+}
+
+/* No hover on touch — keep the run action reachable without a hover state. */
+@media (hover: none) {
+  .tasks-action-button {
+    visibility: visible;
+  }
+}
+
+.tasks-empty {
+  padding: 6px 12px 6px 20px;
+  font-size: 12px;
+  color: var(--fg-inactive);
+}

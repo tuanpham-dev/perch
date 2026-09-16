@@ -1,0 +1,32 @@
+{
+  "name": "search",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "Search",
+  "description": "Built-in VS Code-style SEARCH panel: search and replace across all files in the active folder (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "Search",
+      "properties": {
+        "search.maxResults": {
+          "type": "integer",
+          "default": 2000,
+          "minimum": 100,
+          "maximum": 20000,
+          "description": "Maximum number of matches a single search returns before it's cut off."
+        },
+        "search.excludeGlobs": {
+          "type": "string",
+          "default": "node_modules,.git,dist,build",
+          "description": "Comma-separated list of directory/file globs excluded from search by default (in addition to whatever the 'files to exclude' box adds)."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js",
+    "server": "./server.js"
+  }
+}

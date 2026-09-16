@@ -1,0 +1,38 @@
+{
+  "name": "ports",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.2",
+  "displayName": "Ports",
+  "description": "Built-in PORTS explorer section: listening ports inside your terminals, with open-in-browser, copy-URL, tunnel-command, and kill-process actions (bundled — see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "contributes": {
+    "configuration": {
+      "title": "Ports",
+      "properties": {
+        "ports.clickAction": {
+          "type": "string",
+          "default": "app",
+          "enum": [
+            "app",
+            "browser"
+          ],
+          "enumDescriptions": [
+            "A port's Open action opens it in an app tab (iframe), staying inside perch.",
+            "A port's Open action opens it in a new browser tab."
+          ],
+          "description": "What a port row's Open action does. Both are always available from the row's context menu regardless of this setting."
+        },
+        "ports.sendAutoSubmit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Submit the port proxy viewer's queued comments to the agent immediately. Off (default) types it into the pane for you to review before pressing Enter."
+        }
+      }
+    }
+  },
+  "perch": {
+    "client": "./dist/client.js",
+    "server": "./server.js"
+  }
+}
