@@ -1,11 +1,19 @@
-// Shell integration (plans/warp-features.md Phase 1): a generated snippet the
-// user sources from their shell's startup file — shell-integration.sh for
-// zsh and bash, shell-integration.ps1 for PowerShell. Inside the app's
-// terminals it emits OSC 133 prompt marks (the app's prompt jumps) and OSC 7
-// (the working directory), and reports command start/end (command line, cwd,
-// exit code) to POST /api/command-events/report for the command-history UI
-// and finished-command notifications. Reports are fire-and-forget and never
+// Shell integration (plans/warp-features.md Phase 1): a generated snippet —
+// shell-integration.sh for zsh and bash, shell-integration.ps1 for
+// PowerShell. Inside the app's terminals it emits OSC 133 prompt marks (the
+// app's prompt jumps) and OSC 7 (the working directory), and reports command
+// start/end (command line, cwd, exit code) to POST
+// /api/command-events/report for the command-history UI and
+// finished-command notifications. Reports are fire-and-forget and never
 // block the prompt; with the server down they do nothing.
+//
+// The app's terminals source it without any rc edit, the way the shim
+// folder is put on PATH: zsh starts with ZDOTDIR pointing at the wrapper
+// directory written here (mux.ts's terminalEnv), whose rc files read the
+// user's own and then the snippet; bash starts with `--rcfile bash-init.sh`
+// and PowerShell with `-Command` dot-sourcing the .ps1 (the daemon's
+// shell-launch.ts). The source line the Settings card shows stays as the
+// manual route for any other setup.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -24,6 +32,12 @@ function shortHome(p: string): string {
 
 export const powershellIntegrationPath = path.join(configDir, "shell-integration.ps1");
 
+// The ZDOTDIR the app's zsh terminals start with, and the --rcfile its bash
+// terminals start with. The daemon finds bash-init.sh by this name
+// (mux/src/util/shell-launch.ts).
+export const zshDotDir = path.join(configDir, "zsh");
+export const bashInitPath = path.join(configDir, "bash-init.sh");
+
 const posixSourceLine = `[ -f ${shortHome(shellIntegrationPath)} ] && . ${shortHome(shellIntegrationPath)}`;
 const powershellSourceLine = `if (Test-Path '${powershellIntegrationPath}') { . '${powershellIntegrationPath}' }`;
 
@@ -39,7 +53,8 @@ export const shellIntegrationProfile = process.platform === "win32" ? "your Powe
 // sourcing with "unbound variable".
 function scriptBody(port: number): string {
   return `# Perch shell integration — written by Perch at startup; edits
-# are overwritten. Source it from your shell rc (zsh or bash):
+# are overwritten. The app's own zsh and bash terminals source it
+# automatically; for any other setup, source it from your shell rc:
 #   ${posixSourceLine}
 #
 # Inside Perch's terminals this emits OSC 133 prompt marks (for jumping
@@ -182,12 +197,71 @@ fi
 `;
 }
 
+const WRITTEN_BY = "# Perch shell integration — written by Perch at startup; edits are overwritten.";
+
+// A zsh startup file that reads the user's own copy with ZDOTDIR set to
+// where that copy lives (rc files refer to $ZDOTDIR themselves), then puts
+// ZDOTDIR back on this directory so zsh keeps reading the wrappers.
+// PERCH_USER_ZDOTDIR is the user's real ZDOTDIR: terminalEnv sets it when
+// the server started with one, and .zshenv updates it in case the user's
+// .zshenv is what sets ZDOTDIR (a common way to keep ~ clean).
+function zshWrapper(file: string, extra = ""): string {
+  return `${WRITTEN_BY}
+# Perch starts zsh with ZDOTDIR here so it can source the shell integration
+# after your own ${file}, read from your ZDOTDIR (or ~) as usual.
+_perch_zdotdir=$ZDOTDIR
+ZDOTDIR=\${PERCH_USER_ZDOTDIR:-$HOME}
+[ -f "$ZDOTDIR/${file}" ] && . "$ZDOTDIR/${file}"
+${extra}ZDOTDIR=$_perch_zdotdir
+unset _perch_zdotdir
+`;
+}
+
+export function zshWrapperFiles(): Record<string, string> {
+  return {
+    ".zshenv": zshWrapper(".zshenv", '[ "$ZDOTDIR" = "$HOME" ] || export PERCH_USER_ZDOTDIR=$ZDOTDIR\n'),
+    ".zprofile": zshWrapper(".zprofile"),
+    // The integration comes last, after the user's .zshrc and any prompt
+    // theme it sets up. ZDOTDIR is then left as the user had it (unset when
+    // they had none), so anything started from this shell sees their setup
+    // rather than Perch's — a nested zsh is plain, same as in VS Code.
+    ".zshrc": `${WRITTEN_BY}
+# Perch starts zsh with ZDOTDIR here so it can source the shell integration
+# after your own .zshrc, read from your ZDOTDIR (or ~) as usual.
+ZDOTDIR=\${PERCH_USER_ZDOTDIR:-$HOME}
+[ -f "$ZDOTDIR/.zshrc" ] && . "$ZDOTDIR/.zshrc"
+${posixSourceLine}
+if [ -n "\${PERCH_USER_ZDOTDIR-}" ]; then ZDOTDIR=$PERCH_USER_ZDOTDIR; else unset ZDOTDIR; fi
+`,
+    ".zlogin": zshWrapper(".zlogin"),
+  };
+}
+
+// `bash --rcfile FILE` reads FILE instead of both the system bashrc and
+// ~/.bashrc, so this one reads those first. The system file is where bash
+// was built to look: /etc/bash.bashrc on Debian-style Linux, /etc/bashrc on
+// macOS (Fedora's /etc/bashrc is sourced by its ~/.bashrc, not by bash).
+export function bashInitBody(platform: NodeJS.Platform = process.platform): string {
+  const systemRc = platform === "darwin" ? "/etc/bashrc" : "/etc/bash.bashrc";
+  return `${WRITTEN_BY}
+# Perch starts bash with --rcfile naming this file, which stands in for the
+# files bash reads on its own, so those come first, then the integration.
+[ -f ${systemRc} ] && . ${systemRc}
+[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+${posixSourceLine}
+`;
+}
+
 // Best-effort at boot, same contract as ensureOpenShim: a read-only config
-// dir just disables the feature (index.ts logs and continues).
+// dir just disables the feature (index.ts logs and continues). index.ts
+// waits for this before the engine starts, so a terminal opened right after
+// boot already finds the zsh wrappers ZDOTDIR points at.
 export async function ensureShellIntegration(port: number): Promise<string> {
-  await mkdir(configDir, { recursive: true });
+  await mkdir(zshDotDir, { recursive: true });
   await writeFile(shellIntegrationPath, scriptBody(port));
   await writeFile(powershellIntegrationPath, await powershellScriptBody(port));
+  for (const [name, body] of Object.entries(zshWrapperFiles())) await writeFile(path.join(zshDotDir, name), body);
+  if (process.platform !== "win32") await writeFile(bashInitPath, bashInitBody());
   return shellIntegrationPath;
 }
 

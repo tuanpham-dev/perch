@@ -68,10 +68,11 @@ function PushNotificationToggle() {
   );
 }
 
-// Install card for the shell-integration snippet (plans/warp-features.md):
-// shows the rc line to copy and whether the server has ever received a
-// report — the cheapest honest "is it working" signal, since the server
-// can't see inside the user's rc files.
+// Status card for the shell-integration snippet (plans/warp-features.md).
+// The app's zsh, bash and PowerShell terminals source it on their own
+// (server/src/shellIntegration.ts), so the card is a status line — whether
+// the server has ever received a report, the cheapest honest "is it
+// working" signal — with the rc line tucked away for any other shell setup.
 function ShellIntegrationCard() {
   const [status, setStatus] = useState<{ receivedAny: boolean; sourceLine: string; profile?: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -95,24 +96,30 @@ function ShellIntegrationCard() {
     <div className="settings-row">
       <span className="settings-label">
         Shell integration{" "}
-        {status.receivedAny ? (
-          <span className="settings-hint">- active</span>
-        ) : (
-          <span className="settings-hint">- no command reports received yet</span>
-        )}
+        <span className="settings-hint" style={{ display: "inline" }}>
+          {status.receivedAny ? "- active" : "- not seen yet, open a new terminal"}
+        </span>
       </span>
       <div className="settings-hint">
-        Enables jump-to-previous-command, command history, and finished-command notifications.
-        Add this line to {status.profile ?? "your ~/.zshrc or ~/.bashrc"}, then open a new shell:
+        Jump-to-previous-command, command history and finished-command notifications. Loaded automatically in
+        terminals running zsh, bash or PowerShell.
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <code style={{ flex: 1, overflowX: "auto", whiteSpace: "nowrap", userSelect: "all" }}>
-          {status.sourceLine}
-        </code>
-        <button type="button" className="dialog-button secondary" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
+      <details className="settings-details">
+        <summary className="settings-hint">Not picked up automatically?</summary>
+        <div className="settings-hint">
+          The automatic load covers the bundled terminal daemon. If a zsh, bash or PowerShell terminal misses it
+          (another backend such as tmux, a wrapper script as the shell, or a nested shell), add this line to{" "}
+          {status.profile ?? "your ~/.zshrc or ~/.bashrc"} and open a new terminal.
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <code style={{ flex: 1, overflowX: "auto", whiteSpace: "nowrap", userSelect: "all" }}>
+            {status.sourceLine}
+          </code>
+          <button type="button" className="dialog-button secondary" onClick={copy}>
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </details>
     </div>
   );
 }

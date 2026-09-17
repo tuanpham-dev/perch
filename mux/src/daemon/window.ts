@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BellDetector } from './bell.ts';
 import { spawnEnv } from '../util/spawn-env.ts';
+import { shellLaunchArgs } from '../util/shell-launch.ts';
 import { RawScrollback, RESET_PREFIX } from './raw-scrollback.ts';
 import type { ViewerColors } from '../protocol/messages.ts';
 import { platform } from '../platform/index.ts';
@@ -145,7 +146,7 @@ export class Window {
     } else {
       this.#answerQueries = true;
     }
-    this.#pty = nodePty.spawn(opts.shell, [], {
+    this.#pty = nodePty.spawn(opts.shell, shellLaunchArgs(opts.shell), {
       name: 'xterm-256color',
       cols: opts.cols,
       rows: opts.rows,
