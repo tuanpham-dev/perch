@@ -136,6 +136,8 @@ Clones to `%LOCALAPPDATA%\perch\app`, builds it, adds its `bin` folder to your u
 | `perch update` | Pull the latest code, reinstall, rebuild, and restart |
 | `perch doctor` | Check dependencies and install health, and troubleshoot problems |
 | `perch open [path]` | Open a folder or file in the app, like `code`/`code-server` — see below |
+| `perch ext <cmd>` | Install and manage extensions: `install`, `ls`, `uninstall`, `enable`, `disable` — see below |
+| `perch settings <cmd>` | `export` your settings to a shareable file, or `import` one — see below |
 | `perch ls` | List terminal sessions |
 | `perch attach <session>` | Attach this terminal to a session (`work`) or one window (`work:1`); detach with `Ctrl+\` twice |
 | `perch daemon status` / `stop` | The terminal daemon. Restarting or updating the server never touches it; `daemon stop` ends every terminal, and sessions come back the next time it starts |
@@ -160,6 +162,37 @@ perch start --port=8040 --app-name="Perch - Work"
 `perch open [path[:line]] [editor|preview]` opens a folder as a project, or a file in the editor — like `code`/`code-server`, but for every browser tab currently connected to that instance. With no path, opens the current directory; a bare `perch <path>` works the same as `perch open <path>`. A file's default action mirrors a click in the FILES panel (nvim, or its preview viewer when one applies); pass `editor` or `preview` as a second argument to force one or the other. Run from inside a terminal this app created (e.g. a `claude` session opened as a project), `open` targets that terminal's own instance automatically — otherwise it auto-detects the running instance, or asks which one if more than one is up (`--port <n>` skips that).
 
 If no browser tab is connected, `open` prints a link (`?folder=`/`?file=`) you can open manually instead — note that link carries no auth token, so on an `AUTH_TOKEN`-protected instance it only works in a browser that's already logged in.
+
+#### Extensions from the terminal
+
+`perch ext install <target>` installs an extension, where the target is a registry entry's id, a path to a local `.perch` file, or an `https` URL to one:
+
+```bash
+perch ext install perch.github          # from a configured registry
+perch ext install ./my-extension.perch  # from a file
+perch ext ls                            # id, version, state, and where each came from
+perch ext disable perch.github          # keeps it installed and its settings
+perch ext uninstall perch.github
+```
+
+An id is resolved against the registries this instance has configured; if two of them offer the same id, `ext install` says so and asks you to pass a file instead rather than guessing.
+
+These commands go through the running instance rather than writing `~/.config/perch` directly, so a newly installed extension's server hook starts working immediately with no restart. That does mean an instance has to be running (`perch start`), and on an `AUTH_TOKEN`-protected instance the CLI reads the token from `server/.env` or `$AUTH_TOKEN` — installing an extension runs its code as your user, so it stays behind the gate.
+
+#### Sharing settings
+
+`perch settings export` writes a bundle — preferences, keybindings, extension settings, the sidebar and status bar arrangement, registry sources, and the list of installed extensions with the registry each came from:
+
+```bash
+perch settings export my-setup.json     # or omit the file to write to stdout
+perch settings import my-setup.json     # prints what would change, changes nothing
+perch settings import my-setup.json --yes            # apply it and install its extensions
+perch settings import my-setup.json --no-extensions  # apply the settings only
+```
+
+A bundle never contains API keys, extension credentials, project paths or command usage stats, so it is safe to hand to someone else. Importing **merges** over what you have: a setting the bundle does not mention keeps its current value. With neither `--yes` nor `--no-extensions`, `import` only reports — a settings import is not something to do by accident inside a script.
+
+The same two actions are in the app under Settings, where the import shows a preview first and lists each extension with a checkbox. An extension with no recorded registry source (installed from a file, or before Perch tracked this) is listed but has to be installed by hand.
 
 ## Manual setup (from source)
 

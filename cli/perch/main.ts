@@ -6,7 +6,9 @@ import {
   cmdDisable, cmdEnable, cmdInstances, cmdLogs, cmdPath, cmdRestart, cmdRun, cmdStart, cmdStatus, cmdStop, cmdUpdate, daemonCli,
 } from './commands.ts';
 import { cmdDoctor } from './doctor.ts';
+import { cmdExt } from './extensions.ts';
 import { cmdOpen } from './open.ts';
+import { cmdSettings } from './settings.ts';
 import { Exit, fail, info } from './output.ts';
 
 const HELP = `perch - manage a Perch install
@@ -30,6 +32,10 @@ Commands:
   open       Open a folder or file in the app, like \`code\`/\`code-server\`
              (see: perch open --help); a bare \`perch <path>\`
              does the same
+  ext        Install and manage extensions: install, ls, uninstall,
+             enable, disable (see: perch ext --help)
+  settings   Export settings to a shareable file, or import one
+             (see: perch settings --help)
   ls         List terminal sessions
   attach     Attach this terminal to a session or window (e.g. perch attach work)
   daemon     Terminal daemon: status, start, stop (stopping ends every terminal;
@@ -52,6 +58,8 @@ async function main(argv: string[]): Promise<void> {
     case 'update': return cmdUpdate();
     case 'doctor': return cmdDoctor();
     case 'open': return cmdOpen(rest);
+    case 'ext': return cmdExt(rest);
+    case 'settings': return cmdSettings(rest);
     case 'path': return cmdPath();
     case 'ls':
     case 'attach':
