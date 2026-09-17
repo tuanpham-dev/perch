@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_STATUS_BAR_LAYOUT,
   moveStatusBarItem,
+  parseStatusBarLayout,
   resolveStatusBarLayout,
   sideOfItem,
   toggleStatusBarItemHidden,
@@ -134,5 +135,35 @@ describe("moveStatusBarItem", () => {
       "core.memory",
       "ext.ports",
     ]);
+  });
+});
+
+describe("parseStatusBarLayout", () => {
+  it("round-trips a stored layout", () => {
+    const stored = { left: ["ext.git"], right: ["core.terminals"], hidden: ["ext.ports"] };
+    expect(parseStatusBarLayout(stored)).toEqual(stored);
+  });
+
+  it("rejects anything that is not a plain object", () => {
+    expect(parseStatusBarLayout(null)).toBeNull();
+    expect(parseStatusBarLayout("left")).toBeNull();
+    expect(parseStatusBarLayout(["ext.git"])).toBeNull();
+    expect(parseStatusBarLayout(undefined)).toBeNull();
+  });
+
+  // Null, not an empty layout: the caller has to be able to tell "never
+  // arranged" (keep my defaults) from "arranged into nothing".
+  it("returns null when there is nothing to restore", () => {
+    expect(parseStatusBarLayout({})).toBeNull();
+    expect(parseStatusBarLayout({ left: [], right: [], hidden: [] })).toBeNull();
+  });
+
+  it("drops entries that are not non-empty strings", () => {
+    const parsed = parseStatusBarLayout({
+      left: ["ext.git", 7, null, "", { id: "x" }],
+      right: "core.terminals",
+      hidden: [true, "ext.ports"],
+    });
+    expect(parsed).toEqual({ left: ["ext.git"], right: [], hidden: ["ext.ports"] });
   });
 });

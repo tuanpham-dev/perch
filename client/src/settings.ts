@@ -1,4 +1,6 @@
 import { migrateKeybindingOverrides, type KeybindingOverrides } from "./keybindings";
+import { parsePanelState, parseSidebarLayout, type PanelState, type StoredSidebarLayout } from "./lib/sidebarLayout";
+import { parseStatusBarLayout, type StatusBarLayout } from "./lib/statusBarLayout";
 import type { Project } from "./types";
 
 // The API kinds core implements itself, plus - for a CLI - the id of an agent
@@ -666,41 +668,38 @@ export function saveCommandUsage(usage: CommandUsage): void {
   localStorage.setItem(COMMAND_USAGE_KEY, JSON.stringify(usage));
 }
 
-// The sidebars' arrangement (lib/sidebarLayout.ts): which tabs sit on which
-// side, and any section the user moved into another tab. Active tabs are
-// deliberately NOT part of this — which view you were last looking at is
-// per-device. Empty means "no cross-device preference yet", in which case
-// useSidebarLayout's own local state (including its bundled defaults) stays
-// authoritative rather than this overwriting it with nothing. Lives outside
-// AppSettings, like projects above, so a settings reset can't wipe a drag
-// the user made.
-export interface StoredSidebarLayout {
-  left: string[];
-  right: string[];
-  panelHome: Record<string, string>;
-}
+// The three arrangement keys, all persisted the same way: localStorage for
+// the instant first render, and the server settings document for the
+// cross-device copy (see hooks/useSettingsSync.ts, which owns the sync).
+// Each lives outside AppSettings, like projects above, so "Reset Settings to
+// Defaults" can't wipe an arrangement the user made by hand.
+//
+// The parsers themselves live in lib/ with their pure models, because
+// client/vitest.config.ts runs a node environment and covers pure logic only
+// — a parser sitting next to a localStorage call can't be tested. They are
+// re-exported here so callers can keep importing them from one place.
+export {
+  parsePanelState,
+  parseSidebarLayout,
+  type PanelState,
+  type StoredSidebarLayout,
+} from "./lib/sidebarLayout";
+export { parseStatusBarLayout, type StatusBarLayout } from "./lib/statusBarLayout";
 
 const SIDEBAR_LAYOUT_KEY = "sidebarLayoutSync";
+const STATUS_BAR_LAYOUT_KEY = "statusBarLayout";
+const SIDEBAR_PANELS_KEY = "sidebarPanels";
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((s): s is string => typeof s === "string" && s !== "") : [];
 }
 
-export function parseSidebarLayout(value: unknown): StoredSidebarLayout | null {
-  if (!value || typeof value !== "object") return null;
-  const v = value as Record<string, unknown>;
-  const left = asStringArray(v.left);
-  const right = asStringArray(v.right);
-  if (left.length === 0 && right.length === 0) return null;
-  const panelHome: Record<string, string> = {};
-  if (v.panelHome && typeof v.panelHome === "object") {
-    for (const [k, tab] of Object.entries(v.panelHome as Record<string, unknown>)) {
-      if (typeof tab === "string") panelHome[k] = tab;
-    }
-  }
-  return { left, right, panelHome };
-}
-
+// Which tabs sit on which side, any section the user moved into another tab,
+// and which panes they hid. Active tabs are deliberately NOT part of this —
+// which view you were last looking at is per-device. Null means "no
+// cross-device preference yet", in which case useSidebarLayout's own local
+// state (including its bundled defaults) stays authoritative rather than
+// this overwriting it with nothing.
 export function loadSidebarLayout(): StoredSidebarLayout | null {
   try {
     const stored = parseSidebarLayout(JSON.parse(localStorage.getItem(SIDEBAR_LAYOUT_KEY) ?? "null"));
@@ -708,7 +707,7 @@ export function loadSidebarLayout(): StoredSidebarLayout | null {
     // Pre-right-sidebar builds synced a bare tab order; read it once so a
     // device that only ever knew that key still restores its arrangement.
     const legacy = asStringArray(JSON.parse(localStorage.getItem(SIDEBAR_TABS_ORDER_KEY) ?? "[]"));
-    return legacy.length > 0 ? { left: legacy, right: [], panelHome: {} } : null;
+    return legacy.length > 0 ? { left: legacy, right: [], panelHome: {}, hiddenPanels: [] } : null;
   } catch {
     return null;
   }
@@ -716,4 +715,35 @@ export function loadSidebarLayout(): StoredSidebarLayout | null {
 
 export function saveSidebarLayout(layout: StoredSidebarLayout): void {
   localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(layout));
+}
+
+// The status bar's arrangement: which widgets sit in which group, in what
+// order, and which the user switched off. Null on a device that has never
+// arranged it, same contract as loadSidebarLayout above.
+export function loadStatusBarLayout(): StatusBarLayout | null {
+  try {
+    return parseStatusBarLayout(JSON.parse(localStorage.getItem(STATUS_BAR_LAYOUT_KEY) ?? "null"));
+  } catch {
+    return null;
+  }
+}
+
+export function saveStatusBarLayout(layout: StatusBarLayout): void {
+  localStorage.setItem(STATUS_BAR_LAYOUT_KEY, JSON.stringify(layout));
+}
+
+// The sidebar accordion's arrangement: pane order, which are collapsed, and
+// how the expanded ones share the height. Named *Stored to keep it distinct
+// from useSidebarLayout's own loadPanelState, which reads the same key and
+// then applies that hook's legacy-id rewrites and one-shot migrations on top.
+export function loadPanelStateStored(): PanelState | null {
+  try {
+    return parsePanelState(JSON.parse(localStorage.getItem(SIDEBAR_PANELS_KEY) ?? "null"));
+  } catch {
+    return null;
+  }
+}
+
+export function savePanelStateStored(state: PanelState): void {
+  localStorage.setItem(SIDEBAR_PANELS_KEY, JSON.stringify(state));
 }

@@ -3046,6 +3046,131 @@ body.scrollbar-dragging {
   border-top: 1px solid var(--border);
 }
 
+/* Export/Import sit on their own row above the reset button, so the
+   destructive action keeps a line to itself. Wraps on a phone. */
+.settings-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* The settings-import file input, rendered at the app root. Visually gone but
+   NOT display:none: a display:none input cannot be opened by every browser,
+   and it could not take focus. Pushed off-screen instead. */
+.settings-file-input {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.settings-share-error {
+  margin-bottom: 8px;
+  color: var(--error);
+  font-size: 12px;
+}
+
+/* ---- Import Settings preview ----
+   Reuses .dialog/.dialog-overlay; only the body between the title and the
+   buttons is its own. Wider than the default dialog because every row pairs a
+   name with a right-aligned count or reason. */
+.import-dialog {
+  width: 620px;
+  /* The base .dialog carries min-width: 400px, which overflows a phone —
+     cleared here and capped to the viewport, the same guard .dialog-pick
+     needs for the same reason. */
+  min-width: 0;
+  max-width: calc(100vw - 32px);
+}
+
+.import-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.import-head {
+  margin: 14px 0 6px;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.import-head:first-child {
+  margin-top: 0;
+}
+
+.import-note {
+  color: var(--fg);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.import-error {
+  color: var(--error);
+  font-size: 13px;
+  /* Server messages name a path or a version, so let them wrap rather than
+     widening the dialog. */
+  overflow-wrap: anywhere;
+}
+
+.import-group {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.import-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--fg-bright);
+}
+
+.import-row + .import-row {
+  border-top: 1px solid var(--border);
+}
+
+.import-row-ext {
+  cursor: pointer;
+}
+
+.import-row-ext.disabled {
+  cursor: default;
+  color: var(--fg-inactive);
+}
+
+.import-row-ext input {
+  /* Baseline alignment puts a checkbox a little high next to text. */
+  align-self: center;
+  margin: 0;
+}
+
+.import-row-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.import-row-count {
+  margin-left: auto;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-row-detail {
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--fg-inactive);
+  font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .settings-build {
   margin-top: 10px;
   font-size: 11px;
