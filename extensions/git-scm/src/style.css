@@ -331,18 +331,10 @@
   min-height: 28px;
   box-sizing: border-box;
   cursor: pointer;
-  /* Matches client/src's .file-tree-row font-size. */
+  /* Matches client/src's .file-tree-row font-size and font: both trees
+     inherit the app's UI stack, so they read as one visual system. */
   font-size: 13.5px;
-  /* client/src's .file-tree-row is a <button>, and the app has no global
-     `button { font-family: inherit }` reset, so it renders in the
-     browser's native form-control font (Arial on this stack) instead of
-     the app's system-ui/Ubuntu/Droid-Sans UI stack every other panel
-     inherits. .git-row is a <div> (see the no-native-<button> comment
-     below), so it inherits the UI stack correctly by default — this
-     explicit override intentionally matches FILES tree's actual rendered
-     look rather than "fixing" it, since that reset lives outside this
-     extension's scope. */
-  font-family: Arial, sans-serif;
+  font-family: inherit;
   /* A div, not a native <button> (see FileRow's own comment on why) — a
      Shift+click range-select gesture otherwise triggers the browser's
      native text-selection-extend instead of just the row's click handler,
