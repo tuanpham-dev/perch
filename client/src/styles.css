@@ -1803,6 +1803,12 @@ body.resizing-row {
   padding: 0 6px;
 }
 
+/* Nothing portaled in: no padding either, or it shows as a gap right of the
+   window-action buttons beside it. */
+.tab-bar-actions:empty {
+  padding: 0;
+}
+
 /* Extension window-action buttons (e.g. "Preview Claude session") for the
    bar's own active tab — see App.tsx's tabExtrasFor. Sits left of
    .tab-bar-actions; unlike the SESSIONS-row equivalent (.window-action-button,
@@ -1813,7 +1819,7 @@ body.resizing-row {
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
-  padding: 0 4px;
+  padding: 0 6px;
 }
 
 .tab-bar-window-action {
@@ -1822,7 +1828,7 @@ body.resizing-row {
   justify-content: center;
   background: none;
   border: none;
-  color: var(--fg-inactive);
+  color: var(--fg);
   line-height: 1;
   width: 24px;
   height: 24px;
