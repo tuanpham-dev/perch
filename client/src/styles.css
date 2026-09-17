@@ -94,6 +94,19 @@ body {
   overflow: hidden;
 }
 
+/* Native form controls don't inherit the page font: browsers give buttons,
+   inputs, selects and textareas their own form-control font (Arial on this
+   stack), which used to leave sidebar tabs, tree folder rows, settings
+   navigation and dialog controls in a different face from the text around
+   them. Element-level, so a class rule (the terminal's helper textarea, a
+   monospace input) still wins. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 /* ---- Scrollbars (VS Code style) ---- */
 
 * {
