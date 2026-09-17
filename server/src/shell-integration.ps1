@@ -1,6 +1,7 @@
 # Perch shell integration for PowerShell - written by Perch at
-# startup; edits are overwritten. Add this line to your PowerShell profile
-# (the file $PROFILE names), then open a new terminal:
+# startup; edits are overwritten. The app's own PowerShell terminals load it
+# automatically; for any other setup, add this line to your PowerShell
+# profile (the file $PROFILE names), then open a new terminal:
 #   __SOURCE_LINE__
 #
 # Inside Perch's terminals this marks prompts (OSC 133, for jumping

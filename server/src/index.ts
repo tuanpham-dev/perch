@@ -349,6 +349,13 @@ server.listen(PORT, HOST, () => {
 // The terminal daemon: tell it which server its shells report to, and turn
 // its bells into push notifications. A bell is keyed "session:index", the
 // address a notification opens.
+// Shell-integration snippet (OSC 133 marks + command reports — see
+// server/src/shellIntegration.ts), plus the zsh wrappers terminalEnv points
+// ZDOTDIR at, so they exist before the engine's first terminal. Same
+// contract as the shims below: failure only disables the feature.
+await ensureShellIntegration(PORT).catch((err) => {
+  console.error("failed to write shell integration:", err);
+});
 // The engine chosen in Settings -> Terminal, before anything asks for a
 // terminal; an engine an extension provides registers when hooks load below.
 const backend = readSettingSync("terminalBackend");
@@ -389,12 +396,6 @@ ensureClipboardShims().catch((err) => {
 // never the server.
 ensureAgentHookShim(PORT).catch((err) => {
   console.error("failed to write agent-hook shim:", err);
-});
-// Shell-integration snippet (OSC 133 marks + command reports — see
-// server/src/shellIntegration.ts). Same contract: failure only disables the
-// feature.
-ensureShellIntegration(PORT).catch((err) => {
-  console.error("failed to write shell integration:", err);
 });
 // Finished-command notifications (plans/warp-features.md Phase 2): every
 // shell-integration end event checks the user's threshold. The 1s floor

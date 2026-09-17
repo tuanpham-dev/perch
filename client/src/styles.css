@@ -3364,6 +3364,19 @@ body.scrollbar-dragging {
   margin-bottom: 0;
 }
 
+/* A folded-away detail under a settings row (the shell-integration card's
+   manual source line): the summary reads as a hint until opened. */
+.settings-details {
+  margin-top: 4px;
+}
+.settings-details > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.settings-details[open] > summary {
+  margin-bottom: 4px;
+}
+
 /* A hint that's actually a problem — a key that failed to save, a CLI
    provider that isn't installed. Same size and position as a plain hint;
    only the color says "this needs attention" rather than "small print".

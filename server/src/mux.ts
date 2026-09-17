@@ -10,7 +10,10 @@ import { connectOrSpawn, tryConnect, type ClientConn } from "perch-mux/client";
 import { setConfigKey, unsetConfigKey } from "perch-mux/config";
 import type { SessionInfo, WindowInfo } from "perch-mux/protocol";
 import type { AttachHandle, AttachHandlers, Multiplexer, MuxEvent, MuxSession, MuxWindow, ViewerColors } from "./multiplexer.js";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { openShimPath, shimBinDir } from "./openUrl.js";
+import { zshDotDir } from "./shellIntegration.js";
 import { spawnEnv } from "./spawnEnv.js";
 
 let serverPort = Number(process.env.PORT ?? 3001);
@@ -26,9 +29,24 @@ function daemonEnv(): NodeJS.ProcessEnv {
 // What any engine's new terminals get so they can reach this server: the
 // browser opener, the port, and the shim folder first on PATH so the
 // clipboard and xdg-open shims stand in for tools a headless host lacks.
+// zsh also gets the shell integration this way: ZDOTDIR names the wrapper
+// directory ensureShellIntegration writes, whose rc files read the user's
+// own (from PERCH_USER_ZDOTDIR, or ~) and then the snippet. Only when the
+// wrappers exist — zsh pointed at an empty ZDOTDIR would skip the user's rc
+// files entirely.
 export function terminalEnv(port: number): Record<string, string> {
   const env: Record<string, string> = { BROWSER: openShimPath, PERCH_PORT: String(port) };
-  if (process.platform !== "win32") env.PATH = withShimsFirst(process.env.PATH);
+  if (process.platform !== "win32") {
+    env.PATH = withShimsFirst(process.env.PATH);
+    Object.assign(env, zshEnv(process.env.ZDOTDIR, zshDotDir, existsSync(path.join(zshDotDir, ".zshrc"))));
+  }
+  return env;
+}
+
+export function zshEnv(userZdotdir: string | undefined, wrapperDir: string, wrappersExist: boolean): Record<string, string> {
+  if (!wrappersExist) return {};
+  const env: Record<string, string> = { ZDOTDIR: wrapperDir };
+  if (userZdotdir && userZdotdir !== wrapperDir) env.PERCH_USER_ZDOTDIR = userZdotdir;
   return env;
 }
 
