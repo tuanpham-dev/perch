@@ -53,6 +53,10 @@ export interface FileViewerHostProps {
   // Reports dirty/clean transitions so closing the tab can confirm before
   // discarding unsaved edits (CsvView's editable grid).
   setDirty?: (dirty: boolean) => void;
+  // Renames this tab in place, without activating it or remounting the
+  // viewer (re-calling ctx.app.openViewerTab does both). For a viewer whose
+  // title carries live state, such as a waiting marker.
+  setTitle?: (title: string) => void;
   // Bumped each time an explicit open/preview action re-targets this
   // already-open tab (FILES-tree click or "Preview", terminal link, quick
   // switcher, ctx.app.openViewerTab) — see Tab.extViewerReloadKey. A viewer
@@ -167,8 +171,10 @@ export interface RegisteredWindowAction {
   id: string;
   extensionId: string;
   // Codicon name for the row button (same Icon component the built-in
-  // window-kill-button uses).
-  icon: string;
+  // window-kill-button uses), or a function of the row's context returning
+  // one, evaluated on every render so an action can show state. Render
+  // through resolveWindowActionIcon.
+  icon: string | ((ctx: WindowActionContext) => string);
   title: string;
   // Re-evaluated by Sidebar.tsx on every window row render (the session
   // list already polls every ~3s — see useSessions.ts — so this is
@@ -352,12 +358,12 @@ export interface ExtensionContext {
   // command. Generic: not tied to any particular command or extension.
   registerWindowAction(action: {
     id: string;
-    icon: string;
+    icon: string | ((ctx: WindowActionContext) => string);
     title: string;
     isVisible: (ctx: WindowActionContext) => boolean;
     onClick: (ctx: WindowActionContext) => void;
     showInTabBar?: boolean;
-  }): void;
+  }): { refresh(): void };
   // Contributes an item to the FILES-tree context menu for a file or
   // directory row, appended after the built-in items behind a separator.
   // See RegisteredFileMenuItem.
@@ -528,7 +534,7 @@ export interface ExtensionContext {
     // without createCwd, a missing session surfaces an error to the user.
     // Session-name collisions surface the backend's own "duplicate session" error —
     // pick the name accordingly.
-    openSessionWindow(sessionName: string, opts?: { createCwd?: string }): void;
+    openSessionWindow(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void;
     // Kills a session and closes its tabs, including the synthetic
     // per-window attachments that killing the session behind the app's back would leave behind.
     // Deliberately runs no confirmation of its own (unlike the sidebar's own
@@ -978,6 +984,18 @@ export const extensionFileViewers: RegisteredFileViewer[] = [];
 export const extensionFileOpenInterceptors: RegisteredFileOpenInterceptor[] = [];
 export const extensionSidebarPanels: RegisteredSidebarPanel[] = [];
 export const extensionWindowActions: RegisteredWindowAction[] = [];
+
+// A window action's icon for one row. A throwing icon function falls back to
+// a neutral glyph rather than taking the row down with it.
+export function resolveWindowActionIcon(action: RegisteredWindowAction, ctx: WindowActionContext): string {
+  if (typeof action.icon === "string") return action.icon;
+  try {
+    const name = action.icon(ctx);
+    return typeof name === "string" && name ? name : "extensions";
+  } catch {
+    return "extensions";
+  }
+}
 export const extensionFileMenuItems: RegisteredFileMenuItem[] = [];
 export const extensionTabGroupMenuItems: RegisteredTabGroupMenuItem[] = [];
 export const extensionSidebarTabs: RegisteredSidebarTab[] = [];
@@ -1253,14 +1271,14 @@ export function setCloseViewerTabHandler(handler: (namespacedViewerId: string, p
 }
 
 let openSessionWindowHandler:
-  | ((sessionName: string, createCwd?: string) => void)
+  | ((sessionName: string, createCwd?: string, windowIndex?: number) => void)
   | null = null;
 
 // Wired once from App.tsx to the same create-then-open-a-window-tab path the
 // sidebar's pinned-session restore uses — see
 // ExtensionContext.app.openSessionWindow.
 export function setOpenSessionWindowHandler(
-  handler: (sessionName: string, createCwd?: string) => void,
+  handler: (sessionName: string, createCwd?: string, windowIndex?: number) => void,
 ): void {
   openSessionWindowHandler = handler;
 }
@@ -1663,6 +1681,9 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         showInTabBar: action.showInTabBar ?? false,
       });
       notify();
+      // Re-renders the rows so isVisible and a function icon are evaluated
+      // again, for an action whose state changes between session polls.
+      return { refresh: notify };
     },
     registerFileMenuItem(item) {
       extensionFileMenuItems.push({
@@ -1897,7 +1918,7 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         revealSidebarPanelById(namespaced);
       },
       openSessionWindow(sessionName, opts) {
-        openSessionWindowHandler?.(sessionName, opts?.createCwd);
+        openSessionWindowHandler?.(sessionName, opts?.createCwd, opts?.windowIndex);
       },
       killSession(sessionName) {
         killSessionHandler?.(sessionName);

@@ -17,6 +17,7 @@ import { findTerminalPort, listTerminalPorts } from "./ports.js";
 import { expandHome } from "./files.js";
 import {
   createSession,
+  captureWindow,
   createWindow,
   invalidateSessionsCache,
   killSession,
@@ -28,6 +29,7 @@ import {
   type SessionPane,
   type TerminalSession,
 } from "./terminals.js";
+import { notifyExtension } from "./push.js";
 import { createWorktree, listWorktrees, removeWorktree, type WorktreeListing } from "./gitWorktrees.js";
 import { listAiProfiles, runAi, type AiProfileSummary, type AiRunOptions } from "./ai.js";
 import {
@@ -735,6 +737,17 @@ export interface ExtensionHostApi {
     // One entry per window (a window is one terminal), with its stable window
     // id as `id` and what's running in it as `command`.
     listPanes(session: string): Promise<SessionPane[]>;
+    // The window's screen as plain text: its visible rows, plus
+    // `opts.scrollback` history lines above them. One string per row joined
+    // with "\n", trailing blank rows dropped. Rejects when the window is gone
+    // or the terminal backend cannot read screens.
+    capture(windowId: string, opts?: { scrollback?: number }): Promise<string>;
+  };
+  // Web push to every browser that subscribed in Settings (push.ts). Rate
+  // limited per window: a second push for the same window within a few
+  // seconds is dropped. Resolves quietly when no browser ever subscribed.
+  notifications: {
+    push(notification: { title: string; body: string; windowId: string }): Promise<void>;
   };
   // git worktrees (gitWorktrees.ts), the functions behind core's
   // /api/git/worktrees routes. `cwd`/`path` may be `~`-shortened and are
@@ -866,6 +879,10 @@ function makeHostApi(id: string): ExtensionHostApi {
         }
       },
       listPanes: (session) => listSessionPanes(session),
+      capture: (windowId, opts) => captureWindow(windowId, opts?.scrollback ?? 0),
+    },
+    notifications: {
+      push: ({ title, body, windowId }) => notifyExtension(String(windowId), String(title), String(body)),
     },
     worktrees: {
       list: (dir, opts) => listWorktrees(expandHome(dir), opts),

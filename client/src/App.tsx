@@ -34,6 +34,7 @@ import {
   setKillSessionHandler,
   setDialogHandlers,
   setOpenSessionWindowHandler,
+  resolveWindowActionIcon,
   useExtensionRegistry,
 } from "./extensions";
 import { useDialogs } from "./hooks/useDialogs";
@@ -850,7 +851,7 @@ export default function App() {
                 action.onClick(ctx);
               }}
             >
-              <Icon name={action.icon} />
+              <Icon name={resolveWindowActionIcon(action, ctx)} />
             </button>
           ))}
         </>
@@ -1229,7 +1230,7 @@ export default function App() {
   // useFileOpeners. Both route through the same hooks the sidebar's own menu
   // items use, so an extension can't diverge from core's tab bookkeeping.
   useEffect(() => {
-    setOpenSessionWindowHandler((sessionName, createCwd) => {
+    setOpenSessionWindowHandler((sessionName, createCwd, windowIndex) => {
       void (async () => {
         // Queried fresh rather than read off `sessions`: an extension
         // typically calls this immediately after creating the worktree/dir
@@ -1244,7 +1245,10 @@ export default function App() {
           return;
         }
         if (existing) {
-          const activeIndex = existing.windows.find((w) => w.active)?.index;
+          // A requested window that still exists wins over the active one.
+          const requested =
+            windowIndex !== undefined ? existing.windows.find((w) => w.index === windowIndex)?.index : undefined;
+          const activeIndex = requested ?? existing.windows.find((w) => w.active)?.index;
           await refresh();
           if (activeIndex !== undefined) await openWindowTab(sessionName, activeIndex);
           return;
@@ -2209,6 +2213,13 @@ export default function App() {
                   setDirty={(dirty) => {
                     if (dirty) dirtyTabsRef.current.add(tab.id);
                     else dirtyTabsRef.current.delete(tab.id);
+                  }}
+                  setTitle={(title) => {
+                    setTabs((prev) =>
+                      prev.some((t) => t.id === tab.id && t.extViewerTitle !== title)
+                        ? prev.map((t) => (t.id === tab.id ? { ...t, extViewerTitle: title } : t))
+                        : prev,
+                    );
                   }}
                 />
               );

@@ -1814,7 +1814,6 @@ body.resizing-row {
   gap: 2px;
   flex-shrink: 0;
   padding: 0 4px;
-  border-left: 1px solid var(--tab-border);
 }
 
 .tab-bar-window-action {

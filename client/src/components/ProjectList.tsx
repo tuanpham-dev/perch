@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { getContextGetter } from "../contextKeys";
-import { getWindowDecorations, useExtensionRegistryVersion } from "../extensions";
+import { getWindowDecorations, resolveWindowActionIcon, useExtensionRegistryVersion } from "../extensions";
 import type { RegisteredWindowAction } from "../extensions";
 import { useDismissOnOutsidePress } from "../hooks/useDismissOnOutsidePress";
 import { useGitRootDirs } from "../hooks/useGitRootDir";
@@ -879,7 +879,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
                 action.onClick(ctx);
               }}
             >
-              <Icon name={action.icon} />
+              <Icon name={resolveWindowActionIcon(action, ctx)} />
             </button>
           ))}
         <button

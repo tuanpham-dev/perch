@@ -113,6 +113,11 @@ export interface Multiplexer {
   clearRestored(target: string): Promise<void>;
   // Raw bytes into the window's terminal, exactly as if typed.
   sendText(target: string, data: string): Promise<void>;
+  // Plain text of the window's visible rows plus its last `scrollback`
+  // history lines, one line per row, trailing blank rows dropped. Optional so
+  // an engine registered before this existed still loads; callers treat a
+  // missing capture as "this backend cannot read screens".
+  capture?(target: string, scrollback?: number): Promise<string>;
   // `pinned` attaches to exactly that window; otherwise to the target's
   // session, following its current window.
   attach(
@@ -263,6 +268,11 @@ const engine: Multiplexer = {
   resetWindowName: (target) => ready.then(() => active.resetWindowName(target)),
   clearRestored: (target) => ready.then(() => active.clearRestored(target)),
   sendText: (target, data) => ready.then(() => active.sendText(target, data)),
+  capture: (target, scrollback) =>
+    ready.then(() => {
+      if (!active.capture) throw new Error("the terminal backend cannot read window screens");
+      return active.capture(target, scrollback);
+    }),
   attach: (target, opts, handlers) => ready.then(() => active.attach(target, opts, handlers)),
   onEvent: (listener) => {
     eventListeners.add(listener);
