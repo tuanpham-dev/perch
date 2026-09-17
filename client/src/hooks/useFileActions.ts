@@ -386,10 +386,6 @@ export function useFileActions(
     [createFileInDir, createFolderInDir, pickAndUpload, pasteIntoDir],
   );
 
-  const handleFilesRefresh = useCallback(() => {
-    setFilesRefreshKey((k) => k + 1);
-  }, [setFilesRefreshKey]);
-
   const findInFolder = useCallback((entryPath: string, rootDir: string) => {
     const rel = entryPath.startsWith(rootDir + "/")
       ? entryPath.slice(rootDir.length + 1)
@@ -539,7 +535,6 @@ export function useFileActions(
     fsClipboard,
     handleUpload,
     handleFileTreeDrop,
-    handleFilesRefresh,
     renameFileEntry,
     deleteFileEntry,
     deleteFileEntries,

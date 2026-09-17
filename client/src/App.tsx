@@ -1726,7 +1726,6 @@ export default function App() {
     fsClipboard,
     handleUpload,
     handleFileTreeDrop,
-    handleFilesRefresh,
     fileTreeRootMenuItems,
     fileMenuItems,
     fileMultiMenuItems,
@@ -2054,7 +2053,6 @@ export default function App() {
     onFilesRootModeChange={setFilesRootMode}
     onDropFiles={handleFileTreeDrop}
     filesRefreshKey={filesRefreshKey}
-    onFilesRefresh={handleFilesRefresh}
     onOpenFile={openFileOrViewer}
     onPreviewFile={openPreviewViewerTab}
     onEditFile={openFileInEditor}
@@ -2364,7 +2362,6 @@ export default function App() {
     onFilesRootModeChange={setFilesRootMode}
     onDropFiles={handleFileTreeDrop}
     filesRefreshKey={filesRefreshKey}
-    onFilesRefresh={handleFilesRefresh}
     onOpenFile={openFileOrViewer}
     onPreviewFile={openPreviewViewerTab}
     onEditFile={openFileInEditor}

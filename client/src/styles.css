@@ -623,15 +623,6 @@ body.sidebar-tab-dragging .sidebar-drop-edge:hover {
   gap: 2px;
 }
 
-.mode-button {
-  color: var(--fg-inactive);
-}
-
-.mode-button.active {
-  color: var(--list-active-fg);
-  background: var(--list-active-bg);
-}
-
 .sidebar-topbar {
   flex-shrink: 0;
   display: flex;

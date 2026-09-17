@@ -201,6 +201,11 @@ interface StatusResponse {
   lastCommitMessage?: string | null;
   // Drives the More Actions menu's "Pop Latest Stash" enabled state.
   stashCount?: number;
+  // HEAD's hash and the newest stash entry's hash: the status poll watches
+  // them so COMMITS and STASH follow commits and stashes made in a
+  // terminal, not only ones made from this panel (see setSharedStatus).
+  head?: string | null;
+  stashHead?: string | null;
 }
 
 const STATUS_LABEL: Record<FileStatus, string> = {
@@ -676,10 +681,26 @@ function updateBadge(status: StatusResponse | null) {
   setSidebarBadge?.("git", count > 0 ? count : null);
 }
 
+// What the last status said about history and stashes, so a poll tick can
+// tell a commit or stash made outside the panel (in a terminal, by an
+// agent) from one it already knows about. Compared within one repo only:
+// a repo switch is the panes' own business.
+let seenHistory: { root: string; head: string | null; stashHead: string | null; stashCount: number } | null = null;
+
 function setSharedStatus(next: StatusResponse | null) {
   currentStatus = next;
   updateBadge(next);
   statusListeners.forEach((cb) => cb(next));
+  if (!next?.root) {
+    seenHistory = null;
+    return;
+  }
+  const now = { root: next.root, head: next.head ?? null, stashHead: next.stashHead ?? null, stashCount: next.stashCount ?? 0 };
+  if (seenHistory && seenHistory.root === now.root) {
+    if (seenHistory.head !== now.head) refreshCommits();
+    if (seenHistory.stashHead !== now.stashHead || seenHistory.stashCount !== now.stashCount) refreshStashes();
+  }
+  seenHistory = now;
 }
 
 async function fetchStatus(cwd: string) {
@@ -786,9 +807,9 @@ async function fetchCommits(root: string, limit: number) {
   }
 }
 
-// Called after any mutating operation (commit, pull, discard…). A no-op
-// until the pane has fetched once, so a user who never opens COMMITS never
-// pays for a `git log` on every stage.
+// Called after any mutating operation (commit, pull, discard…) and by the
+// status poll when HEAD moves. A no-op until the pane has fetched once, so
+// a user who never opens COMMITS never pays for a `git log` on every stage.
 function refreshCommits() {
   if (commitsState.root) fetchCommits(commitsState.root, commitsState.limit);
 }
@@ -840,9 +861,10 @@ async function fetchStashes(root: string) {
 }
 
 // Called after any mutating operation, like refreshCommits — a stash push
-// or pop from the panel's More Actions menu changes this list too. A no-op
-// until the pane has fetched once, so a user who never opens STASH never
-// pays for a `git stash list`.
+// or pop from the panel's More Actions menu changes this list too — and by
+// the status poll when the stash ref moves. A no-op until the pane has
+// fetched once, so a user who never opens STASH never pays for a
+// `git stash list`.
 function refreshStashes() {
   if (stashesState.root) fetchStashes(stashesState.root);
 }
@@ -1269,10 +1291,6 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
     return () => {
       fetchErrorListeners.delete(setError);
     };
-  }, []);
-
-  const refresh = useCallback(() => {
-    refreshStatus();
   }, []);
 
   const afterMutate = useCallback(async () => {
@@ -1958,20 +1976,17 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
         <Icon name="git-branch" />
         <span className="git-branch-button-name">{status.branch ?? "detached HEAD"}</span>
       </button>
-      <button
-        className={`icon-button mode-button${viewMode === "list" ? " active" : ""}`}
-        title="View as List"
-        onClick={() => changeViewMode("list")}
-      >
-        <Icon name="list-flat" />
-      </button>
-      <button
-        className={`icon-button mode-button${viewMode === "tree" ? " active" : ""}`}
-        title="View as Tree"
-        onClick={() => changeViewMode("tree")}
-      >
-        <Icon name="list-tree" />
-      </button>
+      {/* One toggle for the two layouts, showing the one a click switches
+          to - VS Code's convention for this control. */}
+      {viewMode === "list" ? (
+        <button className="icon-button" title="View as Tree" onClick={() => changeViewMode("tree")}>
+          <Icon name="list-tree" />
+        </button>
+      ) : (
+        <button className="icon-button" title="View as List" onClick={() => changeViewMode("list")}>
+          <Icon name="list-flat" />
+        </button>
+      )}
       <button
         className="git-sync-button"
         disabled={busy}
@@ -1995,9 +2010,6 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
             )}
           </span>
         )}
-      </button>
-      <button className="icon-button" title="Refresh" disabled={busy} onClick={refresh}>
-        <Icon name="refresh" />
       </button>
       <button
         className="icon-button"
@@ -2523,7 +2535,7 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
 // module-level COMMITS store above, and owns nothing else — which is why
 // unmounting it, as the host does whenever the pane is collapsed, costs
 // nothing.
-function CommitsPanel({ actionsTarget }: PanelProps) {
+function CommitsPanel(_props: PanelProps) {
   const status = useSharedStatus();
   const [{ commits, limit, loading, root: loadedRoot }, setState] = useState<CommitsState>(
     () => commitsState,
@@ -2557,20 +2569,10 @@ function CommitsPanel({ actionsTarget }: PanelProps) {
   // `git rev-list @{u}..HEAD` call per /log fetch.
   const unpushedCount = status?.upstream ? (status.ahead ?? 0) : 0;
 
-  const headerActions = (
-    <button
-      className="icon-button"
-      title="Refresh commits"
-      disabled={loading || !root}
-      onClick={() => refreshCommits()}
-    >
-      <Icon name="refresh" />
-    </button>
-  );
-
+  // No header refresh: the list follows the status poll (HEAD moving
+  // reloads it) and the panel's own operations.
   return (
     <div className="git-panel git-commits-panel">
-      {actionsTarget && createPortal(headerActions, actionsTarget)}
       {!root ? (
         <div className="git-empty">Not a git repository.</div>
       ) : commits.length === 0 ? (
@@ -2653,25 +2655,17 @@ function StashPanel({ actionsTarget }: PanelProps) {
   const stashAll = (includeUntracked: boolean) =>
     runOp(() => apiPost("/stash", { cwd: root, includeUntracked }));
 
+  // Stash All only: the list follows the status poll (the stash ref moving
+  // reloads it) and the pane's own Apply/Pop/Drop.
   const headerActions = (
-    <>
-      <button
-        className="icon-button"
-        title="Stash All Changes"
-        disabled={busy || !root}
-        onClick={() => stashAll(false)}
-      >
-        <Icon name="archive" />
-      </button>
-      <button
-        className="icon-button"
-        title="Refresh stashes"
-        disabled={loading || !root}
-        onClick={() => refreshStashes()}
-      >
-        <Icon name="refresh" />
-      </button>
-    </>
+    <button
+      className="icon-button"
+      title="Stash All Changes"
+      disabled={busy || !root}
+      onClick={() => stashAll(false)}
+    >
+      <Icon name="archive" />
+    </button>
   );
 
   return (
