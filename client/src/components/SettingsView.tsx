@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import * as api from "../api";
 import { extensionSettingsComponents, useExtensionRegistryVersion } from "../extensions";
 import { DEFAULT_SETTINGS, type AppSettings, type ExtensionSettingsValues } from "../settings";
 import type { ExtensionInfo } from "../types";
@@ -25,6 +26,19 @@ interface Props {
   // shortcut twice in a row (with no navigation in between) still re-fires.
   pendingFocusExtensionId?: string | null;
   onFocusExtensionHandled?: () => void;
+  // Hands the picked bundle to App, which renders the preview dialog at the
+  // app root beside every other dialog. It cannot be rendered from here: this
+  // view lives inside a .split-content-host, whose `z-index: 0` makes it a
+  // stacking context and whose overflow is hidden, so a dialog mounted in it
+  // is trapped in the tab's own layer instead of sitting over the app.
+  // App owns the file input, the parsing and the preview dialog; this view
+  // only asks for the picker and renders whatever went wrong. The dialog has
+  // to live at the app root like every other dialog (a tab's content sits in
+  // a .split-content-host, a stacking context with hidden overflow), so the
+  // parsed bundle's state belongs there too - and the input and its parse are
+  // kept beside it rather than split across two owners.
+  onRequestImport: () => void;
+  importError: string | null;
 }
 
 // `ext:<id>` is a dynamic nav entry for one extension's declared
@@ -56,8 +70,33 @@ export default function SettingsView({
   onExtensionSettingsChange,
   pendingFocusExtensionId,
   onFocusExtensionHandled,
+  onRequestImport,
+  importError,
 }: Props) {
   const [section, setSection] = useState<Section>("terminal");
+  // Shown in the footer rather than a toast: an export or a file that isn't
+  // JSON fails right where the button that started it is.
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  // The server builds the bundle, so an export is one fetch plus a download.
+  // The object URL is revoked once the click has been dispatched; keeping it
+  // alive would pin the whole bundle in memory for the life of the page.
+  const exportSettings = async () => {
+    setShareError(null);
+    try {
+      const bundle = await api.fetchSettingsBundle();
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "perch-settings.json";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
     onSettingsChange({ ...settings, [key]: value });
@@ -153,6 +192,21 @@ export default function SettingsView({
               .map((c) => <c.component key={c.id} />)}
 
           <div className="settings-footer">
+            {!activeExtension && (
+              <>
+                <div className="settings-footer-row">
+                  <button className="dialog-button secondary" onClick={exportSettings}>
+                    Export Settings…
+                  </button>
+                  <button className="dialog-button secondary" onClick={onRequestImport}>
+                    Import Settings…
+                  </button>
+                </div>
+                {(shareError ?? importError) && (
+                  <div className="settings-share-error">{shareError ?? importError}</div>
+                )}
+              </>
+            )}
             {activeExtension ? (
               <button
                 className="dialog-button secondary"

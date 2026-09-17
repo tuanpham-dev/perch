@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { extensionStatusBarItems, useExtensionRegistryVersion } from "../extensions";
+import { loadStatusBarLayout, saveStatusBarLayout } from "../settings";
 import {
   EMPTY_STATUS_BAR_LAYOUT,
   MANAGE_ITEM_ID,
@@ -21,27 +30,15 @@ import type { ExtensionInfo, MenuItem } from "../types";
 // what it's handed, the same split useSidebarLayout uses for the Panes list.
 //
 // Two kinds of switch, because an extension may already have one. Without a
-// visibilitySetting the app keeps the id in layout.hidden (per device, beside
-// the drag order). With one, that setting is the single source of truth and
-// the app writes it — so Git's "show the branch" setting and its row in the
-// list can never disagree.
-
-const LAYOUT_KEY = "statusBarLayout";
-
-function loadLayout(): StatusBarLayout {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "null");
-    if (parsed && typeof parsed === "object") {
-      const ids = (value: unknown) =>
-        Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
-      return { left: ids(parsed.left), right: ids(parsed.right), hidden: ids(parsed.hidden) };
-    }
-  } catch {
-    // Fall through to the empty layout — every item then takes its default
-    // group and registration order.
-  }
-  return EMPTY_STATUS_BAR_LAYOUT;
-}
+// visibilitySetting the app keeps the id in layout.hidden, beside the drag
+// order, and both travel between devices through the settings document. With
+// one, that setting is the single source of truth and the app writes it — so
+// Git's "show the branch" setting and its row in the list can never disagree.
+//
+// Storage is split the way useSidebarLayout splits it: localStorage renders
+// instantly (settings.ts owns those accessors), and the cross-device copy
+// arrives as `syncedLayout` from useSettingsSync, which also receives every
+// deliberate change back through `onLayoutChange`.
 
 // One row of the show/hide list.
 export interface StatusBarEntry {
@@ -57,6 +54,11 @@ interface Options {
   extensionSettings: ExtensionSettingsValues;
   setExtensionSettings: Dispatch<SetStateAction<ExtensionSettingsValues>>;
   mobilePointer: boolean;
+  // The cross-device arrangement, or null on a device that has never synced
+  // one — applied once when it first arrives, never re-applied, so it can't
+  // fight a later local drag (same contract as useSidebarLayout's).
+  syncedLayout: StatusBarLayout | null;
+  onLayoutChange: (layout: StatusBarLayout) => void;
 }
 
 export function useStatusBarLayout({
@@ -64,12 +66,50 @@ export function useStatusBarLayout({
   extensionSettings,
   setExtensionSettings,
   mobilePointer,
+  syncedLayout,
+  onLayoutChange,
 }: Options) {
-  const [layout, setLayout] = useState<StatusBarLayout>(loadLayout);
+  const [layout, setLayout] = useState<StatusBarLayout>(
+    () => loadStatusBarLayout() ?? EMPTY_STATUS_BAR_LAYOUT,
+  );
 
   useEffect(() => {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+    saveStatusBarLayout(layout);
   }, [layout]);
+
+  // Applied once, the first time a synced layout arrives.
+  const appliedSyncedRef = useRef(false);
+  useEffect(() => {
+    if (appliedSyncedRef.current || !syncedLayout) return;
+    appliedSyncedRef.current = true;
+    setLayout(syncedLayout);
+  }, [syncedLayout]);
+
+  // Every write goes through here, so there is one place that pushes to the
+  // settings document. Two writers reach it: the hidden toggle below, and the
+  // drag in StatusBar.tsx, which calls this as its `setLayout` prop. Both are
+  // deliberate user actions, so this pushes unconditionally — unlike
+  // useSidebarLayout, whose panel state is also written by an append-only
+  // reconciliation that runs on every load and must never be pushed.
+  //
+  // The updater is resolved against a ref rather than inside setLayout's own
+  // updater, because a state updater can run twice under StrictMode and
+  // onLayoutChange is a side effect (the same hazard useBottomPanel documents
+  // for its detach calls). moveStatusBarItem and toggleStatusBarItemHidden
+  // both return the previous object for a no-op, so identity is a sound test
+  // for "nothing to push".
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const onLayoutChangeRef = useRef(onLayoutChange);
+  onLayoutChangeRef.current = onLayoutChange;
+  const applyLayout = useCallback((update: SetStateAction<StatusBarLayout>) => {
+    const prev = layoutRef.current;
+    const next = typeof update === "function" ? update(prev) : update;
+    if (next === prev) return;
+    layoutRef.current = next;
+    setLayout(next);
+    onLayoutChangeRef.current(next);
+  }, []);
 
   // The registry is mutable state outside React, so this version is what
   // re-reads it when an extension registers an item or goes away.
@@ -117,17 +157,17 @@ export function useStatusBarLayout({
         toggle: () =>
           setting
             ? setExtensionFlag(item.extensionId, setting, !visible)
-            : setLayout((prev) => toggleStatusBarItemHidden(prev, item.id)),
+            : applyLayout((prev) => toggleStatusBarItemHidden(prev, item.id)),
       };
     });
     rows.push({
       id: TERMINALS_ITEM_ID,
       label: "Terminals",
       visible: !layout.hidden.includes(TERMINALS_ITEM_ID),
-      toggle: () => setLayout((prev) => toggleStatusBarItemHidden(prev, TERMINALS_ITEM_ID)),
+      toggle: () => applyLayout((prev) => toggleStatusBarItemHidden(prev, TERMINALS_ITEM_ID)),
     });
     return rows.sort((a, b) => a.label.localeCompare(b.label));
-  }, [extItems, extensions, extensionSettings, layout.hidden, setExtensionFlag]);
+  }, [extItems, extensions, extensionSettings, layout.hidden, setExtensionFlag, applyLayout]);
 
   // What the bar actually renders. A switched-off item is simply not a slot,
   // which is what keeps its stored position untouched while it's away.
@@ -148,5 +188,5 @@ export function useStatusBarLayout({
     [entries],
   );
 
-  return { layout, setLayout, visibleSlots, menuItems };
+  return { layout, setLayout: applyLayout, visibleSlots, menuItems };
 }

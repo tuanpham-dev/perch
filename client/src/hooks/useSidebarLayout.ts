@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import {
   flushPendingTabReveals,
   setSidebarLayoutBridge,
@@ -21,7 +21,10 @@ import {
   togglePanelHidden,
   sideOfTab,
   visibleTabsForSide,
+  parsePanelState,
   type PanelLike,
+  type StoredSidebarLayout,
+  type PanelState,
   type SidebarLayout,
   type SidebarSide,
   type TabEnv,
@@ -44,14 +47,9 @@ import {
 // "is this one of the built-ins".
 export type PanelId = string;
 
-export interface PanelState {
-  order: PanelId[];
-  collapsed: Record<PanelId, boolean>;
-  // Relative flex-grow weights for expanded panels. Values are seeded from
-  // measured pixel heights on resize, but any positive number works — flex
-  // only cares about the ratio between siblings, not the absolute value.
-  sizes: Record<PanelId, number>;
-}
+// Lives in lib/sidebarLayout.ts with the rest of the pure model (and its
+// parser); re-exported here so every existing importer is unaffected.
+export type { PanelState };
 
 const PANEL_IDS: PanelId[] = ["projects", "files"];
 export const MIN_PANEL_HEIGHT = 60;
@@ -103,14 +101,12 @@ function loadPanelState(): PanelState {
   try {
     const parsed = JSON.parse(localStorage.getItem(PANELS_KEY) ?? "null");
     if (!parsed || typeof parsed !== "object") return { ...DEFAULT_PANEL_STATE };
-    // Any string id is accepted here so an id from before extension panels
-    // moved out of the accordion into their own tab survives a reload — it's
-    // simply excluded at render time (see visibleOrder) since its extension
-    // isn't registered as an explorer section.
-    const order: PanelId[] =
-      Array.isArray(parsed.order) && parsed.order.every((id: unknown) => typeof id === "string")
-        ? [...(parsed.order as PanelId[])]
-        : [...DEFAULT_PANEL_STATE.order];
+    // parsePanelState does the shape validation (any string id is accepted,
+    // so an id from before extension panels moved out of the accordion into
+    // their own tab survives a reload — it's simply excluded at render time,
+    // see visibleOrder). The legacy-id rewrites and one-shot migrations below
+    // are this hook's own business and stay here.
+    const order: PanelId[] = [...(parsePanelState(parsed)?.order ?? DEFAULT_PANEL_STATE.order)];
     // The sunset SESSIONS pane's id rewrites to "projects" BEFORE the
     // missing-id backfill below — otherwise the backfill would append a
     // second "projects" at the end and the stored slot would be lost.
@@ -180,17 +176,14 @@ function loadPanelState(): PanelState {
   }
 }
 
-// Cross-device slice of the layout: what the user has deliberately
-// arranged. Active tabs stay local (which view you were last looking at is
-// per-device), same split the older sidebarTabsOrder key used.
-export interface SyncedSidebarLayout {
-  left: string[];
-  right: string[];
-  panelHome: Record<string, string>;
-  // Which panes the user hid — an arrangement decision like the others, so
-  // it travels with them.
-  hiddenPanels?: string[];
-}
+// The cross-device slice of the layout is StoredSidebarLayout in
+// lib/sidebarLayout.ts, beside the parser that reads it. This name is kept as
+// an alias because it reads better at the call sites below, which are about
+// syncing rather than storing. It used to be a separate interface whose
+// hiddenPanels was optional; one shape with one optionality is what stops the
+// field being written on one side and dropped on the other, which is exactly
+// the bug this key had.
+export type SyncedSidebarLayout = StoredSidebarLayout;
 
 const LAYOUT_KEY = "sidebarLayout";
 // Replaced by LAYOUT_KEY. Read once for the migration below so an existing
@@ -248,12 +241,45 @@ export function useSidebarLayout(
   extensionsSettled: boolean,
   syncedLayout: SyncedSidebarLayout | null,
   onLayoutChange: (layout: SyncedSidebarLayout) => void,
+  syncedPanels: PanelState | null,
+  onPanelStateChange: (state: PanelState) => void,
   sidebarVisible: Record<SidebarSide, boolean>,
   setSidebarVisible: (side: SidebarSide, visible: boolean) => void,
 ) {
   const [layout, setLayout] = useState<SidebarLayout>(loadLayout);
-  const [panelState, setPanelState] = useState<PanelState>(loadPanelState);
+  // setPanelStateRaw is deliberately not handed out: the reconciliation
+  // effect below is the one writer that must NOT reach the settings document
+  // (it appends on every load), so it keeps the raw setter while every
+  // outside caller gets the pushing funnel returned as `setPanelState`.
+  const [panelState, setPanelStateRaw] = useState<PanelState>(loadPanelState);
   const [tabDrag, setTabDrag] = useState<TabDragState | null>(null);
+
+  // Same funnel, and the same StrictMode reasoning, as
+  // useStatusBarLayout's applyLayout: resolve the updater against a ref
+  // rather than inside the state updater, because onPanelStateChange is a
+  // side effect and an updater can run twice.
+  const panelStateRef = useRef(panelState);
+  panelStateRef.current = panelState;
+  const onPanelStateChangeRef = useRef(onPanelStateChange);
+  onPanelStateChangeRef.current = onPanelStateChange;
+  const setPanelState = useCallback((update: SetStateAction<PanelState>) => {
+    const prev = panelStateRef.current;
+    const next = typeof update === "function" ? update(prev) : update;
+    if (next === prev) return;
+    panelStateRef.current = next;
+    setPanelStateRaw(next);
+    onPanelStateChangeRef.current(next);
+  }, []);
+
+  // Applied once, the first time a synced arrangement arrives — never
+  // re-applied, so it can't fight a later local drag. Uses the raw setter:
+  // echoing the document's own value straight back to it is pointless.
+  const appliedSyncedPanelsRef = useRef(false);
+  useEffect(() => {
+    if (appliedSyncedPanelsRef.current || !syncedPanels) return;
+    appliedSyncedPanelsRef.current = true;
+    setPanelStateRaw(syncedPanels);
+  }, [syncedPanels]);
 
   // Every section that can appear in a tab: the two built-in Explorer
   // sections plus every registered extension panel, whatever its location —
@@ -300,7 +326,7 @@ export function useSidebarLayout(
       if (added.length === 0) return prev;
       return { ...prev, left: [...prev.left, ...added.map((p) => p.id)] };
     });
-    setPanelState((prev) => {
+    setPanelStateRaw((prev) => {
       const order = [...prev.order];
       // Tab panels join the order too, now that any of them can be moved
       // into an accordion — sectionsForTab filters by home, so an id sitting
@@ -339,8 +365,8 @@ export function useSidebarLayout(
         left: syncedLayout.left,
         right: syncedLayout.right,
         active: prev.active,
-        panelHome: syncedLayout.panelHome ?? {},
-        hiddenPanels: syncedLayout.hiddenPanels ?? prev.hiddenPanels,
+        panelHome: syncedLayout.panelHome,
+        hiddenPanels: syncedLayout.hiddenPanels,
       }),
     );
   }, [syncedLayout]);
@@ -355,6 +381,11 @@ export function useSidebarLayout(
   useEffect(() => {
     localStorage.setItem(PANELS_KEY, JSON.stringify(panelState));
   }, [panelState]);
+
+  // PANEL_MIGRATIONS_KEY stays local on purpose: it records what THIS device
+  // has already migrated. A document-sourced order arriving from another
+  // device must not re-trigger a one-shot reorder here — that would fight a
+  // user who has since dragged the sections back.
 
   // Only a deliberate arrangement is pushed to the settings doc — never the
   // reconciliation above, whose appends happen on every load.

@@ -8,6 +8,7 @@ import ExtensionPageView from "./components/ExtensionPageView";
 import Icon from "./components/Icon";
 import KeyboardShortcutsView from "./components/KeyboardShortcutsView";
 import QuickSwitcher, { type PaletteCommand } from "./components/QuickSwitcher";
+import ImportSettingsDialog from "./components/settings/ImportSettingsDialog";
 import SettingsView from "./components/SettingsView";
 import Sidebar from "./components/Sidebar";
 import SplitLayout from "./components/SplitLayout";
@@ -307,6 +308,41 @@ export default function App() {
   // opens a panel terminal in the picked project instead).
   const [folderPickerMode, setFolderPickerMode] = useState<null | "project" | "panelTerminal">(null);
 
+  // The settings bundle waiting on its import preview. Held here, and
+  // rendered at the app root below beside every other dialog, because
+  // SettingsView lives inside a .split-content-host - a stacking context with
+  // hidden overflow, which would trap the dialog in that tab's own layer.
+  const [importBundle, setImportBundle] = useState<api.SettingsBundle | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  // The settings import's file input, beside the dialog and the bundle state
+  // it feeds. At the app root rather than in the settings tab because a tab's
+  // content is unmounted whenever its measured rect is missing (see
+  // `if (!rect) return null` below), and a file input must outlive its own
+  // picker. Rendered off-screen rather than display:none, since a
+  // display:none input cannot be opened programmatically in every browser.
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  // Parsed here so a file that is not JSON at all fails before any dialog
+  // opens. Whether it is a *bundle* is the server's call, reported inside the
+  // dialog itself.
+  const pickImportFile = useCallback(async (file: File) => {
+    setImportError(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      setImportError(`${file.name} is not a JSON file.`);
+      return;
+    }
+    // Valid JSON can still be null, a number or an array, and a falsy value
+    // would open no dialog and report nothing - a dead-end click.
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      setImportError(`${file.name} does not contain a settings bundle.`);
+      return;
+    }
+    setImportBundle(parsed as api.SettingsBundle);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("sidebarVisible", String(sidebarVisible));
   }, [sidebarVisible]);
@@ -556,6 +592,10 @@ export default function App() {
     setExtensionRegistries,
     sidebarLayout: syncedSidebarLayout,
     setSidebarLayout: setSyncedSidebarLayout,
+    statusBarLayout: syncedStatusBarLayout,
+    setStatusBarLayout: setSyncedStatusBarLayout,
+    sidebarPanels: syncedSidebarPanels,
+    setSidebarPanels: setSyncedSidebarPanels,
   } = useSettingsSync(extCommands);
 
   // Both sidebars' tabs, their per-side order, and which tab each section
@@ -581,6 +621,8 @@ export default function App() {
     extensionsSettled,
     syncedSidebarLayout,
     setSyncedSidebarLayout,
+    syncedSidebarPanels,
+    setSyncedSidebarPanels,
     sidebarVisibility,
     setSidebarSideVisible,
   );
@@ -627,7 +669,14 @@ export default function App() {
     setLayout: setStatusBarLayout,
     visibleSlots: statusBarSlots,
     menuItems: statusBarMenuItems,
-  } = useStatusBarLayout({ extensions, extensionSettings, setExtensionSettings, mobilePointer });
+  } = useStatusBarLayout({
+    extensions,
+    extensionSettings,
+    setExtensionSettings,
+    mobilePointer,
+    syncedLayout: syncedStatusBarLayout,
+    onLayoutChange: setSyncedStatusBarLayout,
+  });
 
   // Extension registry catalog (server/src/registry.ts) — fetched lazily on
   // the Extensions sidebar tab's first activation (see ensureRegistryLoaded)
@@ -2161,6 +2210,8 @@ export default function App() {
                 onExtensionSettingsChange={setExtensionSettings}
                 pendingFocusExtensionId={pendingFocusExtensionId}
                 onFocusExtensionHandled={() => setPendingFocusExtensionId(null)}
+                onRequestImport={() => importInputRef.current?.click()}
+                importError={importError}
               />
             );
           } else if (tab.keyboardView) {
@@ -2478,6 +2529,22 @@ export default function App() {
           }}
           onCancel={() => setFolderPickerMode(null)}
         />
+      )}
+      <input
+        ref={importInputRef}
+        id="settings-import-file"
+        className="settings-file-input"
+        type="file"
+        accept="application/json,.json"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          // Cleared so picking the same file twice in a row still fires.
+          e.target.value = "";
+          if (file) void pickImportFile(file);
+        }}
+      />
+      {importBundle && (
+        <ImportSettingsDialog bundle={importBundle} onClose={() => setImportBundle(null)} />
       )}
       {dialog && <Dialog dialog={dialog} />}
       {switcherQuery !== null && (

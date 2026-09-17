@@ -10,8 +10,10 @@ import {
   loadKeybindingOverrides,
   adoptWorktreeExtensionSettings,
   loadProjects,
+  loadPanelStateStored,
   loadSettings,
   loadSidebarLayout,
+  loadStatusBarLayout,
   migrateSettings,
   projectsFromPins,
   sanitizeProjects,
@@ -19,10 +21,16 @@ import {
   saveExtensionRegistries,
   saveExtensionSettings,
   saveKeybindingOverrides,
+  savePanelStateStored,
   saveProjects,
   saveSettings,
   saveSidebarLayout,
+  saveStatusBarLayout,
+  parsePanelState,
   parseSidebarLayout,
+  parseStatusBarLayout,
+  type PanelState,
+  type StatusBarLayout,
   type StoredSidebarLayout,
   type AppSettings,
   type CommandUsage,
@@ -149,6 +157,37 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
     if (sidebarLayout) saveSidebarLayout(sidebarLayout);
   }, [sidebarLayout]);
 
+  // The status bar's arrangement (which widgets in which group, in what
+  // order, and which the user switched off) and the sidebar accordion's
+  // (pane order, collapsed, sizes) — same localStorage-first +
+  // skip-initial-persist + server-doc flow as sidebarLayout above.
+  //
+  // Unlike sidebarLayout, both of these START from the device's own stored
+  // value rather than null. That is what makes adoption fall out for free:
+  // when the fetched document has no value for one of these keys, the local
+  // one is simply left in state and the ordinary write-back below carries it
+  // up, so an arrangement made before this key was ever synced survives the
+  // upgrade instead of being forgotten.
+  const [statusBarLayout, setStatusBarLayout] = useState<StatusBarLayout | null>(loadStatusBarLayout);
+  const statusBarLayoutMounted = useRef(false);
+  useEffect(() => {
+    if (!statusBarLayoutMounted.current) {
+      statusBarLayoutMounted.current = true;
+      return;
+    }
+    if (statusBarLayout) saveStatusBarLayout(statusBarLayout);
+  }, [statusBarLayout]);
+
+  const [sidebarPanels, setSidebarPanels] = useState<PanelState | null>(loadPanelStateStored);
+  const sidebarPanelsMounted = useRef(false);
+  useEffect(() => {
+    if (!sidebarPanelsMounted.current) {
+      sidebarPanelsMounted.current = true;
+      return;
+    }
+    if (sidebarPanels) savePanelStateStored(sidebarPanels);
+  }, [sidebarPanels]);
+
   // Command palette usage stats (count/last per command id) — same
   // localStorage-first + skip-initial-persist + server-doc flow as
   // projects above, and for the same reason: its own top-level doc key
@@ -169,6 +208,14 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
   // are held until that first GET resolves, so a stale localStorage snapshot
   // can never clobber the server doc.
   const serverSyncReady = useRef(false);
+  // Bumped once when the first GET finds a key this client owns MISSING from
+  // the document, purely to give the write-back effect below a dependency
+  // that changed. Without it, a document with nothing to apply triggers no
+  // setState, so no re-render, so no write-back — and a first-run adoption
+  // would wait for the user's next unrelated edit. Only bumped when
+  // something is actually absent, so an up-to-date document costs no extra
+  // request per load.
+  const [adoptionGeneration, setAdoptionGeneration] = useState(0);
   useEffect(() => {
     let cancelled = false;
     api
@@ -218,6 +265,13 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
             ? parseSidebarLayout({ left: doc.sidebarTabsOrder, right: [], panelHome: {} })
             : null);
         if (syncedLayout) setSidebarLayout(syncedLayout);
+        // Same "absent means never arranged, so leave the device's own value
+        // alone" rule as sidebarLayout above — which is also what leaves the
+        // local value in place for the adoption push below.
+        const syncedStatusBar = parseStatusBarLayout(doc.statusBarLayout);
+        if (syncedStatusBar) setStatusBarLayout(syncedStatusBar);
+        const syncedPanels = parsePanelState(doc.sidebarPanels);
+        if (syncedPanels) setSidebarPanels(syncedPanels);
         if (doc.commandUsage && typeof doc.commandUsage === "object" && !Array.isArray(doc.commandUsage)) {
           const usage: CommandUsage = {};
           for (const [id, entry] of Object.entries(doc.commandUsage as Record<string, unknown>)) {
@@ -233,6 +287,18 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
           setCommandUsage(usage);
         }
         serverSyncReady.current = true;
+        // Adoption: any owned key the document lacks, for which this device
+        // holds a value, needs one push to get it up there. The three values
+        // read here come from this mount-once effect's closure, so they are
+        // the ones loaded from localStorage at mount — which is precisely
+        // what "this device's own value" means, and nothing can have changed
+        // them before this first GET resolved (every write-back is gated on
+        // serverSyncReady, set just above). Not a stale closure.
+        const absent =
+          (!syncedStatusBar && statusBarLayout !== null) ||
+          (!syncedPanels && sidebarPanels !== null) ||
+          (!syncedLayout && sidebarLayout !== null);
+        if (absent) setAdoptionGeneration((n) => n + 1);
       })
       .catch(() => {
         // Server unreachable (offline PWA) — localStorage stays authoritative
@@ -252,6 +318,22 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
   // single-user tool. Errors are swallowed: localStorage already has the
   // change, and a persistent server failure would otherwise toast on every
   // keystroke in a settings input.
+  // The three arrangement keys, and ONLY the ones this device actually has an
+  // opinion about. null means "never arranged here", which must not be written
+  // over another device's real arrangement: this is a PUT of the whole
+  // document, so including a null key would erase it. A device with no
+  // arrangement of its own simply stays quiet about it — the read-merge above
+  // then carries whatever is already stored straight back.
+  //
+  // Without this, hiding a status bar widget on one machine was undone the
+  // next time a machine that had never arranged anything wrote for any other
+  // reason.
+  const arrangement = (): Record<string, unknown> => ({
+    ...(sidebarLayout ? { sidebarLayout } : {}),
+    ...(statusBarLayout ? { statusBarLayout } : {}),
+    ...(sidebarPanels ? { sidebarPanels } : {}),
+  });
+
   useEffect(() => {
     if (!serverSyncReady.current) return;
     const timer = window.setTimeout(() => {
@@ -265,7 +347,7 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
           projects,
           commandUsage,
           extensionRegistries,
-          sidebarLayout,
+          ...arrangement(),
         }))
         .catch(() => ({
           settings,
@@ -274,7 +356,7 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
           projects,
           commandUsage,
           extensionRegistries,
-          sidebarLayout,
+          ...arrangement(),
         }))
         .then((doc) => api.putSettingsDoc(doc))
         .catch(() => {});
@@ -288,6 +370,9 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
     commandUsage,
     extensionRegistries,
     sidebarLayout,
+    statusBarLayout,
+    sidebarPanels,
+    adoptionGeneration,
   ]);
 
   return {
@@ -310,5 +395,9 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
     setExtensionRegistries,
     sidebarLayout,
     setSidebarLayout,
+    statusBarLayout,
+    setStatusBarLayout,
+    sidebarPanels,
+    setSidebarPanels,
   };
 }

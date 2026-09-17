@@ -357,3 +357,87 @@ export function moveTargetsForPanel(
   }
   return targets.filter((t) => t.tabId !== tabOfPanel(layout, panel, env));
 }
+
+// ---- Stored shapes ----
+//
+// The parsers below read values that came back from localStorage or the
+// settings document, so every one of them is defensive in the same way: a
+// malformed value yields null and the caller falls back to its own defaults,
+// rather than throwing and taking a whole sidebar down with it.
+//
+// They live here rather than beside their localStorage accessors in
+// settings.ts because client/vitest.config.ts runs a node environment and
+// covers pure logic only — a parser next to a `localStorage` call can't be
+// tested. settings.ts re-exports them.
+
+// The accordion's arrangement: which sections, in what order, which are
+// collapsed, and how the expanded ones share the height.
+export interface PanelState {
+  order: string[];
+  collapsed: Record<string, boolean>;
+  // Relative flex-grow weights for expanded panels. Values are seeded from
+  // measured pixel heights on resize, but any positive number works — flex
+  // only cares about the ratio between siblings, not the absolute value,
+  // which is also what lets this travel between differently sized screens.
+  sizes: Record<string, number>;
+}
+
+// The cross-device slice of the tab layout: what the user deliberately
+// arranged. Active tabs are deliberately NOT part of it — which view you
+// were last looking at is per-device.
+export interface StoredSidebarLayout {
+  left: string[];
+  right: string[];
+  panelHome: Record<string, string>;
+  // Which panes the user hid. An arrangement decision like the others, so it
+  // travels with them.
+  hiddenPanels: string[];
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((s): s is string => typeof s === "string" && s !== "") : [];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function parseSidebarLayout(value: unknown): StoredSidebarLayout | null {
+  if (!isPlainObject(value)) return null;
+  const left = asStringArray(value.left);
+  const right = asStringArray(value.right);
+  if (left.length === 0 && right.length === 0) return null;
+  const panelHome: Record<string, string> = {};
+  if (isPlainObject(value.panelHome)) {
+    for (const [k, tab] of Object.entries(value.panelHome)) {
+      if (typeof tab === "string") panelHome[k] = tab;
+    }
+  }
+  return { left, right, panelHome, hiddenPanels: asStringArray(value.hiddenPanels) };
+}
+
+// Null unless there is an `order` to speak of: without one there is no
+// arrangement to restore, and the caller's DEFAULT_PANEL_STATE is a better
+// answer than a half-empty object. Any string id is accepted — an id whose
+// extension isn't registered right now keeps its slot and is filtered at
+// render time, the never-prune rule the rest of this module follows.
+export function parsePanelState(value: unknown): PanelState | null {
+  if (!isPlainObject(value)) return null;
+  const order = asStringArray(value.order);
+  if (order.length === 0) return null;
+  const collapsed: Record<string, boolean> = {};
+  if (isPlainObject(value.collapsed)) {
+    for (const [id, flag] of Object.entries(value.collapsed)) {
+      if (typeof flag === "boolean") collapsed[id] = flag;
+    }
+  }
+  // Only finite positive weights: a 0, a negative or a NaN would collapse a
+  // pane to nothing with no way to drag it back.
+  const sizes: Record<string, number> = {};
+  if (isPlainObject(value.sizes)) {
+    for (const [id, size] of Object.entries(value.sizes)) {
+      if (typeof size === "number" && Number.isFinite(size) && size > 0) sizes[id] = size;
+    }
+  }
+  return { order, collapsed, sizes };
+}

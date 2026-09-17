@@ -128,3 +128,18 @@ export function toggleStatusBarItemHidden(layout: StatusBarLayout, id: string): 
     : [...layout.hidden, id];
   return { ...layout, hidden };
 }
+
+// Reads a stored layout (localStorage, or the settings document) back into
+// the model. Defensive like lib/sidebarLayout.ts's parsers, and null rather
+// than EMPTY_STATUS_BAR_LAYOUT when there is nothing to restore: "never
+// arranged" has to stay distinguishable from "arranged into empty groups",
+// since only the first means the caller's own defaults should stay in charge.
+export function parseStatusBarLayout(value: unknown): StatusBarLayout | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  const ids = (raw: unknown) =>
+    Array.isArray(raw) ? raw.filter((s): s is string => typeof s === "string" && s !== "") : [];
+  const layout = { left: ids(v.left), right: ids(v.right), hidden: ids(v.hidden) };
+  if (layout.left.length === 0 && layout.right.length === 0 && layout.hidden.length === 0) return null;
+  return layout;
+}

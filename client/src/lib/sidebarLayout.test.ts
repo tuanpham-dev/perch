@@ -17,6 +17,8 @@ import {
   movePanelToTab,
   resolveActive,
   sanitizeLayout,
+  parsePanelState,
+  parseSidebarLayout,
   sectionsForTab,
   sideOfTab,
   selectTab,
@@ -447,5 +449,81 @@ describe("container tabs and unknown tabs", () => {
     const once = addTabToSide(layout(), BOX, "right");
     expect(once.right).toEqual([BOX]);
     expect(addTabToSide(once, BOX, "left")).toBe(once);
+  });
+});
+
+describe("parsePanelState", () => {
+  it("round-trips a stored arrangement", () => {
+    const stored = {
+      order: ["projects", "files"],
+      collapsed: { projects: true, files: false },
+      sizes: { projects: 2, files: 1.5 },
+    };
+    expect(parsePanelState(stored)).toEqual(stored);
+  });
+
+  // Without an order there is no arrangement to restore, and the caller's own
+  // DEFAULT_PANEL_STATE is a better answer than a half-empty object.
+  it("returns null without a usable order", () => {
+    expect(parsePanelState({ collapsed: { files: true } })).toBeNull();
+    expect(parsePanelState({ order: [] })).toBeNull();
+    expect(parsePanelState({ order: [1, 2] })).toBeNull();
+    expect(parsePanelState(null)).toBeNull();
+    expect(parsePanelState([])).toBeNull();
+  });
+
+  // A 0, a negative or a NaN weight would collapse a pane to nothing with no
+  // way to drag it back, so those are dropped and the pane falls back to its
+  // default weight.
+  it("keeps only finite positive sizes and boolean collapse flags", () => {
+    const parsed = parsePanelState({
+      order: ["a", "b", "c", "d"],
+      collapsed: { a: true, b: "yes", c: 1 },
+      sizes: { a: 3, b: 0, c: -2, d: Number.NaN, e: "1" },
+    });
+    expect(parsed).toEqual({ order: ["a", "b", "c", "d"], collapsed: { a: true }, sizes: { a: 3 } });
+  });
+});
+
+describe("parseSidebarLayout", () => {
+  // The regression this covers: hiddenPanels was written to the settings doc
+  // and then dropped on read, so a hidden pane came back on another device.
+  it("keeps hiddenPanels", () => {
+    const parsed = parseSidebarLayout({
+      left: [EXPLORER_TAB_ID],
+      right: [],
+      panelHome: { files: RUN_TAB_ID },
+      hiddenPanels: ["projects"],
+    });
+    expect(parsed).toEqual({
+      left: [EXPLORER_TAB_ID],
+      right: [],
+      panelHome: { files: RUN_TAB_ID },
+      hiddenPanels: ["projects"],
+    });
+  });
+
+  it("defaults hiddenPanels to empty when absent", () => {
+    expect(parseSidebarLayout({ left: [EXPLORER_TAB_ID], right: [] })?.hiddenPanels).toEqual([]);
+  });
+
+  it("returns null when no tab is placed on either side", () => {
+    expect(parseSidebarLayout({ left: [], right: [], hiddenPanels: ["projects"] })).toBeNull();
+    expect(parseSidebarLayout(null)).toBeNull();
+    expect(parseSidebarLayout([EXPLORER_TAB_ID])).toBeNull();
+  });
+
+  it("drops non-string tab ids and panelHome entries", () => {
+    const parsed = parseSidebarLayout({
+      left: [EXPLORER_TAB_ID, "", 3],
+      right: null,
+      panelHome: { files: RUN_TAB_ID, projects: 9 },
+    });
+    expect(parsed).toEqual({
+      left: [EXPLORER_TAB_ID],
+      right: [],
+      panelHome: { files: RUN_TAB_ID },
+      hiddenPanels: [],
+    });
   });
 });
