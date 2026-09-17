@@ -133,6 +133,48 @@ export async function notifyCommandDone(
   );
 }
 
+// Extension-initiated notifications (host.notifications.push). A shorter
+// cooldown than the bell's, keyed per window, because an extension reports a
+// discrete event (a prompt appeared) rather than a bell that can ring in a
+// loop. Kept apart from the bell's map so neither signal hides the other.
+export const EXTENSION_RATE_LIMIT_MS = 5_000;
+const lastExtensionNotifiedAt = new Map<string, number>();
+
+// Pure cooldown check, split out so it is testable without web-push. Records
+// the send when it allows one.
+export function shouldNotifyExtension(windowId: string, now: number): boolean {
+  const last = lastExtensionNotifiedAt.get(windowId);
+  if (last !== undefined && now - last < EXTENSION_RATE_LIMIT_MS) return false;
+  lastExtensionNotifiedAt.set(windowId, now);
+  return true;
+}
+
+export function resetExtensionNotifyCooldowns(): void {
+  lastExtensionNotifiedAt.clear();
+}
+
+// Never creates push.json: an extension asking to notify must not be what
+// generates VAPID keys on a machine where nobody has subscribed a browser.
+// No file, no subscriptions, or a send failure all resolve quietly.
+export async function notifyExtension(windowId: string, title: string, body: string): Promise<void> {
+  if (!shouldNotifyExtension(windowId, Date.now())) return;
+  if (!cached) {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(pushPath, "utf8"));
+      if (!isPushDoc(parsed)) return;
+      cached = parsed;
+    } catch {
+      return;
+    }
+  }
+  if (cached.subscriptions.length === 0) return;
+  try {
+    await sendToAll(JSON.stringify({ title, body, pane: windowId }));
+  } catch {
+    // A push service outage is not the caller's problem.
+  }
+}
+
 async function sendToAll(payload: string): Promise<void> {
   const doc = await loadOrInit();
   if (doc.subscriptions.length === 0) return;

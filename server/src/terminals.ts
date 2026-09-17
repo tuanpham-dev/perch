@@ -217,6 +217,15 @@ export async function sendTextToSession(
   }
 }
 
+// A window's screen as plain text: its visible rows plus `scrollback` history
+// lines above them. Rejects when the window is gone or the running engine
+// cannot read screens.
+export async function captureWindow(windowId: string, scrollback = 0): Promise<string> {
+  const engine = mux();
+  if (!engine.capture) throw new Error("the terminal backend cannot read window screens");
+  return engine.capture(`@${windowId}`, Math.max(0, Math.floor(scrollback)));
+}
+
 export async function sendTextToWindow(windowId: string, text: string, submit: boolean): Promise<void> {
   await mux().sendText(`@${windowId}`, text);
   if (submit) {

@@ -558,6 +558,7 @@ interface FileViewerHostProps {
   showMenu?: (x: number, y: number, items: MenuItem[]) => void;
   setDirty?: (dirty: boolean) => void;   // closing a dirty tab confirms first
   reloadKey?: number;                    // bumped when an explicit open re-targets this tab
+  setTitle?: (title: string) => void;   // rename this tab in place (no activate, no remount)
   fontSize?: number;                     // the configured terminal font size, px
 }
 ```
@@ -796,12 +797,12 @@ registry ("New Prompt Here", scoped to the group's `cwd`).
 ```ts
 ctx.registerWindowAction({
   id: string,
-  icon: string,                         // codicon name
+  icon: string | ((ctx: WindowActionContext) => string), // codicon name
   title: string,                        // tooltip
   isVisible: (ctx: WindowActionContext) => boolean,
   onClick: (ctx: WindowActionContext) => void,
   showInTabBar?: boolean,               // default false
-});
+}): { refresh(): void };
 
 interface WindowActionContext {
   sessionName: string;
@@ -816,7 +817,11 @@ button), shown only where `isVisible` returns true — `command` lets an
 action target e.g. only windows running `claude`. `isVisible` re-evaluates
 on the session list's own ~3s poll, so it's reactive for free.
 `showInTabBar: true` also renders it in the tab bar when the matching
-terminal window's tab is focused.
+terminal window's tab is focused. `icon` may also be a function of the
+same context returning a codicon name, evaluated on each render, so an
+action can show state (a waiting bell, say) without re-registering. Call
+the returned `refresh()` when that state changes, so rows re-render before
+the next session poll.
 
 ### File decorations — `registerFileDecorationProvider`
 
@@ -1288,9 +1293,11 @@ To create or remove a worktree **without** UI, use
 [`host.worktrees`](#server-api) from a server hook. Reference: `worktrees`.
 
 ```ts
-ctx.app.openSessionWindow(sessionName: string, opts?: { createCwd?: string }): void
+ctx.app.openSessionWindow(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void
 ```
-Opens a session's active window as a window-tab. If no session by that
+Opens a session's active window as a window-tab, or the window at
+`opts.windowIndex` when that window exists (focusing its tab if it is already
+open). If no session by that
 name exists, `opts.createCwd` creates it rooted there first — the same
 create-then-open path the sidebar's pinned-session restore uses — and without
 `createCwd`, a missing session surfaces an error to the user. A name that
@@ -1527,6 +1534,8 @@ export function activate({ router, log, getSettings, host, ai, secrets }) {
 | `host.sessions.sendTextToWindow(windowId, text, submit)` | `Promise<void>` - the same, addressed by window id, which survives renumbering and renames. |
 | `host.sessions.kill(name)` | `Promise<void>` - kills the session by exact name. **No confirmation of any kind runs**; a panel that offers it should ask first (`confirmDialog`). A session that is already gone is not an error. |
 | `host.sessions.listPanes(session)` | `Promise<SessionPane[]>` - one entry per window of `session` (a window is one terminal): `{ windowIndex, paneIndex, paneActive, active, id, command, pid, title }`. `id` is the window's stable id, the same value its shell sees as `$PERCH_WINDOW` and `host.agentHooks` events carry as `paneId`; `title` is the window's name; `paneIndex` is always 0. Rejects when the session does not exist. |
+| `host.sessions.capture(windowId, opts?)` | `Promise<string>` - the window's screen as plain text: its visible rows plus `opts.scrollback` history lines above them, one line per row joined with `\n`, trailing blank rows dropped. Rows are not re-joined where a long line wrapped. Works on the bundled daemon and on any terminal backend that implements `capture`; rejects when the window is gone or the backend cannot read screens. Read-only: pair it with `sendTextToWindow` to act on what a TUI shows. |
+| `host.notifications.push({ title, body, windowId })` | `Promise<void>` - a web push to every browser that subscribed to notifications in Settings, the same channel as the bell notification. Rate limited per window (a second push for one window within 5 seconds is dropped). Resolves quietly when no browser ever subscribed; never creates push keys itself. |
 | `host.worktrees.list(dir, opts?)` | `Promise<{ repo, worktrees, branches }>` - the worktrees of the repository containing `dir` (`~` expanded). `repo` is the main worktree's path, `null` outside a repository. `opts.dirty` adds per-worktree uncommitted-changes state and `opts.branches` the local branch list; both cost extra git calls. Paths are absolute. |
 | `host.worktrees.create({ cwd, branch, base?, mode, location? })` | `Promise<{ path, branch }>` - `mode: "new"` creates `branch` off `base` (default HEAD), `"existing"` checks an existing branch out. `location` is a template over `{repo}` and `{branch}`, default `{repo}/.worktrees/{branch}`; an in-repo location is added to `.git/info/exclude`. Stops at the checkout - no session is created. Refusals reject with an error whose `status` is 400 (not a repo, no branch) or 409 (the target already exists). |
 | `host.worktrees.remove({ cwd, path, force? })` | `Promise<{ removed }>` - removes a worktree's checkout and keeps its branch. Only a path git reports as a worktree of that repository, never the main one (404/400 otherwise). Kill any session inside it first. |
