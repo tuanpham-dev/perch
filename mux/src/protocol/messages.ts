@@ -26,7 +26,7 @@ export type Request =
   // A client has acted on (or declined) a restored window's restoredCommands.
   | { id: number; kind: 'window.clearRestored'; target: string }
   | { id: number; kind: 'window.kill'; target: string }
-  | { id: number; kind: 'io.capture'; target: string; scrollback?: number }
+  | { id: number; kind: 'io.capture'; target: string; scrollback?: number; styles?: boolean }
   | { id: number; kind: 'io.send'; target: string; data: string }
   | { id: number; kind: 'resize'; cols: number; rows: number }
   | { id: number; kind: 'daemon.status' }

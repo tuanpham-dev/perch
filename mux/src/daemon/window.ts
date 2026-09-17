@@ -5,6 +5,7 @@ import { RawScrollback, RESET_PREFIX } from './raw-scrollback.ts';
 import type { ViewerColors } from '../protocol/messages.ts';
 import { platform } from '../platform/index.ts';
 import { directoryFromOsc7 } from '../util/osc7.ts';
+import { styledRow } from './styled-capture.ts';
 import * as nodePty from 'node-pty';
 import type { IPty } from 'node-pty';
 // CJS packages: named ESM imports fail at runtime, so use default-import interop.
@@ -316,13 +317,14 @@ export class Window {
     return Buffer.from(refreshPrefix + this.serializeState(scrollbackLines), 'utf8');
   }
 
-  /** Plain text of the viewport plus the last `extraScrollback` history lines. */
-  capture(extraScrollback = 0): string {
+  /** Text of the viewport plus the last `extraScrollback` history lines:
+   *  plain, or with `styles` each row's styling kept as SGR escapes. */
+  capture(extraScrollback = 0, styles = false): string {
     const buf = this.#term.buffer.active;
     const start = Math.max(0, buf.length - this.#term.rows - extraScrollback);
     const lines: string[] = [];
     for (let i = start; i < buf.length; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? '');
+      lines.push(styles ? styledRow(buf, i) : (buf.getLine(i)?.translateToString(true) ?? ''));
     }
     while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
     return lines.join('\n');

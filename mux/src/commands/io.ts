@@ -4,11 +4,12 @@ import { withConn } from '../client/connection.ts';
 export function registerIoCommands(program: Command): void {
   program
     .command('capture <target>')
-    .description("print a window's screen as plain text (target: sess, sess:index, or sess:name)")
+    .description("print a window's screen as text (target: sess, sess:index, or sess:name)")
     .option('-S, --scrollback <lines>', 'include this many lines of history above the screen', '0')
-    .action(async (target: string, opts: { scrollback: string }) => {
+    .option('-e, --escapes', 'keep colors and text attributes as SGR escape sequences')
+    .action(async (target: string, opts: { scrollback: string; escapes?: boolean }) => {
       const data = await withConn((c) =>
-        c.request({ kind: 'io.capture', target, scrollback: Number(opts.scrollback) || 0 }),
+        c.request({ kind: 'io.capture', target, scrollback: Number(opts.scrollback) || 0, styles: opts.escapes === true }),
       ) as { text: string };
       console.log(data.text);
     });

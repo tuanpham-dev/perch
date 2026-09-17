@@ -376,7 +376,7 @@ export class DaemonServer {
       }
       case 'io.capture': {
         const { window } = this.store.resolveTarget(req.target);
-        return { text: window.capture(req.scrollback ?? 0) };
+        return { text: window.capture(req.scrollback ?? 0, req.styles === true) };
       }
       case 'io.send': {
         const { window } = this.store.resolveTarget(req.target);
