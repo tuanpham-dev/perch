@@ -741,7 +741,7 @@ export interface ExtensionHostApi {
     // `opts.scrollback` history lines above them. One string per row joined
     // with "\n", trailing blank rows dropped. Rejects when the window is gone
     // or the terminal backend cannot read screens.
-    capture(windowId: string, opts?: { scrollback?: number }): Promise<string>;
+    capture(windowId: string, opts?: { scrollback?: number; styles?: boolean }): Promise<string>;
   };
   // Web push to every browser that subscribed in Settings (push.ts). Rate
   // limited per window: a second push for the same window within a few
@@ -879,7 +879,7 @@ function makeHostApi(id: string): ExtensionHostApi {
         }
       },
       listPanes: (session) => listSessionPanes(session),
-      capture: (windowId, opts) => captureWindow(windowId, opts?.scrollback ?? 0),
+      capture: (windowId, opts) => captureWindow(windowId, opts?.scrollback ?? 0, opts?.styles === true),
     },
     notifications: {
       push: ({ title, body, windowId }) => notifyExtension(String(windowId), String(title), String(body)),

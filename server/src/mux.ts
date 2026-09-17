@@ -226,8 +226,8 @@ export const daemonMultiplexer: Multiplexer = {
   sendText: async (target, data) => {
     await request({ kind: "io.send", target, data });
   },
-  capture: async (target, scrollback = 0) => {
-    const reply = await request<{ text: string }>({ kind: "io.capture", target, scrollback });
+  capture: async (target, scrollback = 0, opts) => {
+    const reply = await request<{ text: string }>({ kind: "io.capture", target, scrollback, styles: opts?.styles === true });
     return reply.text;
   },
   attach,

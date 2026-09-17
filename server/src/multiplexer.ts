@@ -113,11 +113,13 @@ export interface Multiplexer {
   clearRestored(target: string): Promise<void>;
   // Raw bytes into the window's terminal, exactly as if typed.
   sendText(target: string, data: string): Promise<void>;
-  // Plain text of the window's visible rows plus its last `scrollback`
-  // history lines, one line per row, trailing blank rows dropped. Optional so
-  // an engine registered before this existed still loads; callers treat a
+  // Text of the window's visible rows plus its last `scrollback` history
+  // lines, one line per row, trailing blank rows dropped. With `styles`, each
+  // row keeps its colors and attributes as SGR escapes (an engine that can't
+  // may return plain text; readers treat escapes as optional). Optional so an
+  // engine registered before this existed still loads; callers treat a
   // missing capture as "this backend cannot read screens".
-  capture?(target: string, scrollback?: number): Promise<string>;
+  capture?(target: string, scrollback?: number, opts?: { styles?: boolean }): Promise<string>;
   // `pinned` attaches to exactly that window; otherwise to the target's
   // session, following its current window.
   attach(
@@ -268,10 +270,10 @@ const engine: Multiplexer = {
   resetWindowName: (target) => ready.then(() => active.resetWindowName(target)),
   clearRestored: (target) => ready.then(() => active.clearRestored(target)),
   sendText: (target, data) => ready.then(() => active.sendText(target, data)),
-  capture: (target, scrollback) =>
+  capture: (target, scrollback, opts) =>
     ready.then(() => {
       if (!active.capture) throw new Error("the terminal backend cannot read window screens");
-      return active.capture(target, scrollback);
+      return active.capture(target, scrollback, opts);
     }),
   attach: (target, opts, handlers) => ready.then(() => active.attach(target, opts, handlers)),
   onEvent: (listener) => {
