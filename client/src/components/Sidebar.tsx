@@ -87,7 +87,6 @@ interface Props {
   onFilesRootModeChange: (mode: "project" | "cwd") => void;
   onDropFiles: (destDir: string, dataTransfer: DataTransfer) => void;
   filesRefreshKey: number;
-  onFilesRefresh: () => void;
   onOpenFile: (path: string) => void;
   onPreviewFile: (path: string) => void;
   onEditFile: (path: string) => void;
@@ -200,7 +199,6 @@ export default function Sidebar({
   onFilesRootModeChange,
   onDropFiles,
   filesRefreshKey,
-  onFilesRefresh,
   onOpenFile,
   onPreviewFile,
   onEditFile,
@@ -517,23 +515,25 @@ export default function Sidebar({
     if (id === "files") {
       return (
         <>
-          <button
-            className={`icon-button mode-button${filesRootMode === "project" ? " active" : ""}`}
-            title="Files in project folder"
-            onClick={() => onFilesRootModeChange("project")}
-          >
-            <Icon name="root-folder" />
-          </button>
-          <button
-            className={`icon-button mode-button${filesRootMode === "cwd" ? " active" : ""}`}
-            title="Files in terminal's folder (follows cd)"
-            onClick={() => onFilesRootModeChange("cwd")}
-          >
-            <Icon name="terminal" />
-          </button>
-          <button className="icon-button" title="Refresh" onClick={onFilesRefresh}>
-            <Icon name="refresh" />
-          </button>
+          {/* One toggle for the two root modes, showing the mode a click
+              switches to (the header's path already says which is active). */}
+          {filesRootMode === "project" ? (
+            <button
+              className="icon-button"
+              title="Follow the terminal's folder (follows cd)"
+              onClick={() => onFilesRootModeChange("cwd")}
+            >
+              <Icon name="terminal" />
+            </button>
+          ) : (
+            <button
+              className="icon-button"
+              title="Show the project folder"
+              onClick={() => onFilesRootModeChange("project")}
+            >
+              <Icon name="root-folder" />
+            </button>
+          )}
         </>
       );
     }

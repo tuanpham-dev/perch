@@ -760,23 +760,34 @@ export function activate({ router, log, host, getSettings, ai }) {
       const { operation, mergeMsg } = await detectOperation(root);
       // %B is the raw, unwrapped subject+body — what Amend's prefill should
       // show back verbatim. Absent (rather than erroring) on an unborn
-      // branch, where there's no commit yet to amend.
+      // branch, where there's no commit yet to amend. HEAD's hash rides
+      // along in the same call: the client's status poll watches it to
+      // reload the COMMITS pane when a commit lands from outside the panel.
       let lastCommitMessage = null;
+      let head = null;
       try {
-        lastCommitMessage = (await git(["log", "-1", "--format=%B"], root)).replace(/\n+$/, "");
+        const log = await git(["log", "-1", "--format=%H%n%B"], root);
+        const nl = log.indexOf("\n");
+        head = log.slice(0, nl);
+        lastCommitMessage = log.slice(nl + 1).replace(/\n+$/, "");
       } catch {
         // No commits yet.
       }
-      // Drives the More Actions menu's "Pop Latest Stash" enabled state.
-      // refs/stash doesn't exist until the first stash, which makes
-      // rev-list fail (not return 0) — caught and treated as "no stashes".
+      // Drives the More Actions menu's "Pop Latest Stash" enabled state, and
+      // (with the newest entry's hash) the STASH pane's reload when a stash
+      // is pushed or popped from a terminal. refs/stash doesn't exist until
+      // the first stash, which makes rev-list fail (not return 0) — caught
+      // and treated as "no stashes".
       let stashCount = 0;
+      let stashHead = null;
       try {
-        stashCount = Number((await git(["rev-list", "--walk-reflogs", "--count", "refs/stash"], root)).trim());
+        const entries = (await git(["rev-list", "--walk-reflogs", "refs/stash"], root)).split("\n").filter(Boolean);
+        stashCount = entries.length;
+        stashHead = entries[0] ?? null;
       } catch {
         // No stashes yet.
       }
-      res.json({ root, operation, mergeMsg, lastCommitMessage, stashCount, ...parseStatus(raw) });
+      res.json({ root, operation, mergeMsg, lastCommitMessage, head, stashCount, stashHead, ...parseStatus(raw) });
     } catch {
       // Not a git repository — a plain empty-state response, not an error
       // (confirmed: no "Initialize Repository" affordance for v1).

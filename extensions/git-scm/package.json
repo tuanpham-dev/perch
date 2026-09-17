@@ -15,7 +15,7 @@
           "default": 3000,
           "minimum": 0,
           "maximum": 30000,
-          "description": "How often (ms) to poll the active directory's git status, kept running in the background so the sidebar badge stays current even when the SOURCE CONTROL panel isn't open. 0 disables polling - status only refreshes on the refresh button, active-directory change, and after an operation."
+          "description": "How often (ms) to poll the active directory's git status, kept running in the background so the sidebar badge stays current even when the SOURCE CONTROL panel isn't open. 0 disables polling - status then only refreshes on active-directory change, after an operation, and via the Git: Refresh command."
         },
         "gitScm.fetchInterval": {
           "type": "integer",

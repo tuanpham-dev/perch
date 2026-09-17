@@ -6,7 +6,6 @@
 // module-level bridge variables set once in activate(), the same pattern
 // ports/git-scm use.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import "./style.css";
 import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
@@ -144,7 +143,7 @@ interface PanelProps {
   confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean>;
 }
 
-function TasksPanel({ actionsTarget, showMenu }: PanelProps) {
+function TasksPanel({ showMenu }: PanelProps) {
   // Touch/pen long-press → the same menu right-click opens.
   const bindMenu = useLongPressMenu();
   const { sessionName, cwd } = useActiveContext();
@@ -157,9 +156,6 @@ function TasksPanel({ actionsTarget, showMenu }: PanelProps) {
   // Rows with a /run request in flight — their action is disabled until it
   // settles, mirroring ports' `killing` set.
   const [starting, setStarting] = useState<Set<string>>(new Set());
-  // The header Refresh button (portaled into actionsTarget) bumps this to
-  // force a reload, same as ports'.
-  const [refreshKey, setRefreshKey] = useState(0);
   // Guards state updates from a fetch that resolves after unmount. Reset on
   // every mount, not just at ref creation, so StrictMode's dev double-invoke
   // (mount, cleanup, mount) doesn't leave it stuck false.
@@ -191,7 +187,7 @@ function TasksPanel({ actionsTarget, showMenu }: PanelProps) {
 
   useEffect(() => {
     loadScripts();
-    // The load above (mount, context change, Refresh) always runs; only the
+    // The load above (mount, context change) always runs; only the
     // background ticks skip while hidden, resuming immediately on regaining
     // visibility instead of waiting out the rest of the interval.
     const timer = window.setInterval(() => {
@@ -205,7 +201,7 @@ function TasksPanel({ actionsTarget, showMenu }: PanelProps) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [refreshKey, loadScripts]);
+  }, [loadScripts]);
 
   // When only one package has scripts it needs no group: its scripts are
   // listed on their own, always expanded, and script-less packages are left
@@ -297,17 +293,6 @@ function TasksPanel({ actionsTarget, showMenu }: PanelProps) {
 
   return (
     <div className="tasks-panel">
-      {actionsTarget &&
-        createPortal(
-          <button
-            className="icon-button"
-            title="Refresh"
-            onClick={() => setRefreshKey((k) => k + 1)}
-          >
-            <Icon name="refresh" />
-          </button>,
-          actionsTarget,
-        )}
       {error && <div className="tasks-error">{error}</div>}
       <div className="tasks-list" onKeyDown={nav.onKeyDown}>
         {packages.map((pkg) => {
