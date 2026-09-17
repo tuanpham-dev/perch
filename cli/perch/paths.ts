@@ -28,4 +28,25 @@ export function readPort(): string {
   return '3001';
 }
 
+/**
+ * The shared-secret gate's token, resolved the same way readPort resolves the
+ * port: an AUTH_TOKEN env var, then the last AUTH_TOKEN= line in server/.env,
+ * else "" for an install with no gate configured.
+ *
+ * Read so `perch ext` and `perch settings` can authenticate against a gated
+ * instance with the header the server already accepts (see
+ * server/src/security.ts's tokenFromRequest). Deliberately NOT an exemption:
+ * installing an extension runs its server hook as this user, so it stays
+ * behind the gate rather than becoming reachable by any local process.
+ */
+export function readAuthToken(): string {
+  if (process.env.AUTH_TOKEN) return process.env.AUTH_TOKEN;
+  if (existsSync(ENV_FILE)) {
+    const lines = readFileSync(ENV_FILE, 'utf8').split('\n').filter((l) => l.startsWith('AUTH_TOKEN='));
+    const last = lines.at(-1)?.slice('AUTH_TOKEN='.length).replace(/^["']|["']$/g, '').trim();
+    if (last) return last;
+  }
+  return '';
+}
+
 export const appUrl = (port = readPort()) => `http://127.0.0.1:${port}`;

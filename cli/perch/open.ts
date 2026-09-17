@@ -3,9 +3,8 @@
 import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { sep } from 'node:path';
-import { listInstances } from './instances.ts';
-import { ask, die, Exit, heading, info, interactive, ok, table, warn } from './output.ts';
-import { instanceSummary } from './commands.ts';
+import { resolveInstancePort } from './apiClient.ts';
+import { die, info, ok } from './output.ts';
 
 const USAGE = `Usage: perch open [path[:line]] [editor|preview] [--port <n>] [--help]
 
@@ -66,27 +65,9 @@ export async function cmdOpen(args: string[]): Promise<void> {
   }
   if (!abs) die(`no such file or directory: ${target}`);
 
-  // --port wins, then $PERCH_PORT (set in every terminal this app starts,
-  // so running `open` inside one targets its own instance), then discovery.
-  port ||= process.env.PERCH_PORT ?? '';
-  if (!port) {
-    const instances = listInstances();
-    if (instances.length === 0) die('no running instance found - start one with: perch start');
-    if (instances.length === 1) port = instances[0]!.port;
-    else if (!interactive()) {
-      warn('more than one instance is running; re-run with --port <n>:');
-      instances.forEach((i) => info(instanceSummary(i)));
-      throw new Exit(1);
-    } else {
-      heading('Running instances');
-      table([['#', 'PID', 'PORT', 'APP_NAME', 'MANAGED BY'], ...instances.map((i, n) => [String(n + 1), String(i.pid), i.port, i.appName, i.managedBy])], [4, 8, 6, 22]);
-      const choice = await ask(`Open on which instance? [1-${instances.length}/q=cancel]: `);
-      if (choice === '' || /^q$/i.test(choice)) return info('cancelled');
-      const n = Number(choice);
-      if (!Number.isInteger(n) || n < 1 || n > instances.length) die(`invalid choice: ${choice}`);
-      port = instances[n - 1]!.port;
-    }
-  }
+  // --port wins, then $PERCH_PORT, then discovery — shared with every other
+  // command that reaches the API (see apiClient.ts's resolveInstancePort).
+  port = await resolveInstancePort(port);
 
   const body = new URLSearchParams({ path: abs });
   if (line) body.set('line', line);
