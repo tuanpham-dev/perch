@@ -82,6 +82,7 @@ import {
   writeAiSecret,
   writeSettingsDoc,
 } from "./settingsStore.js";
+import { applyBundle, buildBundle, parseBundle, summarizeBundle } from "./settingsBundle.js";
 import {
   openDiffInWindow,
   openMergeInWindow,
@@ -357,6 +358,56 @@ api.patch("/settings", async (req, res) => {
   }
 });
 
+// Settings bundles: the shareable slice of the document plus the sharer's
+// extension list, as one file another install can import. See
+// settingsBundle.ts for what travels and why it's an allowlist. Three routes
+// because both the browser and the CLI drive the same flow: fetch a bundle,
+// preview a file, then apply it.
+api.get("/settings/bundle", async (_req, res) => {
+  try {
+    res.json(await buildBundle());
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
+// Read-only: says what a bundle would contribute and which of its extensions
+// this machine could install, changing nothing.
+api.post("/settings/bundle/preview", async (req, res) => {
+  const parsed = parseBundle(req.body);
+  if ("error" in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  try {
+    res.json(await summarizeBundle(parsed.bundle));
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
+api.post("/settings/bundle/apply", async (req, res) => {
+  const parsed = parseBundle(req.body?.bundle);
+  if ("error" in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const ids = Array.isArray(req.body?.extensions)
+    ? req.body.extensions.filter((id: unknown): id is string => typeof id === "string")
+    : [];
+  try {
+    const results = await applyBundle(parsed.bundle, ids);
+    // Same as PUT/PATCH above: an imported terminal setting has to reach the
+    // running terminals, not wait for a restart.
+    void applyTerminalSettings().catch((err) =>
+      console.error("failed to apply terminal settings:", err),
+    );
+    res.json({ extensions: results });
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
 // Extensions: manifests discovered under ~/.config/perch/extensions/.
 // See extensions.ts for the format and security posture (running an
 // extension's server hook is running code as the server user — same threat
@@ -474,7 +525,9 @@ api.post("/registry/install", async (req, res) => {
   }
   try {
     const packagePath = await resolvePackageForInstall(source, id);
-    res.status(201).json(await installFromPackageFile(packagePath));
+    // The source is recorded with the install so an exported settings bundle
+    // can name where to reinstall this extension from.
+    res.status(201).json(await installFromPackageFile(packagePath, source));
   } catch (err) {
     res.status(400).json({ error: errMessage(err) });
   }

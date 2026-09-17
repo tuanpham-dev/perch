@@ -356,6 +356,11 @@ export interface ExtensionInfo {
   // be reinstalled), but inactive: enabled is false, so nothing loads it.
   // Only ever true for builtins; a user extension is deleted outright.
   uninstalled: boolean;
+  // The registry source this extension was installed from, or null when none
+  // was recorded (an upload, a hand-dropped folder, a builtin, or an install
+  // from before this was tracked). An exported settings bundle carries it so
+  // an import knows where to fetch the extension from.
+  source: string | null;
 }
 
 function resolveId(manifest: ExtensionManifest, folder: string): string {
@@ -370,7 +375,41 @@ function resolveId(manifest: ExtensionManifest, folder: string): string {
 // untouched, still listed but inactive/reinstallable) rather than deleted
 // like a user extension's state key. true/false is the ordinary
 // enabled/disabled toggle for either kind.
-type ExtensionState = boolean | "uninstalled";
+//
+// The object form adds where the extension came from, so an exported
+// settings bundle can name the registry an importer should install it from
+// (see settingsBundle.ts). It is written only by a registry install; the
+// bare boolean/"uninstalled" forms are still what older state files hold and
+// what an upload-installed extension gets, so every read goes through
+// stateEnabled/stateSource rather than touching an entry directly.
+type ExtensionEnablement = boolean | "uninstalled";
+type ExtensionState = ExtensionEnablement | { enabled: ExtensionEnablement; source?: string };
+
+function isStateObject(entry: ExtensionState | undefined): entry is { enabled: ExtensionEnablement; source?: string } {
+  return typeof entry === "object" && entry !== null;
+}
+
+// What an entry says about being on, off or tombstoned. undefined means the
+// state file has nothing to say, which callers read as "on by default".
+export function stateEnabled(entry: ExtensionState | undefined): ExtensionEnablement | undefined {
+  if (entry === undefined) return undefined;
+  return isStateObject(entry) ? entry.enabled : entry;
+}
+
+// The registry source this extension was installed from, or null when none
+// was recorded — an upload, a hand-dropped folder, a builtin, or anything
+// installed before installs started recording it.
+export function stateSource(entry: ExtensionState | undefined): string | null {
+  if (!isStateObject(entry)) return null;
+  return typeof entry.source === "string" && entry.source ? entry.source : null;
+}
+
+// Rewrites only the enablement, keeping any recorded source: a disable must
+// not cost the extension its provenance.
+function withEnabled(entry: ExtensionState | undefined, enabled: ExtensionEnablement): ExtensionState {
+  const source = stateSource(entry);
+  return source ? { enabled, source } : enabled;
+}
 
 async function readState(): Promise<Record<string, ExtensionState>> {
   try {
@@ -446,6 +485,7 @@ function toInfo(
   enabled: boolean,
   builtin: boolean,
   uninstalled = false,
+  source: string | null = null,
 ): ExtensionInfo {
   return {
     id,
@@ -495,6 +535,7 @@ function toInfo(
     builtin,
     required: isRequired(manifest, builtin),
     uninstalled,
+    source,
   };
 }
 
@@ -502,24 +543,26 @@ export async function listExtensions(): Promise<ExtensionInfo[]> {
   const state = await readState();
   const results: ExtensionInfo[] = [];
   for (const [id, { manifest, builtin }] of await discoverExtensions()) {
+    const enablement = stateEnabled(state[id]);
+    const source = stateSource(state[id]);
     // A required builtin ignores whatever the state file says (a stale
     // tombstone or `false` from before the flag existed must not ship the
     // app without its rendering floor) — always listed, always enabled.
     if (isRequired(manifest, builtin)) {
-      results.push(toInfo(manifest, id, true, builtin));
+      results.push(toInfo(manifest, id, true, builtin, false, source));
       continue;
     }
     // A tombstoned builtin stays in the list (so it can be reinstalled) but
     // inactive: enabled=false keeps everything that keys off `enabled`
     // (client activation, server hooks, theme/font loading) from touching it,
     // while `uninstalled` drives the UI's Reinstall action.
-    if (builtin && state[id] === "uninstalled") {
-      results.push(toInfo(manifest, id, false, builtin, true));
+    if (builtin && enablement === "uninstalled") {
+      results.push(toInfo(manifest, id, false, builtin, true, source));
       continue;
     }
     // A freshly dropped-in or installed extension is active by default;
     // only an explicit `false` in the state file turns it off.
-    results.push(toInfo(manifest, id, state[id] !== false, builtin));
+    results.push(toInfo(manifest, id, enablement !== false, builtin, false, source));
   }
   return results;
 }
@@ -542,8 +585,13 @@ export async function resolveExtensionFile(id: string, relPath: string): Promise
 }
 
 // packagePath is a temp file (already written by the caller); this consumes
-// and removes it either way.
-export async function installFromPackageFile(packagePath: string): Promise<ExtensionInfo> {
+// and removes it either way. `source` is the registry source the package was
+// resolved from, recorded in the state file so an exported settings bundle
+// can tell an importer where to get it; an upload has none.
+export async function installFromPackageFile(
+  packagePath: string,
+  source?: string,
+): Promise<ExtensionInfo> {
   const workDir = path.join(tmpdir(), `perch-ext-${randomUUID()}`);
   try {
     await mkdir(workDir, { recursive: true });
@@ -567,7 +615,10 @@ export async function installFromPackageFile(packagePath: string): Promise<Exten
 
     const id = resolveId(manifest, folder);
     const state = await readState();
-    state[id] = true;
+    // A re-install from a different source updates the recorded one; an
+    // upload over a registry install clears it, since the bytes on disk no
+    // longer came from that catalog.
+    state[id] = source ? { enabled: true, source } : true;
     await writeState(state);
 
     // Install enables the extension (state[id] = true above), so its server
@@ -601,7 +652,7 @@ export async function uninstallExtension(id: string): Promise<void> {
     // Tombstone rather than delete repo files — a future .perch install with
     // the same id overrides this entry (discoverExtensions layers user-dir
     // extensions on top of builtins) and restores it.
-    state[id] = "uninstalled";
+    state[id] = withEnabled(state[id], "uninstalled");
   } else {
     await rm(found.folderPath, { recursive: true, force: true });
     delete state[id];
@@ -622,7 +673,7 @@ export async function setExtensionEnabled(id: string, enabled: boolean): Promise
     throw new Error("this extension is required and cannot be disabled");
   }
   const state = await readState();
-  state[id] = enabled;
+  state[id] = withEnabled(state[id], enabled);
   await writeState(state);
 
   if (enabled) {
@@ -631,7 +682,7 @@ export async function setExtensionEnabled(id: string, enabled: boolean): Promise
     unmountServerHook(id);
   }
 
-  return toInfo(found.manifest, id, enabled, found.builtin);
+  return toInfo(found.manifest, id, enabled, found.builtin, false, stateSource(state[id]));
 }
 
 // ---- Server hooks ----
