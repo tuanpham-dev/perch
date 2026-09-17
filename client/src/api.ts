@@ -344,6 +344,65 @@ export function patchSettingsDoc(patch: SettingsDoc): Promise<void> {
   });
 }
 
+// ---- Settings bundles ----
+//
+// The shareable slice of the settings document plus the sharer's extension
+// list, as one file another install can import. The server builds and applies
+// it (server/src/settingsBundle.ts) so the list of what travels lives in one
+// place; the client's job is to move the file and to ask before applying it.
+
+// Opaque on purpose: the client never picks the bundle apart, it hands it
+// straight back to preview and apply.
+export type SettingsBundle = Record<string, unknown>;
+
+export interface BundleExtensionRow {
+  id: string;
+  version: string;
+  source: string | null;
+  installed: boolean;
+  // False when no source was recorded for this extension, or the recorded one
+  // isn't configured here. `reason` says which, for the row to show.
+  installable: boolean;
+  reason?: string;
+}
+
+export interface BundleSummary {
+  exportedAt: string;
+  categories: { key: string; label: string; count: number }[];
+  extensions: BundleExtensionRow[];
+}
+
+export interface BundleInstallResult {
+  id: string;
+  ok: boolean;
+  error?: string;
+}
+
+export function fetchSettingsBundle(): Promise<SettingsBundle> {
+  return request("/api/settings/bundle");
+}
+
+// Read-only: says what the bundle would contribute and which extensions could
+// be installed, changing nothing.
+export function previewSettingsBundle(bundle: SettingsBundle): Promise<BundleSummary> {
+  return request("/api/settings/bundle/preview", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(bundle),
+  });
+}
+
+export function applySettingsBundle(
+  bundle: SettingsBundle,
+  extensionIds: string[],
+): Promise<{ extensions: BundleInstallResult[] }> {
+  return request("/api/settings/bundle/apply", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ bundle, extensions: extensionIds }),
+  });
+}
+
 export function killSession(name: string): Promise<void> {
   return request(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
 }

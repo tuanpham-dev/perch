@@ -385,4 +385,8 @@ export interface ExtensionInfo {
   // A builtin that's been uninstalled: still listed and inactive
   // (enabled=false), the UI offers Reinstall instead of Disable/Uninstall.
   uninstalled: boolean;
+  // The registry source this extension was installed from, or null when none
+  // was recorded (an upload, a builtin, or an install from before it was
+  // tracked). Mirrors server/src/extensions.ts's ExtensionInfo.
+  source: string | null;
 }
