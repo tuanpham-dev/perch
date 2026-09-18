@@ -108,8 +108,16 @@ export default function FolderPickerDialog({ initialPath, onPick, onCancel }: Pr
       setSelectedIndex(null);
       return;
     }
-    const segment = value.slice(value.lastIndexOf("/") + 1);
-    if (!segment) {
+    // Typeahead only applies to a name typed *inside the listed folder*:
+    // either a bare name ("wo") or the listed path plus one more segment
+    // ("~/wo"). An absolute path typed from scratch ("/works" while "~" is
+    // listed) is a request to go there, so its last segment must not
+    // prefix-match a subfolder of the listed folder ("~/works") and hijack
+    // Enter into descending there instead.
+    const slash = value.lastIndexOf("/");
+    const segment = value.slice(slash + 1);
+    const insideListed = slash === -1 || (listedPath !== null && childPath(listedPath, segment) === value);
+    if (!segment || !insideListed) {
       setSelectedIndex(null);
       return;
     }

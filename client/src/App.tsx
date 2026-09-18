@@ -796,6 +796,7 @@ export default function App() {
     reopenClosedTab,
     activeTab,
     activeRealTab,
+    activeSessionName,
     activeSession,
     activeWindow,
     filesRootDir,
@@ -990,7 +991,7 @@ export default function App() {
   // project's panel tabs and its editor tab group agree on what counts as
   // "this project". null when there's no active editor tab at all (the panel
   // then shows nothing and relies on requestPanelTerminal's project picker).
-  const activeProjectKey = activeRealTab ? projectKeyForSession(activeRealTab.sessionName) : null;
+  const activeProjectKey = activeSessionName !== null ? projectKeyForSession(activeSessionName) : null;
 
   // The bottom terminal panel (plans/bottom-terminal-panel.md) — its own state
   // model, separate from the editor's tabs/split tree, since it only ever
@@ -1090,8 +1091,8 @@ export default function App() {
   // command) — the panel never guesses a session on the user's behalf.
   const requestPanelTerminal = useCallback(
     (anchor: { x: number; y: number }) => {
-      if (activeRealTab) {
-        newTerminal(activeRealTab.sessionName);
+      if (activeSessionName !== null) {
+        newTerminal(activeSessionName);
         return;
       }
       // One entry per project (not per session): a merged project's entry
@@ -1110,7 +1111,7 @@ export default function App() {
       ];
       showMenu(anchor.x, anchor.y, items);
     },
-    [activeRealTab, sessions, newTerminal, projectLabelForSession, projectKeyForSession, showMenu],
+    [activeSessionName, sessions, newTerminal, projectLabelForSession, projectKeyForSession, showMenu],
   );
 
   // The panel's "Attach Window…" dropdown: every window not already
@@ -1451,19 +1452,19 @@ export default function App() {
       "settings.openKeyboardShortcuts": openKeyboardShortcutsTab,
       "session.new": () => setFolderPickerMode("project"),
       "session.kill": () => {
-        if (activeRealTab) closeProject(activeRealTab.sessionName);
+        if (activeSessionName !== null) closeProject(activeSessionName);
       },
       "session.togglePin": () => {
-        if (activeRealTab) togglePinSession(activeRealTab.sessionName);
+        if (activeSessionName !== null) togglePinSession(activeSessionName);
       },
       "window.new": () => {
-        if (activeRealTab) createWindow(activeRealTab.sessionName);
+        if (activeSessionName !== null) createWindow(activeSessionName);
       },
       "window.kill": () => {
-        if (activeRealTab && activeWindow) killWindow(activeRealTab.sessionName, activeWindow.index);
+        if (activeSessionName !== null && activeWindow) killWindow(activeSessionName, activeWindow.index);
       },
       "window.rename": () => {
-        if (activeRealTab && activeWindow) renameWindow(activeRealTab.sessionName, activeWindow);
+        if (activeSessionName !== null && activeWindow) renameWindow(activeSessionName, activeWindow);
       },
       ...Object.fromEntries(
         Array.from({ length: 9 }, (_, i) => [
@@ -1559,7 +1560,7 @@ export default function App() {
       "panel.split": splitActivePane,
     }),
     [
-      activeRealTab,
+      activeSessionName,
       activeWindow,
       activeTabId,
       activeGroupTabs,
@@ -1612,8 +1613,8 @@ export default function App() {
     setContextKey("commandPaletteOpen", switcherQuery?.startsWith(">") ?? false);
   }, [switcherQuery]);
   useEffect(() => {
-    setContextKey("activeSession", activeRealTab !== null);
-  }, [activeRealTab]);
+    setContextKey("activeSession", activeSessionName !== null);
+  }, [activeSessionName]);
   useEffect(() => {
     setContextKey("activeWindow", activeWindow !== undefined);
   }, [activeWindow]);
@@ -1683,7 +1684,7 @@ export default function App() {
   // paletteSortByUsage additionally reorders everything else by `count` desc
   // (stable, so ties keep the static COMMANDS order).
   const paletteCommands = useMemo<PaletteCommand[]>(() => {
-    const hasSession = activeRealTab !== null;
+    const hasSession = activeSessionName !== null;
     const hasWindow = activeWindow !== undefined;
     // Render-fresh for activeSession/activeWindow: the context-key store's
     // mirroring effects run after render, so reading it for these two here
@@ -1742,7 +1743,7 @@ export default function App() {
     const lastUsed = sorted[lastUsedIndex];
     return [lastUsed, ...sorted.slice(0, lastUsedIndex), ...sorted.slice(lastUsedIndex + 1)];
   }, [
-    activeRealTab,
+    activeSessionName,
     activeWindow,
     resolvedBindings,
     globalHandlers,
@@ -1756,14 +1757,14 @@ export default function App() {
   // session's lazygit window (started in the file tree's root when created)
   // and bring it up as a window tab.
   const openLazygit = async () => {
-    if (!activeRealTab) return;
+    if (activeSessionName === null) return;
     try {
-      const { index } = await api.openLazygit(activeRealTab.sessionName, filesRootDir ?? undefined);
+      const { index } = await api.openLazygit(activeSessionName, filesRootDir ?? undefined);
       // Refresh before opening the tab: the vanished-window sweep below
       // closes any window-tab whose window isn't in `sessions` yet, and a
       // just-created lazygit window won't be until the next poll otherwise.
       await refresh();
-      await openWindowTab(activeRealTab.sessionName, index);
+      await openWindowTab(activeSessionName, index);
     } catch (err) {
       showError(err);
     }
@@ -1964,9 +1965,9 @@ export default function App() {
   const projectListProps = useMemo(
     () => ({
       sessions,
-      activeSessionName: activeRealTab?.sessionName ?? null,
+      activeSessionName,
       activeWindow:
-        activeRealTab?.windowIndex !== undefined
+        activeRealTab?.windowIndex !== undefined && activeRealTab.sessionName === activeSessionName
           ? { sessionName: activeRealTab.sessionName, index: activeRealTab.windowIndex }
           : null,
       onOpenAllWindows: openAllWindows,
@@ -1995,6 +1996,7 @@ export default function App() {
     [
       sessions,
       activeRealTab,
+      activeSessionName,
       openAllWindows,
       openWindowTab,
       killWindow,

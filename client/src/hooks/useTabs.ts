@@ -828,18 +828,41 @@ export function useTabs(
     });
   }, [sessions, sessionsLoadedRef]);
 
+  // A virtual tab opened from a project (originSessionName — a preview of
+  // one of its files, say) belongs to that project, so switching to it moves
+  // the sidebar there: the real tab it resolves to is one of that session's
+  // own, preferring the last-active one, and only a virtual tab with no
+  // origin (settings, or a preview whose session went away) falls back to
+  // whichever real tab was open most recently.
+  const virtualOrigin = activeTab && !isRealTab(activeTab) ? activeTab.originSessionName : undefined;
+  const lastRealTab = tabs.find((t) => t.id === lastRealTabIdRef.current) ?? null;
   const activeRealTab =
     activeTab && isRealTab(activeTab)
       ? activeTab
-      : (tabs.find((t) => t.id === lastRealTabIdRef.current) ?? null);
+      : virtualOrigin === undefined
+        ? lastRealTab
+        : lastRealTab?.sessionName === virtualOrigin
+          ? lastRealTab
+          : (tabs.find((t) => isRealTab(t) && t.sessionName === virtualOrigin) ?? lastRealTab);
 
-  const activeSession = sessions.find((s) => s.name === activeRealTab?.sessionName) ?? null;
+  // The session the sidebar (FILES root, PROJECTS highlight, lazygit pill)
+  // and every session-level command act on. Usually activeRealTab's, but a
+  // virtual tab's origin session wins even when none of its terminals is
+  // open as a tab any more — the project is still the one the tab came from.
+  const activeSessionName: string | null =
+    virtualOrigin !== undefined && sessions.some((s) => s.name === virtualOrigin)
+      ? virtualOrigin
+      : (activeRealTab?.sessionName ?? null);
+
+  const activeSession = sessions.find((s) => s.name === activeSessionName) ?? null;
   // A window-tab is pinned to a specific window, which may not be the
   // session's own active window (their current-window pointers
   // diverge independently once a window-tab exists) — look it up by index
-  // rather than falling back to whatever the session considers active.
+  // rather than falling back to whatever the session considers active. Only
+  // when the tab is in the active session, though: a real tab left over
+  // from another project says nothing about this one's windows.
   const activeWindow =
-    activeRealTab?.windowIndex !== undefined
+    activeRealTab?.windowIndex !== undefined && activeRealTab.sessionName === activeSessionName
       ? activeSession?.windows.find((w) => w.index === activeRealTab.windowIndex)
       : activeSession?.windows.find((w) => w.active);
   const filesRootDir = activeWindow?.cwd ?? null;
@@ -851,11 +874,11 @@ export function useTabs(
   // ext viewer) doesn't collapse to.
   useEffect(() => {
     setActiveContext({
-      sessionName: activeRealTab?.sessionName ?? null,
+      sessionName: activeSessionName,
       windowIndex: activeWindow?.index ?? null,
       cwd: filesRootDir,
     });
-  }, [activeRealTab, activeWindow, filesRootDir]);
+  }, [activeSessionName, activeWindow, filesRootDir]);
 
   // Folder-derived display name for a session's project — the label every
   // surface (tabs, chips, quick switcher) uses instead of the session
@@ -1197,6 +1220,7 @@ export function useTabs(
     reopenClosedTab,
     activeTab,
     activeRealTab,
+    activeSessionName,
     activeSession,
     activeWindow,
     filesRootDir,
