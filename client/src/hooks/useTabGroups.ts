@@ -157,6 +157,25 @@ export function useTabGroups(
     });
   }, [tabsRef, mruTabIdsRef, setActiveTabId, keyForSession]);
 
+  // Makes a project the active one from its chip: activates that group's
+  // most-recently-used tab within this one bar, falling back to its first.
+  // Scoped per bar (editorGroupId) like closeGroupTabs — a chip only ever
+  // acts on the tabs sitting under it. The group's own collapsed state needs
+  // no handling here: activating a tab inside a collapsed group expands it
+  // through the auto-expand effect above.
+  const activateGroup = useCallback(
+    (editorGroupId: string, sessionName: string) => {
+      const members = tabsRef.current.filter(
+        (t) => t.groupId === editorGroupId && groupKeyForTab(t, keyForSession) === sessionName,
+      );
+      if (members.length === 0) return;
+      const memberIds = new Set(members.map((t) => t.id));
+      const recent = mruTabIdsRef.current.find((tid) => memberIds.has(tid));
+      setActiveTabId(recent ?? members[0].id, editorGroupId);
+    },
+    [tabsRef, mruTabIdsRef, setActiveTabId, keyForSession],
+  );
+
   // Moves a whole group's block to a new position relative to the other
   // groups within one editor group's own tab bar only — the drag-a-chip /
   // "Move Group Left/Right" operation. See plans/reorder-tab-groups.md and
@@ -277,5 +296,5 @@ export function useTabGroups(
     });
   }, []);
 
-  return { tabGroupState, toggleGroupCollapsed, closeGroupTabs, groupMenuItems, renameGroup, moveGroup };
+  return { tabGroupState, toggleGroupCollapsed, activateGroup, closeGroupTabs, groupMenuItems, renameGroup, moveGroup };
 }

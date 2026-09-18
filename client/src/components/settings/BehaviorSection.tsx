@@ -7,7 +7,7 @@ import {
   getCurrentSubscription,
   pushUnavailableReason,
 } from "../../pushSubscribe";
-import type { AppSettings } from "../../settings";
+import { TAB_BAR_SCOPES, type AppSettings } from "../../settings";
 import { useSettingsContext } from "./context";
 
 // Local component state, not a synced AppSettings field — see
@@ -234,6 +234,23 @@ export default function BehaviorSection() {
         />
         <span>Group tabs by project in the tab bar</span>
       </label>
+
+      {settings.tabGroupsBySession && (
+        <label className="settings-row">
+          <span className="settings-label">Show tabs for</span>
+          <select
+            className="dialog-input settings-select"
+            value={settings.tabBarScope}
+            onChange={(e) => set("tabBarScope", e.target.value as AppSettings["tabBarScope"])}
+          >
+            {TAB_BAR_SCOPES.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <label className="settings-row">
         <span className="settings-label">Default projects folder</span>

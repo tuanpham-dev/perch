@@ -471,9 +471,23 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
         else onOpenAllWindows(node.sessions[0].name);
         return;
       }
-      // A repository row whose terminals all live on worktrees is a group
-      // header: it has nothing of its own to open, so Enter folds it.
-      if (node.worktrees.length > 0) toggleCollapsed(row.id);
+      // A repository row whose terminals all live on worktrees has no
+      // terminal of its own, but it is still the project you are asking to
+      // switch to: hand off to the checkout that represents it — its main
+      // one, or the first worktree that actually has a terminal. Folding is
+      // the chevron's job (and ArrowLeft's), never the row's, so a click
+      // here always lands on a project.
+      const worktree =
+        node.worktrees.find((w) => w.worktree.main && w.sessions.length > 0) ??
+        node.worktrees.find((w) => w.sessions.length > 0);
+      if (worktree) {
+        onOpenWorktree(worktree);
+        return;
+      }
+      // Nothing live anywhere under it — a pinned project outliving its
+      // sessions. Opening its folder is what "switch to this project" can
+      // still mean, and matches the row's own New Terminal fallback.
+      if (node.cwd) onOpenProject(node.cwd);
     },
     [rowsById, onOpenProject, onOpenAllWindows, onOpenWindow, onOpenWorktree],
   );

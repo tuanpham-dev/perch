@@ -691,6 +691,45 @@ export function useTabs(
     });
   }, []);
 
+  // Every tab in one editor group, as the tab bar's own empty-space menu
+  // offers it. Mirrors closeOtherTabs — one dirty confirm for the whole
+  // batch, each tab pushed on the reopen stack, MRU pruned — plus
+  // closeTabImmediate's empty-pane branch: a split pane left with nothing
+  // collapses, unless it is the only pane there is.
+  const closeAllTabs = useCallback(
+    async (editorGroupId: string) => {
+      const toClose = tabsRef.current.filter((t) => t.groupId === editorGroupId);
+      if (toClose.length === 0) return;
+      const anyDirty = toClose.some((t) => dirtyTabsRef.current.has(t.id));
+      if (anyDirty) {
+        const ok = await confirmDialog("Some tabs have unsaved changes. Close them all anyway?", "Close All");
+        if (!ok) return;
+      }
+      const closedIds = new Set(toClose.map((t) => t.id));
+      for (const t of toClose) {
+        dirtyTabsRef.current.delete(t.id);
+        if (t.windowIndex !== undefined) api.closeWindowTab(t.attachName).catch(() => {});
+        pushClosedTab(t);
+      }
+      mruTabIdsRef.current = mruTabIdsRef.current.filter((tid) => !closedIds.has(tid));
+      const survivors = tabsRef.current.filter((t) => !closedIds.has(t.id));
+      setTabs(survivors);
+      setSplitLayout((prev) => {
+        if (leaves(prev.tree).length <= 1) {
+          return { ...prev, groupActive: { ...prev.groupActive, [editorGroupId]: null } };
+        }
+        const tree = removeLeaf(prev.tree, editorGroupId);
+        const groupActive = { ...prev.groupActive };
+        delete groupActive[editorGroupId];
+        const fallback = mruTabIdsRef.current
+          .map((tid) => survivors.find((t) => t.id === tid))
+          .find((t): t is Tab => t !== undefined);
+        return { tree, groupActive, activeGroupId: fallback?.groupId ?? leaves(tree)[0] };
+      });
+    },
+    [confirmDialog],
+  );
+
   const closeOtherTabs = useCallback(
     async (id: string) => {
       const target = tabs.find((t) => t.id === id);
@@ -1214,6 +1253,7 @@ export function useTabs(
     openWindowTab,
     openAllWindows,
     closeTab,
+    closeAllTabs,
     cycleTab,
     moveTab,
     closeOtherTabs,
