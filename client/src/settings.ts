@@ -270,6 +270,15 @@ export interface AppSettings {
   // the organizing unit (plans/project-first-ui.md); migrateSettings flips
   // a stored false once (guarded), so a later deliberate opt-out sticks.
   tabGroupsBySession: boolean;
+  // Which projects' tabs the tab bar shows, once tabs are grouped by project.
+  // "all" is the original behavior — every project's chip and tabs, collapsed
+  // only where the user collapsed them. "activeProject" hides every other
+  // project's chip and tabs outright (switch projects from the sidebar or the
+  // quick switcher). "collapseOthers" keeps every chip but folds each
+  // inactive project's tabs behind it, so one project's tabs are open at a
+  // time and the rest stay one click away. Ignored while tabGroupsBySession
+  // is off: without chips there would be nothing left to click.
+  tabBarScope: "all" | "activeProject" | "collapseOthers";
   // Where the Open Folder dialog starts browsing. Empty = home. Renamed
   // from newSessionCwd (migrateSettings copies the old key forward).
   defaultProjectsFolder: string;
@@ -307,6 +316,15 @@ export interface AppSettings {
 // two most commonly pre-installed on Linux, no single distro-wide default
 // exists) — so an unavailable bundled font still lands on something native
 // to the machine before falling through to the browser's generic mapping.
+// The "Show tabs for" choices, in the order both places offer them: the
+// Settings → Behavior select and the tab bar's own right-click menu. One
+// list, so a reworded label can't end up saying two different things.
+export const TAB_BAR_SCOPES: { value: AppSettings["tabBarScope"]; label: string }[] = [
+  { value: "all", label: "All projects" },
+  { value: "activeProject", label: "The active project only" },
+  { value: "collapseOthers", label: "The active project, others collapsed" },
+];
+
 export const DEFAULT_SETTINGS: AppSettings = {
   // xterm.js is the bundled, required engine (extensions/xterm-engine) — the
   // safe default. Ghostty moved to the optional registry, so it's no longer
@@ -355,6 +373,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tabCloseActivation: "recent",
   newTabPlacement: "end",
   tabGroupsBySession: true,
+  tabBarScope: "all",
   defaultProjectsFolder: "",
   colorTheme: "perch.plastic-legacy-theme:Plastic Legacy",
   iconTheme: "perch.seti-icons:seti",

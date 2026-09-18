@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import type { AppSettings } from "../settings";
 import type { MenuItem, Tab, TabGroupState } from "../types";
 import { adjustForContrast, GROUP_COLORS, groupColorHex } from "../utils/groupColor";
 import { getFileIconResult, useIconThemeVersion } from "../utils/iconThemes";
 import FileIcon from "./FileIcon";
 import Icon from "./Icon";
+
+type TabBarScope = AppSettings["tabBarScope"];
 
 interface Props {
   tabs: Tab[];
@@ -24,6 +27,10 @@ interface Props {
   // filtered by the caller).
   editorGroupId: string;
   tabMenuItems: (tab: Tab) => MenuItem[];
+  // Right-click on the strip's own empty space. A press that lands on a tab,
+  // a chip or one of the bar's buttons keeps that element's own menu (or no
+  // menu at all), so this only ever fires on the bare strip.
+  barMenuItems: () => MenuItem[];
   // Reports the actions container's DOM element as it mounts/unmounts, so a
   // tab (e.g. an image viewer) can portal per-tab controls into it — VS
   // Code/code-server style editor-actions on the right of the tab strip.
@@ -43,7 +50,15 @@ interface Props {
   // a path key via projectName; a pathless session's key is its own name).
   groupLabel: (groupKey: string) => string;
   groupState: Record<string, TabGroupState>;
+  // Which projects this bar shows — settings.tabBarScope, forced to "all"
+  // by the caller while grouping is off. See renderable/collapsedFor below.
+  scope: TabBarScope;
   onToggleGroupCollapsed: (sessionName: string) => void;
+  // Makes a project active from its chip: activates that group's own
+  // most-recently-used tab in this bar. Clicking the already-active chip
+  // toggles its collapse instead, so a chip is both "switch to this project"
+  // and the fold control it has always been.
+  onActivateGroup: (sessionName: string) => void;
   groupMenuItems: (sessionName: string) => MenuItem[];
   // Populates the chip arrow button's dropdown — the session's windows,
   // opened as a new tab (or focused if already open) on click.
@@ -92,6 +107,7 @@ export default function TabBar({
   onCloseMenu,
   editorGroupId,
   tabMenuItems,
+  barMenuItems,
   actionsRef,
   extras,
   onToggleSidebar,
@@ -99,7 +115,9 @@ export default function TabBar({
   groupKey,
   groupLabel,
   groupState,
+  scope,
   onToggleGroupCollapsed,
+  onActivateGroup,
   groupMenuItems,
   windowMenuItems,
   onReorderGroup,
@@ -121,16 +139,68 @@ export default function TabBar({
   const chipRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const justDraggedRef = useRef(false);
 
+  // The project this bar is on, per bar rather than app-global: each split
+  // pane scopes to whatever it is itself showing. A global tab (Settings,
+  // Keyboard Shortcuts, a viewer whose project is gone) belongs to no
+  // project, so activating one must not hand the bar to a different project
+  // than the one it was on — the last grouped tab's key stays. Mutated
+  // during render, like useTabs' own lastRealTabIdRef, so it is current
+  // without an effect's one-render lag.
+  const lastGroupKeyRef = useRef<string | null>(null);
+  let activeGroupKey: string | null = null;
+  if (groupingEnabled) {
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    const activeKey = activeTab ? groupKey(activeTab) : null;
+    const remembered = lastGroupKeyRef.current;
+    // The remembered project may have lost its last tab in this bar since,
+    // and a bar that has never held a grouped tab has nothing remembered —
+    // both fall through to the first project present.
+    const stillHere = remembered !== null && tabs.some((t) => groupKey(t) === remembered);
+    activeGroupKey = activeKey ?? (stillHere ? remembered : null);
+    if (activeGroupKey === null) {
+      for (const tab of tabs) {
+        const key = groupKey(tab);
+        if (key !== null) {
+          activeGroupKey = key;
+          break;
+        }
+      }
+    }
+    lastGroupKeyRef.current = activeGroupKey;
+  }
+
+  // Under "activeProject" the bar holds one project and nothing to switch
+  // to, so its chip would only take up room: tabs render bare, exactly as
+  // they do with grouping off. Chips come back in the other two scopes,
+  // where they are how you reach the projects that aren't showing.
+  const chipsVisible = scope !== "activeProject";
+
+  // Whether a project's chip and tabs appear in this bar at all. Only
+  // "activeProject" hides anything, and only grouped tabs: an ungrouped tab
+  // (settings, or a viewer whose project is gone) has no chip to reach it by,
+  // so it always stays.
+  const renderable = (key: string) => scope !== "activeProject" || key === activeGroupKey;
+
+  // A group's effective fold state. "collapseOthers" folds every inactive
+  // project, and a manual collapse still wins for the active one — the
+  // auto-expand effect (useTabGroups) clears that the moment one of its tabs
+  // is activated, so a project can't stay folded while it is being used.
+  // Nothing folds under "activeProject": with no chip on screen, a folded
+  // group would be a tab bar you could not get your tabs back into.
+  const collapsedFor = (key: string) =>
+    chipsVisible &&
+    ((groupState[key]?.collapsed ?? false) || (scope === "collapseOthers" && key !== activeGroupKey));
+
   // The distinct group keys among `tabs`, in first-appearance order — the
   // single source of truth chip hit-testing (computeGroupInsertion below)
   // and the render loop's chip order both derive from. Derived through the
   // `groupKey` prop (not lib/tabs' orderedGroupKeys directly) so the
   // project-key resolver App bakes into that prop applies here too.
   const groupOrder: string[] = [];
-  if (groupingEnabled) {
+  if (groupingEnabled && chipsVisible) {
     for (const tab of tabs) {
       const key = groupKey(tab);
-      if (key !== null && !groupOrder.includes(key)) groupOrder.push(key);
+      if (key !== null && renderable(key) && !groupOrder.includes(key)) groupOrder.push(key);
     }
   }
 
@@ -325,12 +395,19 @@ export default function TabBar({
     onActivate(id);
   };
 
+  // A chip for another project switches to it; the active project's own chip
+  // keeps folding, which is the only thing it could still usefully do.
+  const handleChipActivate = (sessionName: string) => {
+    if (sessionName === activeGroupKey) onToggleGroupCollapsed(sessionName);
+    else onActivateGroup(sessionName);
+  };
+
   const handleChipClick = (sessionName: string) => {
     if (justDraggedRef.current) {
       justDraggedRef.current = false;
       return;
     }
-    onToggleGroupCollapsed(sessionName);
+    handleChipActivate(sessionName);
   };
 
   useEffect(() => {
@@ -347,7 +424,7 @@ export default function TabBar({
   if (groupingEnabled) {
     for (const tab of tabs) {
       const key = groupKey(tab);
-      if (key === null) continue;
+      if (key === null || !renderable(key)) continue;
       if (!(key in groupColorFor)) {
         groupColorFor[key] = adjustForContrast(groupColorHex(groupState[key]?.color ?? GROUP_COLORS[0].key), barBg);
       }
@@ -407,11 +484,14 @@ export default function TabBar({
 
   const renderChip = (sessionName: string) => {
     const state = groupState[sessionName];
-    const collapsed = state?.collapsed ?? false;
+    const collapsed = collapsedFor(sessionName);
+    const isActiveGroup = sessionName === activeGroupKey;
     const rawColor = groupColorHex(state?.color ?? GROUP_COLORS[0].key);
     const indicatorClass =
       groupDropIndicator?.id === sessionName ? ` drop-indicator-${groupDropIndicator.edge}` : "";
     const draggingClass = dragGroupKey === sessionName ? " dragging" : "";
+    const activeClass = isActiveGroup ? " active" : "";
+    const label = groupLabel(sessionName);
     return (
       <div
         key={`group:${sessionName}`}
@@ -419,18 +499,23 @@ export default function TabBar({
           if (el) chipRefs.current.set(sessionName, el);
           else chipRefs.current.delete(sessionName);
         }}
-        className={`tab-group-chip${indicatorClass}${draggingClass}`}
+        className={`tab-group-chip${activeClass}${indicatorClass}${draggingClass}`}
         style={{ background: rawColor }}
         role="button"
         tabIndex={0}
         aria-expanded={!collapsed}
-        aria-label={`${groupLabel(sessionName)} tab group, ${collapsed ? "collapsed" : "expanded"}`}
+        title={isActiveGroup ? undefined : `Switch to ${label}`}
+        aria-label={
+          isActiveGroup
+            ? `${label} tab group, ${collapsed ? "collapsed" : "expanded"}`
+            : `Switch to ${label}`
+        }
         onPointerDown={(e) => handleChipPointerDown(e, sessionName)}
         onClick={() => handleChipClick(sessionName)}
         onKeyDown={(e) => {
           if (e.key !== "Enter" && e.key !== " ") return;
           e.preventDefault();
-          onToggleGroupCollapsed(sessionName);
+          handleChipActivate(sessionName);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -441,7 +526,7 @@ export default function TabBar({
           className="tab-group-chip-window-btn"
           title="Project terminals"
           aria-haspopup="menu"
-          aria-label={`${groupLabel(sessionName)} terminals`}
+          aria-label={`${label} terminals`}
           data-menu-trigger="true"
           onClick={(e) => {
             e.stopPropagation();
@@ -460,7 +545,7 @@ export default function TabBar({
         >
           <Icon name="chevron-down" />
         </button>
-        <span className="tab-group-chip-label">{groupLabel(sessionName)}</span>
+        <span className="tab-group-chip-label">{label}</span>
         {groupHasActivity[sessionName] && <span className="activity-dot" />}
       </div>
     );
@@ -474,17 +559,34 @@ export default function TabBar({
       nodes.push(renderTab(tab));
       continue;
     }
+    if (!renderable(key)) continue;
+    if (!chipsVisible) {
+      nodes.push(renderTab(tab));
+      continue;
+    }
     if (!chippedGroups.has(key)) {
       chippedGroups.add(key);
       nodes.push(renderChip(key));
     }
-    if (!(groupState[key]?.collapsed ?? false)) {
+    if (!collapsedFor(key)) {
       nodes.push(renderTab(tab, groupColorFor[key]));
     }
   }
 
+  // Anything with a menu or an action of its own is excluded by target, not
+  // by stopping propagation in each of those handlers: a tab's own menu
+  // already opens on its own contextmenu, and this must not stack a second
+  // one on top of it.
+  const handleBarContextMenu = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest(".tab, .tab-group-chip, .tab-new-btn, .tab-bar-extras, .tab-bar-actions")) {
+      return;
+    }
+    e.preventDefault();
+    onShowMenu(e.clientX, e.clientY, barMenuItems());
+  };
+
   return (
-    <div className="tab-bar" ref={tabBarRef}>
+    <div className="tab-bar" ref={tabBarRef} onContextMenu={handleBarContextMenu}>
       <div
         className="tab-strip"
         ref={barRef}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { BranchNode, SplitDirection, SplitNode } from "../lib/splits";
+import type { AppSettings } from "../settings";
 import type { MenuItem, Tab, TabGroupState } from "../types";
 import TabBar from "./TabBar";
 
@@ -33,12 +34,21 @@ interface SharedProps {
   activeMenuSourceId: string | null;
   onCloseMenu: () => void;
   tabMenuItems: (tab: Tab) => MenuItem[];
+  // The tab bar's own empty-space menu. Editor group id first, like
+  // groupMenuItems below: its items act on the pane that was clicked.
+  tabBarMenuItems: (editorGroupId: string) => MenuItem[];
   onToggleSidebar: () => void;
   groupingEnabled: boolean;
   groupKey: (tab: Tab) => string | null;
   groupLabel: (groupKey: string) => string;
   groupState: Record<string, TabGroupState>;
+  // settings.tabBarScope, already forced to "all" by App while grouping is
+  // off — every bar shares it, but each resolves its own active project.
+  scope: AppSettings["tabBarScope"];
   onToggleGroupCollapsed: (sessionName: string) => void;
+  // Editor group id first, like groupMenuItems below: a chip activates a tab
+  // in its own pane, never another's.
+  onActivateGroup: (editorGroupId: string, sessionName: string) => void;
   // Both take the editor group id first — a session chip's order/position
   // and "Close Group" are scoped to one split pane's own tab bar; Leaf binds
   // its own groupId before handing these to TabBar (see useTabGroups.ts).
@@ -123,12 +133,15 @@ function Leaf({
   activeMenuSourceId,
   onCloseMenu,
   tabMenuItems,
+  tabBarMenuItems,
   onToggleSidebar,
   groupingEnabled,
   groupKey,
   groupLabel,
   groupState,
+  scope,
   onToggleGroupCollapsed,
+  onActivateGroup,
   groupMenuItems,
   windowMenuItems,
   onReorderGroup,
@@ -172,6 +185,7 @@ function Leaf({
         onCloseMenu={onCloseMenu}
         editorGroupId={groupId}
         tabMenuItems={tabMenuItems}
+        barMenuItems={() => tabBarMenuItems(groupId)}
         actionsRef={actionsRefFor(groupId)}
         extras={tabExtrasFor(groupId)}
         onToggleSidebar={onToggleSidebar}
@@ -179,7 +193,9 @@ function Leaf({
         groupKey={groupKey}
         groupLabel={groupLabel}
         groupState={groupState}
+        scope={scope}
         onToggleGroupCollapsed={onToggleGroupCollapsed}
+        onActivateGroup={(sessionName) => onActivateGroup(groupId, sessionName)}
         groupMenuItems={(sessionName) => groupMenuItems(groupId, sessionName)}
         windowMenuItems={(sessionName) => windowMenuItems(groupId, sessionName)}
         onReorderGroup={(sessionKey, toIndex) => onReorderGroup(groupId, sessionKey, toIndex)}

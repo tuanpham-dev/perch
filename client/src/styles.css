@@ -1969,6 +1969,18 @@ body.resizing-row {
   filter: brightness(1.1);
 }
 
+/* An inactive project's chip acts as "switch to this project", so it is
+   dimmed to let the active one read as the project in use and comes back to
+   full strength under the pointer. Declared before .dragging, which shares
+   its specificity and has to win while a chip is being dragged. */
+.tab-group-chip:not(.active) {
+  opacity: 0.55;
+}
+
+.tab-group-chip:not(.active):hover {
+  opacity: 1;
+}
+
 .tab-group-chip.dragging {
   opacity: 0.4;
 }

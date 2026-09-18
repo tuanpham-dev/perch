@@ -45,7 +45,7 @@ import { useFileActions } from "./hooks/useFileActions";
 import { useFileOpeners } from "./hooks/useFileOpeners";
 import { useGlobalKeybindings } from "./hooks/useGlobalKeybindings";
 import { COMMANDS, formatBinding } from "./keybindings";
-import { DEFAULT_SETTINGS } from "./settings";
+import { DEFAULT_SETTINGS, TAB_BAR_SCOPES } from "./settings";
 import { evaluateWhen } from "./whenClause";
 import { useBottomPanel } from "./hooks/useBottomPanel";
 import { useOpenTarget } from "./hooks/useOpenTarget";
@@ -790,6 +790,7 @@ export default function App() {
     openWindowTab,
     openAllWindows,
     closeTab,
+    closeAllTabs,
     cycleTab,
     moveTab,
     closeOtherTabs,
@@ -970,7 +971,7 @@ export default function App() {
     [],
   );
 
-  const { tabGroupState, toggleGroupCollapsed, closeGroupTabs, groupMenuItems, moveGroup } = useTabGroups(
+  const { tabGroupState, toggleGroupCollapsed, activateGroup, closeGroupTabs, groupMenuItems, moveGroup } = useTabGroups(
     tabs,
     tabsRef,
     setTabs,
@@ -1420,6 +1421,80 @@ export default function App() {
       if (sessionName) createWindow(sessionName);
     },
     [groupActive, tabs, activeSession, sessions, createWindow],
+  );
+
+  // Right-click on a tab bar's empty space — the strip itself, not a tab or
+  // a chip, each of which keeps its own menu. Everything here acts on the
+  // clicked pane: right-click focuses it before the menu opens (the leaf's
+  // pointer-down capture in SplitLayout), so the split items, which target
+  // whichever pane is focused, land where the user clicked.
+  // The two settings that shape the tab bar, as a trailing section every
+  // menu you can reach the bar by carries — its empty space, a tab, a
+  // project chip. They are view switches you flip while working, not things
+  // you configure once, so the tab bar itself is where you want them; they
+  // write the same AppSettings fields Settings → Behavior does, so the two
+  // can never disagree. "Show Tabs For" only appears when grouping is on:
+  // without project chips there is nothing for it to scope.
+  const tabBarSettingsItems = useCallback((): MenuItem[] => {
+    const items: MenuItem[] = [{ label: "", separator: true, onClick: () => {} }];
+    if (settings.tabGroupsBySession) {
+      items.push({
+        label: "Show Tabs For",
+        onClick: () => {},
+        submenu: TAB_BAR_SCOPES.map((opt) => ({
+          label: opt.label,
+          checked: settings.tabBarScope === opt.value,
+          onClick: () => setSettings((prev) => ({ ...prev, tabBarScope: opt.value })),
+        })),
+      });
+    }
+    items.push({
+      label: "Group Tabs by Project",
+      checked: settings.tabGroupsBySession,
+      onClick: () =>
+        setSettings((prev) => ({ ...prev, tabGroupsBySession: !prev.tabGroupsBySession })),
+    });
+    return items;
+  }, [settings.tabGroupsBySession, settings.tabBarScope, setSettings]);
+
+  // The per-tab and per-chip menus with that same section appended — the
+  // hooks that build their action items (useSessionActions, useTabGroups)
+  // know nothing about settings, and don't need to.
+  const tabMenuItemsWithSettings = useCallback(
+    (tab: Tab): MenuItem[] => [...tabMenuItems(tab), ...tabBarSettingsItems()],
+    [tabMenuItems, tabBarSettingsItems],
+  );
+  const groupMenuItemsWithSettings = useCallback(
+    (editorGroupId: string, sessionName: string): MenuItem[] => [
+      ...groupMenuItems(editorGroupId, sessionName),
+      ...tabBarSettingsItems(),
+    ],
+    [groupMenuItems, tabBarSettingsItems],
+  );
+
+  const tabBarMenuItems = useCallback(
+    (editorGroupId: string): MenuItem[] => {
+      const items: MenuItem[] = [];
+      if (sessions.length > 0) {
+        items.push({ label: "New Terminal", onClick: () => newWindowInGroup(editorGroupId) });
+      }
+      items.push(
+        { label: "Reopen Closed Tab", onClick: reopenClosedTab },
+        { label: "Split Up", onClick: () => void splitGroup("up") },
+        { label: "Split Down", onClick: () => void splitGroup("down") },
+        { label: "Split Left", onClick: () => void splitGroup("left") },
+        { label: "Split Right", onClick: () => void splitGroup("right") },
+      );
+      if (tabs.some((t) => t.groupId === editorGroupId)) {
+        items.push({
+          label: "Close All Tabs",
+          danger: true,
+          onClick: () => void closeAllTabs(editorGroupId),
+        });
+      }
+      return [...items, ...tabBarSettingsItems()];
+    },
+    [sessions, tabs, newWindowInGroup, reopenClosedTab, splitGroup, closeAllTabs, tabBarSettingsItems],
   );
 
   // Session/window commands need an active real tab (a session/window, not a
@@ -2169,7 +2244,8 @@ export default function App() {
           onShowMenu={showMenu}
           activeMenuSourceId={menu?.sourceId ?? null}
           onCloseMenu={closeMenu}
-          tabMenuItems={tabMenuItems}
+          tabMenuItems={tabMenuItemsWithSettings}
+          tabBarMenuItems={tabBarMenuItems}
           onReorder={moveTab}
           onMoveTabToGroup={moveTabToGroup}
           onSplitAndMoveTab={splitGroupAndMoveTab}
@@ -2178,8 +2254,12 @@ export default function App() {
           groupKey={tabGroupKey}
           groupLabel={groupLabelForKey}
           groupState={tabGroupState}
+          // Scoping only makes sense once tabs carry project chips: with
+          // grouping off there is no chip to bring a hidden project back.
+          scope={settings.tabGroupsBySession ? settings.tabBarScope : "all"}
           onToggleGroupCollapsed={toggleGroupCollapsed}
-          groupMenuItems={groupMenuItems}
+          onActivateGroup={activateGroup}
+          groupMenuItems={groupMenuItemsWithSettings}
           windowMenuItems={chipWindowMenuItems}
           onReorderGroup={moveGroup}
           onNewWindow={sessions.length > 0 ? newWindowInGroup : null}
