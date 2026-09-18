@@ -2,9 +2,9 @@
   "name": "git-scm",
   "private": true,
   "publisher": "perch",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "displayName": "Git",
-  "description": "Built-in VS Code-style Source Control panel: stage, commit, amend, push/pull/fetch, branch switching, stash, an AI-written commit message, a COMMITS history pane, a status-bar branch readout, and diff view (bundled - see extensions/build.mjs).",
+  "description": "Built-in VS Code-style Source Control panel: stage, commit, amend, push/pull/fetch, publish and force-with-lease, an AI-written commit message, BRANCHES (branches, remotes and tags), COMMITS with search and per-row actions, a commit details view, stash, a status-bar branch readout, and diff view (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
   "contributes": {
     "configuration": {
@@ -23,6 +23,11 @@
           "minimum": 0,
           "maximum": 3600000,
           "description": "How often (ms) to run a non-interactive `git fetch` in the background so ahead/behind counts stay current without manually pulling. 0 (default) disables background fetch. A non-zero value below 60000 is treated as 60000. Never prompts for credentials - a repo whose remote needs auth just fails the fetch silently; use Pull or the More Actions menu's Fetch entry for an interactive attempt."
+        },
+        "gitScm.pullRebase": {
+          "type": "boolean",
+          "default": false,
+          "description": "Rebase instead of merging when pulling. Off (default) pulls with --ff-only, so a pull that would create a merge commit stops and asks. More Actions always offers both Pull and Pull (Rebase), whichever way this is set; Sync follows this setting."
         },
         "gitScm.fileTreeDecorations": {
           "type": "boolean",

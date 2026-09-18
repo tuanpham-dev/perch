@@ -60,8 +60,15 @@ function git(args, cwd, opts = {}) {
       },
       (err, stdout, stderr) => {
         if (err && !(opts.allowNonZeroExit && err.code === 1)) {
-          const wrapped = new Error(stderr.trim() || err.message);
+          // Most git failures explain themselves on stderr, but some of the
+          // most useful ones (a merge or cherry-pick stopping on a
+          // conflict) write to stdout and exit non-zero, leaving stderr
+          // empty — without this the panel would show execFile's own
+          // "Command failed: git merge …" instead of git's account of what
+          // happened.
+          const wrapped = new Error(stderr.trim() || stdout.trim() || err.message);
           wrapped.stderr = stderr;
+          wrapped.stdout = stdout;
           reject(wrapped);
         } else {
           resolve(stdout);
@@ -1093,9 +1100,74 @@ export function activate({ router, log, host, getSettings, ai }) {
     });
   }
 
-  async function runNetworkOp(cwd, op, kind) {
-    if (kind === "pull") {
-      await gitNetwork(["pull", "--ff-only"], cwd, op);
+  // A 4xx that networkHandler should pass through as-is rather than
+  // reporting as a server failure — "you have no remote" is the user's
+  // situation, not an error in the op.
+  function refuse(message, status = 400) {
+    const err = new Error(message);
+    err.status = status;
+    return err;
+  }
+
+  // "origin" when it exists, else the only remote there is. Several remotes
+  // and no origin is genuinely ambiguous: refuse rather than guess which one
+  // a publish or a tag push meant.
+  async function resolveRemote(cwd) {
+    const remotes = (await git(["remote"], cwd))
+      .split("\n")
+      .map((r) => r.trim())
+      .filter(Boolean);
+    if (remotes.length === 0) throw refuse("This repository has no remote to push to.");
+    if (remotes.includes("origin")) return "origin";
+    if (remotes.length === 1) return remotes[0];
+    throw refuse(`Several remotes (${remotes.join(", ")}) and no "origin" - push from a terminal to choose one.`);
+  }
+
+  async function runNetworkOp(cwd, op, kind, params = {}) {
+    if (kind === "pull" || kind === "pull-rebase") {
+      // --rebase for "pull-rebase" always, and for a plain pull when the
+      // user set gitScm.pullRebase; otherwise the --ff-only this extension
+      // has always used (a pull that would create a merge commit is a
+      // decision, not a default).
+      let rebase = kind === "pull-rebase";
+      if (!rebase) {
+        try {
+          rebase = (await getSettings())["gitScm.pullRebase"] === true;
+        } catch {
+          // Unreadable settings fall back to the historical behavior.
+        }
+      }
+      await gitNetwork(["pull", rebase ? "--rebase" : "--ff-only"], cwd, op);
+      return;
+    }
+    if (kind === "publish") {
+      const remote = await resolveRemote(cwd);
+      const branch = await currentBranch(cwd);
+      if (!branch) throw refuse("HEAD is detached - check out a branch before publishing.");
+      await gitNetwork(["push", "-u", remote, branch], cwd, op);
+      return;
+    }
+    if (kind === "push-force-lease") {
+      // --force-with-lease only: it refuses when the remote moved since the
+      // last fetch, which is the whole reason a force push is offered here
+      // at all. A plain --force is never run.
+      await gitNetwork(["push", "--force-with-lease"], cwd, op);
+      return;
+    }
+    if (kind === "push-delete") {
+      const remote = typeof params.remote === "string" ? params.remote.trim() : "";
+      const branch = await validRefName(params.branch, cwd, "branch");
+      if (!remote || remote.startsWith("-")) throw refuse("remote is required");
+      if (!branch) throw refuse("branch is required and must be a valid branch name");
+      await gitNetwork(["push", remote, "--delete", branch], cwd, op);
+      return;
+    }
+    if (kind === "push-tag") {
+      const tag = await validRefName(params.tag, cwd, "tag");
+      if (!tag) throw refuse("tag is required and must be a valid tag name");
+      const remote = typeof params.remote === "string" && params.remote.trim() ? params.remote.trim() : await resolveRemote(cwd);
+      if (remote.startsWith("-")) throw refuse("remote is required");
+      await gitNetwork(["push", remote, `refs/tags/${tag}`], cwd, op);
       return;
     }
     // push: auto-publish (`-u origin <branch>`) when no upstream is set yet
@@ -1147,10 +1219,10 @@ export function activate({ router, log, host, getSettings, ai }) {
       const op = createOp(opId);
       try {
         if (kind === "sync") {
-          await runNetworkOp(cwd, op, "pull");
-          await runNetworkOp(cwd, op, "push");
+          await runNetworkOp(cwd, op, "pull", req.body);
+          await runNetworkOp(cwd, op, "push", req.body);
         } else {
-          await runNetworkOp(cwd, op, kind);
+          await runNetworkOp(cwd, op, kind, req.body);
         }
         await approveRemembered(op, cwd);
         res.json({ ok: true });
@@ -1163,6 +1235,10 @@ export function activate({ router, log, host, getSettings, ai }) {
         } else if (isAuthFailure(message)) {
           for (const key of op.authTouched) credCache.delete(key);
           res.status(401).json({ error: message || "Authentication failed" });
+        } else if (err.status) {
+          // A refusal this route raised itself (no remote, bad ref name) —
+          // the user's situation, reported as such rather than as a 500.
+          res.status(err.status).json({ error: message });
         } else {
           res.status(500).json({ error: message });
         }
@@ -1262,6 +1338,13 @@ export function activate({ router, log, host, getSettings, ai }) {
   router.post("/push", networkHandler("push"));
   router.post("/pull", networkHandler("pull"));
   router.post("/sync", networkHandler("sync"));
+  // Every one of these reaches a remote, so they all ride the same op relay
+  // (credential prompts, watchdog, cancel) rather than the plain git() path.
+  router.post("/pull-rebase", networkHandler("pull-rebase"));
+  router.post("/publish", networkHandler("publish"));
+  router.post("/push-force-lease", networkHandler("push-force-lease"));
+  router.post("/push-delete", networkHandler("push-delete"));
+  router.post("/push-tag", networkHandler("push-tag"));
 
   // Non-interactive fetch: no askpass relay env, so a repo whose remote
   // needs auth just fails fast (GIT_TERMINAL_PROMPT=0) instead of parking a
@@ -1347,6 +1430,14 @@ export function activate({ router, log, host, getSettings, ai }) {
     const staged = req.query.staged === "1";
     const untracked = req.query.untracked === "1";
     const origPath = typeof req.query.origPath === "string" && req.query.origPath ? req.query.origPath : relPath;
+    // With `hash`, the two sides are that commit's revisions of the file
+    // rather than anything in the working tree — the details view, the
+    // COMMITS pane and a stash entry all open files this way.
+    const commitHash = typeof req.query.hash === "string" && req.query.hash ? req.query.hash : "";
+    if (commitHash && !/^[0-9a-f]{4,40}$/i.test(commitHash)) {
+      res.status(400).json({ error: "hash must be a hex commit SHA" });
+      return;
+    }
 
     // A side is refused rather than truncated: an editor showing half a file
     // would be worse than falling back to the unified patch view.
@@ -1379,7 +1470,20 @@ export function activate({ router, log, host, getSettings, ai }) {
 
       let original;
       let modified;
-      if (untracked) {
+      if (commitHash) {
+        // A commit's own two sides: the file as its (first) parent had it,
+        // and as this commit left it. Neither is a file on disk, so the
+        // modified side carries no `path` — the editor opens it read-only.
+        const short = commitHash.slice(0, 7);
+        const before = await showOrEmpty(`${commitHash}^:${origPath}`);
+        const after = await showOrEmpty(`${commitHash}:${relPath}`);
+        original = { content: before.content, label: before.missing ? `${short}^ (new file)` : `${short}^` };
+        modified = {
+          content: after.content,
+          label: after.missing ? `${short} (deleted)` : short,
+          readOnlyReason: "This is a committed revision.",
+        };
+      } else if (untracked) {
         original = { content: "", label: "Empty" };
         modified = { content: fs.readFileSync(abs, "utf8"), label: "Working Tree", path: abs };
       } else if (staged) {
@@ -1422,12 +1526,30 @@ export function activate({ router, log, host, getSettings, ai }) {
     if (!cwd) return;
     const rawLimit = Number(req.query.limit);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(200, Math.floor(rawLimit)) : 20;
+    // The COMMITS search box, already split into its three parts by the
+    // client (searchQuery.mjs). Each is passed as a single `--opt=value`
+    // argument so a value starting with "-" can't become an option, and
+    // --grep is matched case-insensitively against message text.
+    const grep = typeof req.query.grep === "string" ? req.query.grep.trim() : "";
+    const author = typeof req.query.author === "string" ? req.query.author.trim() : "";
+    const filterPath = typeof req.query.path === "string" ? req.query.path.trim() : "";
     try {
       const root = await requireRoot(cwd, res);
       if (!root) return;
+      if (filterPath && !resolveSafePath(root, filterPath)) {
+        res.status(400).json({ error: "path escapes the repository root" });
+        return;
+      }
+      const filterArgs = [];
+      if (grep) filterArgs.push(`--grep=${grep}`, "--regexp-ignore-case");
+      if (author) filterArgs.push(`--author=${author}`, "--regexp-ignore-case");
+      const pathArgs = filterPath ? ["--", filterPath] : [];
       let raw;
       try {
-        raw = await git(["log", `--format=${LOG_FORMAT}`, "-n", String(limit)], root);
+        raw = await git(
+          ["log", `--format=${LOG_FORMAT}`, "-n", String(limit), ...filterArgs, ...pathArgs],
+          root,
+        );
       } catch {
         res.json({ commits: [] });
         return;
@@ -1467,8 +1589,151 @@ export function activate({ router, log, host, getSettings, ai }) {
       // still opt-in: an ordinary merge's COMMITS row keeps the combined
       // diff it has always shown.
       const showArgs = req.query.firstParent === "1" ? ["show", "-m", "--first-parent", hash] : ["show", hash];
-      const diff = await git([...showArgs, "--format=fuller", "--patch"], root);
+      // With `path`, one file's patch out of the commit — what the details
+      // view's file rows open when no editor claims the diff capability.
+      const relPath = typeof req.query.path === "string" ? req.query.path : "";
+      const pathArgs = [];
+      if (relPath) {
+        if (!resolveSafePath(root, relPath)) {
+          res.status(400).json({ error: "path escapes the repository root" });
+          return;
+        }
+        pathArgs.push("--", relPath);
+      }
+      // A single file's patch skips the commit header: whatever asked for
+      // one file (the details view's right column) is already showing the
+      // author, date and message beside it, and repeating them eats the top
+      // of the pane. The whole-commit diff keeps the full header.
+      const formatArg = relPath ? "--format=" : "--format=fuller";
+      const diff = await git([...showArgs, formatArg, "--patch", ...pathArgs], root);
       res.json({ diff });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Commit details ----
+  //
+  // Header plus per-file statistics for one commit, for the details view.
+  // %B is last in the format so a message containing a \x1f (never seen in
+  // practice, but nothing forbids it) can be rejoined instead of truncating
+  // the fields after it.
+  const COMMIT_INFO_FORMAT = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%D%x1f%B";
+
+  // `diff-tree -z` emits NUL-terminated fields. numstat writes
+  // "<added>\t<removed>\t<path>" for an ordinary change and
+  // "<added>\t<removed>\t" followed by two more fields for a rename; a
+  // binary file writes "-" for both counts.
+  function parseNumstatZ(raw) {
+    const tokens = raw.split("\0").filter((t) => t.length > 0);
+    const out = new Map();
+    for (let i = 0; i < tokens.length; i++) {
+      const parts = tokens[i].split("\t");
+      if (parts.length < 3) continue;
+      const [added, removed] = parts;
+      let oldPath = null;
+      let filePath = parts.slice(2).join("\t");
+      if (filePath === "") {
+        oldPath = tokens[++i] ?? null;
+        filePath = tokens[++i] ?? "";
+      }
+      if (!filePath) continue;
+      const binary = added === "-" || removed === "-";
+      out.set(filePath, {
+        oldPath,
+        added: binary ? 0 : Number(added),
+        removed: binary ? 0 : Number(removed),
+        binary,
+      });
+    }
+    return out;
+  }
+
+  // name-status -z: a status token ("M", "R100", …) followed by one path,
+  // or by two for a rename or copy.
+  function parseNameStatusZ(raw) {
+    const tokens = raw.split("\0").filter((t) => t.length > 0);
+    const out = new Map();
+    for (let i = 0; i < tokens.length; i++) {
+      const code = tokens[i];
+      const letter = code[0];
+      let oldPath = null;
+      let filePath;
+      if (letter === "R" || letter === "C") {
+        oldPath = tokens[++i] ?? null;
+        filePath = tokens[++i] ?? "";
+      } else {
+        filePath = tokens[++i] ?? "";
+      }
+      if (!filePath) continue;
+      out.set(filePath, { status: classifyChar(letter) ?? "modified", oldPath });
+    }
+    return out;
+  }
+
+  router.get("/commit-info", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    const hash = typeof req.query.hash === "string" ? req.query.hash : "";
+    if (!COMMIT_HASH_RE.test(hash)) {
+      res.status(400).json({ error: "hash must be a hex commit SHA" });
+      return;
+    }
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      const raw = await git(["show", "-s", `--format=${COMMIT_INFO_FORMAT}`, hash], root);
+      const parts = raw.split("\x1f");
+      const parents = (parts[4] ?? "").trim().split(/\s+/).filter(Boolean);
+      const message = parts.slice(6).join("\x1f").replace(/\n+$/, "");
+
+      // A merge (a stash entry is one too) has no plain diff against "all
+      // its parents at once" that a file list could show, so its files are
+      // read against the first parent — what the merge brought in. The
+      // combined diff is still one click away as Full Diff.
+      const useFirstParent = (req.query.firstParent === "1" || parents.length > 1) && parents.length > 0;
+      const range = useFirstParent ? [`${hash}^1`, hash] : ["--root", hash];
+      const base = ["diff-tree", "-r", "-M", "--no-commit-id", "-z", ...range];
+      const [rawNumstat, rawNameStatus] = await Promise.all([
+        git([...base, "--numstat"], root),
+        git([...base, "--name-status"], root),
+      ]);
+      const stats = parseNumstatZ(rawNumstat);
+      const statuses = parseNameStatusZ(rawNameStatus);
+      const files = [...statuses.entries()].map(([filePath, entry]) => {
+        const stat = stats.get(filePath);
+        return {
+          path: filePath,
+          oldPath: entry.oldPath ?? stat?.oldPath ?? null,
+          status: entry.status,
+          added: stat?.added ?? 0,
+          removed: stat?.removed ?? 0,
+          binary: stat?.binary ?? false,
+        };
+      });
+      files.sort((a, b) => a.path.localeCompare(b.path));
+
+      const refs = (parts[5] ?? "")
+        .split(", ")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => {
+          if (item.startsWith("HEAD -> ")) return { name: item.slice("HEAD -> ".length), head: true, tag: false };
+          if (item === "HEAD") return { name: "HEAD", head: true, tag: false };
+          if (item.startsWith("tag: ")) return { name: item.slice("tag: ".length), head: false, tag: true };
+          return { name: item, head: false, tag: false };
+        });
+
+      res.json({
+        hash: parts[0] ?? hash,
+        author: parts[1] ?? "",
+        email: parts[2] ?? "",
+        timestamp: Number(parts[3] ?? 0),
+        parents,
+        refs,
+        message,
+        files,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1502,13 +1767,58 @@ export function activate({ router, log, host, getSettings, ai }) {
   // would be parsed as an option instead of a ref name.
   const SAFE_BRANCH_RE = /^[^-]/;
 
+  // The leading-dash guard above plus git's own opinion of the name, which
+  // is the only complete answer (no spaces, no "..", no trailing ".lock", no
+  // control characters — the full rules live in git-check-ref-format(1)).
+  // Returns the trimmed name, or null when it isn't usable.
+  async function validRefName(name, cwd, kind = "branch") {
+    if (typeof name !== "string") return null;
+    const trimmed = name.trim();
+    if (!trimmed || !SAFE_BRANCH_RE.test(trimmed)) return null;
+    const args =
+      kind === "tag" ? ["check-ref-format", `refs/tags/${trimmed}`] : ["check-ref-format", "--branch", trimmed];
+    try {
+      await git(args, cwd);
+      return trimmed;
+    } catch {
+      return null;
+    }
+  }
+
+  async function branchExists(root, name) {
+    try {
+      await git(["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], root);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Three shapes, all landing on `git switch`:
+  //   { branch }            switch to a local branch (create: true makes it)
+  //   { branch, track }     a remote row: start tracking it, or just switch
+  //                         when that local name already exists
+  //   { detach }            a commit row: detached HEAD at a hash
   router.post("/checkout", async (req, res) => {
     const cwd = requireCwd(req, res);
     if (!cwd) return;
-    const branch = typeof req.body?.branch === "string" ? req.body.branch.trim() : "";
+    const detach = typeof req.body?.detach === "string" ? req.body.detach.trim() : "";
+    const track = typeof req.body?.track === "string" ? req.body.track.trim() : "";
     const create = req.body?.create === true;
-    if (!branch || !SAFE_BRANCH_RE.test(branch)) {
-      res.status(400).json({ error: "branch is required and cannot start with '-'" });
+    if (detach && !COMMIT_HASH_RE.test(detach)) {
+      res.status(400).json({ error: "detach must be a hex commit SHA" });
+      return;
+    }
+    let branch = "";
+    if (!detach) {
+      branch = (await validRefName(req.body?.branch, cwd, "branch")) ?? "";
+      if (!branch) {
+        res.status(400).json({ error: "branch is required and must be a valid branch name" });
+        return;
+      }
+    }
+    if (track && (track.startsWith("-") || !track.includes("/"))) {
+      res.status(400).json({ error: "track must be a <remote>/<branch> ref" });
       return;
     }
     try {
@@ -1517,7 +1827,355 @@ export function activate({ router, log, host, getSettings, ai }) {
       // Errors (dirty working tree blocking the switch, branch already
       // exists on create, invalid ref name) pass through as git wrote them
       // — no attempt to reword git's own messages here.
-      await git(create ? ["switch", "-c", branch] : ["switch", branch], root);
+      let args;
+      if (detach) {
+        args = ["switch", "--detach", detach];
+      } else if (track && !(await branchExists(root, branch))) {
+        args = ["switch", "--track", track];
+      } else {
+        args = create ? ["switch", "-c", branch] : ["switch", branch];
+      }
+      await git(args, root);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Refs: the BRANCHES pane's whole listing in one round trip ----
+  //
+  // for-each-ref rather than `git branch -vv`: the porcelain is stable, the
+  // fields are exactly the ones the pane renders, and upstream tracking
+  // comes back parsed instead of scraped out of a "[origin/x: ahead 2]"
+  // suffix. Same \x1f/\x1e separators /log uses.
+  const REF_LOCAL_FORMAT =
+    "%(refname:short)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(objectname)%1f%(committerdate:unix)%1f%(subject)%1e";
+  const REF_REMOTE_FORMAT = "%(refname:short)%1f%(objectname)%1f%(committerdate:unix)%1e";
+  // *objectname is the commit an annotated tag points at; it's empty for a
+  // lightweight tag, which points at the commit directly. Both dates are
+  // asked for because only an annotated tag has a taggerdate.
+  const REF_TAG_FORMAT =
+    "%(refname:short)%1f%(objectname)%1f%(*objectname)%1f%(committerdate:unix)%1f%(taggerdate:unix)%1f%(subject)%1e";
+
+  function splitRefRecords(raw) {
+    return raw
+      .split("\x1e")
+      .map((record) => record.replace(/^\n/, ""))
+      .filter((record) => record.length > 0)
+      .map((record) => record.split("\x1f"));
+  }
+
+  // "ahead 1, behind 2" / "ahead 3" / "behind 1" / "gone" / "" — git's own
+  // wording, which is a parse away from the two numbers the pane shows.
+  function parseTrack(track) {
+    const text = (track ?? "").trim();
+    if (text === "gone") return { ahead: 0, behind: 0, gone: true };
+    const ahead = /ahead (\d+)/.exec(text);
+    const behind = /behind (\d+)/.exec(text);
+    return { ahead: ahead ? Number(ahead[1]) : 0, behind: behind ? Number(behind[1]) : 0, gone: false };
+  }
+
+  router.get("/refs", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      const [rawLocal, rawRemote, rawTags, current, remoteNames] = await Promise.all([
+        git(["for-each-ref", "refs/heads", `--format=${REF_LOCAL_FORMAT}`], root),
+        git(["for-each-ref", "refs/remotes", `--format=${REF_REMOTE_FORMAT}`], root),
+        git(["for-each-ref", "refs/tags", `--format=${REF_TAG_FORMAT}`], root),
+        currentBranch(root),
+        git(["remote"], root),
+      ]);
+      const knownRemotes = remoteNames.split("\n").map((r) => r.trim()).filter(Boolean);
+
+      const local = splitRefRecords(rawLocal).map(([name, upstream, track, hash, timestamp, subject]) => ({
+        name,
+        upstream: upstream || null,
+        ...parseTrack(track),
+        hash,
+        timestamp: Number(timestamp),
+        subject: subject ?? "",
+      }));
+      // Current branch first, everything else by name — the row you act on
+      // most shouldn't move as branches come and go.
+      local.sort((a, b) => (a.name === current ? -1 : b.name === current ? 1 : a.name.localeCompare(b.name)));
+
+      const remotes = splitRefRecords(rawRemote)
+        // "origin/HEAD" is a symbolic pointer at the remote's default branch,
+        // not a branch of its own — listing it would duplicate whichever row
+        // it points at.
+        .filter(([name]) => !name.endsWith("/HEAD"))
+        .map(([name, hash, timestamp]) => {
+          const slash = name.indexOf("/");
+          const remote = slash === -1 ? "" : name.slice(0, slash);
+          return {
+            remote: knownRemotes.includes(remote) ? remote : (knownRemotes[0] ?? remote),
+            name: slash === -1 ? name : name.slice(slash + 1),
+            ref: name,
+            hash,
+            timestamp: Number(timestamp),
+          };
+        });
+      remotes.sort((a, b) => a.ref.localeCompare(b.ref));
+
+      const tags = splitRefRecords(rawTags).map(
+        ([name, hash, targetHash, committerdate, taggerdate, subject]) => ({
+          name,
+          hash,
+          targetHash: targetHash || null,
+          annotated: Boolean(targetHash),
+          timestamp: Number(taggerdate || committerdate || 0),
+          subject: subject ?? "",
+        }),
+      );
+      tags.sort((a, b) => b.timestamp - a.timestamp);
+
+      res.json({ current: current || null, detached: !current, local, remotes, tags });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Branch and tag operations ----
+
+  router.post("/branch-create", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    const name = await validRefName(req.body?.name, cwd, "branch");
+    if (!name) {
+      res.status(400).json({ error: "name is required and must be a valid branch name" });
+      return;
+    }
+    const from = typeof req.body?.from === "string" ? req.body.from.trim() : "";
+    if (from && from.startsWith("-")) {
+      res.status(400).json({ error: "from cannot start with '-'" });
+      return;
+    }
+    const checkout = req.body?.checkout === true;
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      // Create then switch, rather than `switch -c <name> <from>`: a dirty
+      // tree that blocks the switch still leaves the branch created, which
+      // is what the user asked for and what the pane then shows.
+      await git(from ? ["branch", name, from] : ["branch", name], root);
+      if (checkout) await git(["switch", name], root);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post("/branch-rename", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    const name = await validRefName(req.body?.name, cwd, "branch");
+    const newName = await validRefName(req.body?.newName, cwd, "branch");
+    if (!name || !newName) {
+      res.status(400).json({ error: "name and newName are required and must be valid branch names" });
+      return;
+    }
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      await git(["branch", "-m", name, newName], root);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -d first, -D only when the client asks after seeing the refusal: the
+  // 409 carries `unmerged` so the panel can offer "delete anyway" instead of
+  // making every delete a force delete.
+  router.post("/branch-delete", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    const name = await validRefName(req.body?.name, cwd, "branch");
+    if (!name) {
+      res.status(400).json({ error: "name is required and must be a valid branch name" });
+      return;
+    }
+    const force = req.body?.force === true;
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      try {
+        await git(["branch", force ? "-D" : "-d", name], root);
+      } catch (err) {
+        const message = (err.message || "").toString();
+        if (!force && /not fully merged/i.test(message)) {
+          res.status(409).json({ error: message.trim(), unmerged: true });
+          return;
+        }
+        throw err;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post("/tag-create", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    const name = await validRefName(req.body?.name, cwd, "tag");
+    if (!name) {
+      res.status(400).json({ error: "name is required and must be a valid tag name" });
+      return;
+    }
+    const target = typeof req.body?.target === "string" ? req.body.target.trim() : "";
+    if (target && target.startsWith("-")) {
+      res.status(400).json({ error: "target cannot start with '-'" });
+      return;
+    }
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      // A message makes it annotated (its own object, with an author and a
+      // date); without one it's a lightweight tag pointing straight at the
+      // commit — the same split `git tag` itself draws.
+      const args = ["tag"];
+      if (message) args.push("-a", "-m", message);
+      args.push(name);
+      if (target) args.push(target);
+      await git(args, root);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post("/tag-delete", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    const name = await validRefName(req.body?.name, cwd, "tag");
+    if (!name) {
+      res.status(400).json({ error: "name is required and must be a valid tag name" });
+      return;
+    }
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      await git(["tag", "-d", name], root);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Merge, rebase, cherry-pick and revert can all stop on a conflict. git
+  // exits non-zero for that, but it isn't a failure to report: the working
+  // tree is now mid-operation, which /status reports and the panel already
+  // renders (the operation badge, the Merge Changes group, Abort). So a
+  // failure that left an operation in progress comes back as a success
+  // carrying `conflicted`, and only a real failure gets an error line.
+  async function settleOperation(root, err, res) {
+    let operation = null;
+    try {
+      ({ operation } = await detectOperation(root));
+    } catch {
+      // Unreadable git dir — fall through to reporting the error.
+    }
+    if (operation) {
+      res.json({ ok: true, conflicted: true, operation });
+      return;
+    }
+    res.status(500).json({ error: err.message });
+  }
+
+  function refOpHandler(build) {
+    return async (req, res) => {
+      const cwd = requireCwd(req, res);
+      if (!cwd) return;
+      const ref = typeof req.body?.ref === "string" ? req.body.ref.trim() : "";
+      if (!ref || ref.startsWith("-")) {
+        res.status(400).json({ error: "ref is required and cannot start with '-'" });
+        return;
+      }
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      try {
+        await git(build(ref), root);
+        res.json({ ok: true });
+      } catch (err) {
+        await settleOperation(root, err, res);
+      }
+    };
+  }
+
+  router.post("/merge", refOpHandler((ref) => ["merge", "--no-edit", ref]));
+  router.post("/rebase", refOpHandler((ref) => ["rebase", ref]));
+
+  // ---- Commit operations ----
+
+  function commitOpHandler(build) {
+    return async (req, res) => {
+      const cwd = requireCwd(req, res);
+      if (!cwd) return;
+      const hash = typeof req.body?.hash === "string" ? req.body.hash.trim() : "";
+      if (!COMMIT_HASH_RE.test(hash)) {
+        res.status(400).json({ error: "hash must be a hex commit SHA" });
+        return;
+      }
+      let args;
+      try {
+        args = build(hash, req.body);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      try {
+        await git(args, root);
+        res.json({ ok: true });
+      } catch (err) {
+        // Cherry-pick and revert stop on conflicts the same way a merge
+        // does — see settleOperation.
+        await settleOperation(root, err, res);
+      }
+    };
+  }
+
+  const RESET_MODES = new Set(["soft", "mixed", "hard"]);
+
+  router.post("/cherry-pick", commitOpHandler((hash) => ["cherry-pick", hash]));
+  router.post("/revert", commitOpHandler((hash) => ["revert", "--no-edit", hash]));
+  router.post(
+    "/reset",
+    commitOpHandler((hash, body) => {
+      const mode = typeof body?.mode === "string" ? body.mode : "";
+      if (!RESET_MODES.has(mode)) throw new Error("mode must be soft, mixed or hard");
+      return ["reset", `--${mode}`, hash];
+    }),
+  );
+
+  // Undo = soft reset to the parent: the commit is gone, its changes are
+  // back in the index, ready to be re-committed with a fixed message. Not
+  // offered while a merge/rebase/cherry-pick is unfinished, where resetting
+  // HEAD would strand the operation.
+  router.post("/undo-commit", async (req, res) => {
+    const cwd = requireCwd(req, res);
+    if (!cwd) return;
+    try {
+      const root = await requireRoot(cwd, res);
+      if (!root) return;
+      const { operation } = await detectOperation(root);
+      if (operation) {
+        res.status(409).json({ error: `Finish or abort the ${operation} first.` });
+        return;
+      }
+      try {
+        await git(["rev-parse", "--verify", "--quiet", "HEAD~1"], root);
+      } catch {
+        res.status(400).json({ error: "The first commit has no parent to undo to." });
+        return;
+      }
+      await git(["reset", "--soft", "HEAD~1"], root);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

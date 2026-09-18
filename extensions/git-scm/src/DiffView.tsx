@@ -14,7 +14,9 @@ import {
   sendToAgent,
   type AgentTargetProgram,
 } from "../../_shared/agentTarget";
-import { apiGetJson, decodeDiffKey, extSettings, statusListeners } from "./client";
+import { apiGetJson, decodeDiffKey, extSettings, statusListeners } from "./host";
+import { highlightLines, highlightMode, languageFor, type HlToken } from "./highlight";
+import "highlight.js/styles/github-dark.css";
 
 interface DiffProps {
   filePath: string;
@@ -44,6 +46,14 @@ interface Hunk {
 function parseHunkHeader(header: string): { oldStart: number; newStart: number } {
   const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(header);
   return { oldStart: m ? Number(m[1]) : 1, newStart: m ? Number(m[2]) : 1 };
+}
+
+function HighlightedText({ tokens }: { tokens: HlToken[] }) {
+  return (
+    <>
+      {tokens.map((t, i) => (t.cls ? <span key={i} className={t.cls}>{t.text}</span> : t.text))}
+    </>
+  );
 }
 
 export function parseHunks(diffText: string): Hunk[] {
@@ -143,6 +153,14 @@ function readSendAutoSubmit(): boolean {
 
 export default function DiffView({ filePath, active, toolbarTarget, openInEditor, showMenu }: DiffProps) {
   const parsed = useMemo(() => decodeDiffKey(filePath), [filePath]);
+  // Only a diff of ONE file can be highlighted: a whole-commit patch spans
+  // files in different languages, and the parser here doesn't split it back
+  // apart. That covers every case that names a file - the details view's
+  // right column, and each working-tree or staged row.
+  const language = useMemo(() => languageFor(parsed.path), [parsed.path]);
+  // Recomputed on every theme change the panel already listens for (the
+  // status subscription below re-renders this component).
+  const hlMode = highlightMode();
   const [diffText, setDiffText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Guards the status-triggered auto-refresh below from piling up a new
@@ -156,7 +174,10 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
   const requestIdRef = useRef(0);
 
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [commentOpen, setCommentOpen] = useState(false);
+  // The lines an open compose popover is about. Null when none is open:
+  // the composer is opened from a line's own gutter button, not implied by
+  // the selection, so clicking around the diff never leaves a stray form.
+  const [composerAt, setComposerAt] = useState<Selection | null>(null);
   const [comment, setComment] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendBusy, setSendBusy] = useState(false);
@@ -171,7 +192,7 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
   const [editText, setEditText] = useState("");
 
   const closeComment = useCallback(() => {
-    setCommentOpen(false);
+    setComposerAt(null);
     setComment("");
     setSendError(null);
   }, []);
@@ -184,6 +205,10 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
       const params = new URLSearchParams({ cwd: parsed.cwd, hash: parsed.commitHash });
       // Stash entries only — see encodeDiffKey's firstParent comment.
       if (parsed.firstParent) params.set("firstParent", "1");
+      // A key that names a file wants that file's patch out of the commit,
+      // not the whole commit: that's what the details view's file rows
+      // encode, and without this they'd all render the same full diff.
+      if (parsed.path) params.set("path", parsed.path);
       url = `/commit-diff?${params}`;
     } else {
       const params = new URLSearchParams({
@@ -256,6 +281,30 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
 
   const hunks = useMemo(() => (diffBody ? parseHunks(diffBody) : []), [diffBody]);
 
+  // One highlight pass over every code line in the patch, so a construct
+  // that spans lines keeps its colour, then looked up per line by a running
+  // index. Removed and added lines sit next to each other here, which can
+  // nudge the grammar's state - the price of colouring a patch without
+  // fetching both whole revisions.
+  const highlighted = useMemo(() => {
+    if (!language) return null;
+    const code = hunks.flatMap((hunk) => hunk.lines.map((line) => line.text)).join("\n");
+    // A very large patch isn't worth blocking the render for.
+    if (!code || code.length > 400_000) return null;
+    return highlightLines(code, language);
+  }, [hunks, language]);
+
+  // hunk index -> the offset of its first line in `highlighted`.
+  const hunkOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let n = 0;
+    for (const hunk of hunks) {
+      offsets.push(n);
+      n += hunk.lines.length;
+    }
+    return offsets;
+  }, [hunks]);
+
   const onLineClick = useCallback(
     (hunkIndex: number, lineIndex: number, shiftKey: boolean) => {
       setSelection((prev) => {
@@ -273,12 +322,31 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
   // and comment on more ranges (elsewhere in this hunk or another one)
   // before delivering everything as one message via sendAllComments.
   const addComment = useCallback(() => {
-    if (!selection || !comment.trim()) return;
+    if (!composerAt || !comment.trim()) return;
     const id = nextPendingId.current++;
-    setPendingComments((prev) => [...prev, { ...selection, id, text: comment.trim() }]);
+    setPendingComments((prev) => [...prev, { ...composerAt, id, text: comment.trim() }]);
     closeComment();
     setSelection(null);
-  }, [selection, comment, closeComment]);
+  }, [composerAt, comment, closeComment]);
+
+  // The gutter button comments on the selection when this line is part of
+  // one (that is how a multi-line comment is made: shift-click the range,
+  // then use any of its buttons), and on this line alone otherwise.
+  const openComposer = useCallback(
+    (hunkIndex: number, lineIndex: number) => {
+      setComment("");
+      setSendError(null);
+      setComposerAt(
+        selection &&
+          selection.hunkIndex === hunkIndex &&
+          lineIndex >= selection.start &&
+          lineIndex <= selection.end
+          ? selection
+          : { hunkIndex, start: lineIndex, end: lineIndex },
+      );
+    },
+    [selection],
+  );
 
   const removePendingComment = useCallback((id: number) => {
     setPendingComments((prev) => prev.filter((pc) => pc.id !== id));
@@ -392,7 +460,7 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
   );
 
   return (
-    <div className={`git-diff-host${active ? "" : " hidden"}`}>
+    <div className={`git-diff-host${active ? "" : " hidden"}`} data-hl={hlMode}>
       {error && <div className="git-diff-status git-diff-error">{error}</div>}
       {!error && diffText === null && <div className="git-diff-status">Loading…</div>}
       {!error && diffText !== null && diffText === "" && (
@@ -431,111 +499,76 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
                 const commentsHere = pendingComments.filter(
                   (pc) => pc.hunkIndex === hunkIndex && pc.end === lineIndex,
                 );
-                // The "Comment" trigger / compose box for the LIVE selection
-                // anchors the same way — right after its last line — so what
-                // you're about to add lands exactly where it'll render once saved.
-                const showComposer = selection?.hunkIndex === hunkIndex && selection.end === lineIndex;
+                // The compose popover belongs to the line its gutter button
+                // was pressed on (for a range, its last line - where the
+                // saved comment's own badge will sit).
+                const composerHere =
+                  composerAt?.hunkIndex === hunkIndex && composerAt.end === lineIndex;
                 return (
                   <Fragment key={lineIndex}>
                     <div
                       className={`git-diff-line git-diff-line-${line.kind}${selected ? " git-diff-line-selected" : ""}${commented ? " git-diff-line-commented" : ""}`}
                       onClick={(e) => onLineClick(hunkIndex, lineIndex, e.shiftKey)}
                     >
+                      {/* Always present, empty or not: a badge or the
+                          compose button appearing must not move the code
+                          sideways. */}
+                      <span className="git-diff-line-gutter">
+                        {commentsHere.length === 0 && (
+                          <button
+                            type="button"
+                            className={`git-diff-comment-add${composerHere ? " open" : ""}`}
+                            title="Comment on this line"
+                            aria-label="Comment on this line"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (composerHere) closeComment();
+                              else openComposer(hunkIndex, lineIndex);
+                            }}
+                          >
+                            <Icon name="comment" />
+                          </button>
+                        )}
+                        {commentsHere.map((pc) => (
+                          <button
+                            key={pc.id}
+                            type="button"
+                            className={`git-diff-comment-badge${expandedIds.has(pc.id) ? " open" : ""}`}
+                            title={pc.text}
+                            aria-expanded={expandedIds.has(pc.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(pc.id);
+                            }}
+                          >
+                            {pendingComments.findIndex((p) => p.id === pc.id) + 1}
+                          </button>
+                        ))}
+                      </span>
                       <span className="git-diff-line-marker">
                         {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
                       </span>
-                      <span className="git-diff-line-text">{line.text}</span>
-                    </div>
-                    {commentsHere.map((pc) => {
-                      const number = pendingComments.findIndex((p) => p.id === pc.id) + 1;
-                      const expanded = expandedIds.has(pc.id);
-                      const editing = editingId === pc.id;
-                      return (
-                        <div key={pc.id} className="git-diff-comment-marker">
-                          <button
-                            type="button"
-                            className="git-diff-comment-badge"
-                            title={pc.text}
-                            onClick={() => toggleExpanded(pc.id)}
-                          >
-                            {number}
-                          </button>
-                          {expanded && (
-                            <div className="git-diff-inline-comment">
-                              <div className="git-diff-inline-comment-header">
-                                <span className="git-diff-inline-comment-range">{rangeLabel(hunk, pc)}</span>
-                                <div className="git-diff-inline-comment-actions">
-                                  {!editing && (
-                                    <button
-                                      type="button"
-                                      className="icon-button"
-                                      title="Edit this comment"
-                                      onClick={() => startEdit(pc)}
-                                    >
-                                      <Icon name="edit" />
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className="icon-button"
-                                    title="Remove this comment"
-                                    onClick={() => removePendingComment(pc.id)}
-                                  >
-                                    <Icon name="close" />
-                                  </button>
-                                </div>
-                              </div>
-                              {editing ? (
-                                <div className="git-diff-comment-edit">
-                                  <textarea
-                                    autoFocus
-                                    value={editText}
-                                    onChange={(e) => setEditText(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Escape") {
-                                        e.preventDefault();
-                                        cancelEdit();
-                                      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                                        e.preventDefault();
-                                        saveEdit();
-                                      }
-                                    }}
-                                  />
-                                  <div className="git-diff-comment-buttons">
-                                    <button
-                                      type="button"
-                                      className="git-diff-btn-primary"
-                                      disabled={!editText.trim()}
-                                      onClick={saveEdit}
-                                    >
-                                      Save
-                                    </button>
-                                    <button type="button" className="git-diff-btn-ghost" onClick={cancelEdit}>
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="git-diff-inline-comment-text">{pc.text}</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {showComposer && (
-                      <div className="git-diff-comment-anchor">
-                        {!commentOpen && (
-                          <button
-                            type="button"
-                            className="git-diff-comment-trigger"
-                            onClick={() => setCommentOpen(true)}
-                          >
-                            <Icon name="comment" /> Comment
-                          </button>
+                      <span className="git-diff-line-text">
+                        {highlighted?.[hunkOffsets[hunkIndex] + lineIndex] ? (
+                          <HighlightedText tokens={highlighted[hunkOffsets[hunkIndex] + lineIndex]} />
+                        ) : (
+                          line.text
                         )}
-                        {commentOpen && (
-                          <div className="git-diff-comment-box">
+                      </span>
+                      {/* The compose form floats too, for the same reason:
+                          starting a comment must not move the code under the
+                          pointer that started it. */}
+                      {composerHere && (
+                        <div
+                          className="git-diff-comment-popover"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="git-diff-inline-comment-header">
+                            <span className="git-diff-inline-comment-range">
+                              {rangeLabel(hunk, composerAt!)}
+                            </span>
+                          </div>
+                          <div className="git-diff-comment-edit">
                             <textarea
                               autoFocus
                               placeholder="What should the agent do with these lines?"
@@ -565,9 +598,93 @@ export default function DiffView({ filePath, active, toolbarTarget, openInEditor
                               </button>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    )}
+                        </div>
+                      )}
+                      {/* The saved comment floats over the diff rather than
+                          taking a row of its own, so opening one leaves every
+                          line exactly where it was. */}
+                      {commentsHere
+                        .filter((pc) => expandedIds.has(pc.id))
+                        .map((pc) => (
+                          <div
+                            key={pc.id}
+                            className="git-diff-comment-popover"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.stopPropagation();
+                                if (editingId === pc.id) cancelEdit();
+                                else toggleExpanded(pc.id);
+                              }
+                            }}
+                          >
+                            <div className="git-diff-inline-comment-header">
+                              <span className="git-diff-inline-comment-range">{rangeLabel(hunk, pc)}</span>
+                              <div className="git-diff-inline-comment-actions">
+                                {editingId !== pc.id && (
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="Edit this comment"
+                                    onClick={() => startEdit(pc)}
+                                  >
+                                    <Icon name="edit" />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="icon-button"
+                                  title="Remove this comment"
+                                  onClick={() => removePendingComment(pc.id)}
+                                >
+                                  <Icon name="close" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-button"
+                                  title="Close"
+                                  onClick={() => toggleExpanded(pc.id)}
+                                >
+                                  <Icon name="chevron-up" />
+                                </button>
+                              </div>
+                            </div>
+                            {editingId === pc.id ? (
+                              <div className="git-diff-comment-edit">
+                                <textarea
+                                  autoFocus
+                                  value={editText}
+                                  onChange={(e) => setEditText(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      cancelEdit();
+                                    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                                      e.preventDefault();
+                                      saveEdit();
+                                    }
+                                  }}
+                                />
+                                <div className="git-diff-comment-buttons">
+                                  <button
+                                    type="button"
+                                    className="git-diff-btn-primary"
+                                    disabled={!editText.trim()}
+                                    onClick={saveEdit}
+                                  >
+                                    Save
+                                  </button>
+                                  <button type="button" className="git-diff-btn-ghost" onClick={cancelEdit}>
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="git-diff-inline-comment-text">{pc.text}</div>
+                            )}
+                          </div>
+                        ))}
+                    </div>
                   </Fragment>
                 );
               })}

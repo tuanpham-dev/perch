@@ -735,23 +735,34 @@
   gap: 4px;
   background: var(--fg-accent);
   color: var(--bg);
-  border: none;
+  border: 1px solid transparent;
   border-radius: 4px;
-  padding: 3px 8px;
+  padding: 4px 12px;
   font-size: 12px;
+  /* The one action in the form, so it carries weight as well as fill. */
+  font-weight: 600;
   cursor: pointer;
 }
 
+/* Not "the same button at half strength", which on a dark panel fades the
+   primary action almost out of sight before you have typed anything. An
+   outline with muted text still reads as a button, and as one that isn't
+   ready yet. */
 .git-diff-btn-primary:disabled {
-  opacity: 0.5;
+  background: none;
+  border-color: color-mix(in srgb, var(--fg) 30%, transparent);
+  color: var(--fg-inactive);
+  font-weight: 400;
   cursor: default;
 }
 
 .git-diff-btn-ghost {
   background: none;
   border: none;
-  color: var(--fg-inactive);
-  padding: 3px 6px;
+  /* --fg-inactive sits near 3:1 on the panel, under the 4.5 a 12px label
+     needs; the secondary action reads as secondary from having no fill. */
+  color: var(--fg);
+  padding: 4px 10px;
   font-size: 12px;
   cursor: pointer;
 }
@@ -796,21 +807,164 @@
    inline (or being listed separately), so it's obvious at a glance which
    lines a comment is about without every comment's text competing for room. */
 
-.git-diff-comment-marker {
-  margin: 2px 10px;
+/* An always-present slot at the head of every line: a badge or the compose
+   button appearing must not push the code sideways, so the space is
+   reserved whether or not anything occupies it. */
+.git-diff-line-gutter {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: 22px;
+  padding-left: 2px;
+  box-sizing: border-box;
+}
+
+/* Revealed by hovering the line, so the gutter stays quiet while reading
+   and offers the action exactly where the pointer already is. Kept in the
+   layout when hidden (visibility, not display) so nothing moves. */
+.git-diff-comment-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.git-diff-comment-add:hover,
+.git-diff-comment-add.open {
+  color: var(--fg-accent);
+}
+
+.git-diff-line:hover .git-diff-comment-add,
+.git-diff-line-selected .git-diff-comment-add,
+.git-diff-comment-add.open,
+.git-diff-comment-add:focus-visible {
+  visibility: visible;
+}
+
+/* Touch and pen have no hover, so the button follows the selection instead:
+   tap a line and it appears on that line. Showing it on every line would
+   fill the gutter with icons for a diff nobody is commenting on. */
+@media (hover: none) {
+  .git-diff-line-selected .git-diff-comment-add,
+  .git-diff-comment-add.open {
+    visibility: visible;
+  }
+}
+
+/* The line is the popover's positioning context. */
+.git-diff-line {
+  position: relative;
+}
+
+/* Floats over the diff instead of taking a row: opening a comment leaves
+   every line where it was. */
+.git-diff-comment-popover {
+  position: absolute;
+  top: 100%;
+  left: 22px;
+  z-index: 5;
+  width: min(520px, calc(100% - 32px));
+  min-width: 260px;
+  margin-top: 2px;
+  padding: 8px 10px;
+  background: var(--input-bg, var(--bg));
+  /* Not var(--border): several themes set it to the panel's own colour,
+     where the edge disappears. Derived from the foreground it always
+     shows. */
+  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  cursor: default;
+  white-space: normal;
+  /* The host has no UI-font variable: its body sets this stack and every
+     other surface inherits it. A popover living inside the diff inherits
+     the diff's monospace face instead, so the app's own stack and text size
+     are restated here - once, for everything inside to inherit. */
+  font-family: system-ui, Ubuntu, "Droid Sans", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+
+/* Form controls don't inherit type by default. Family and size only: the
+   `font` shorthand would also reset weight, flattening the primary button. */
+.git-diff-comment-popover textarea,
+.git-diff-comment-popover button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.git-diff-comment-popover .git-diff-inline-comment-header {
+  margin-bottom: 6px;
+}
+
+/* A quiet label above the comment, in the app's own small-caps header
+   idiom rather than competing with the text it introduces. */
+.git-diff-comment-popover .git-diff-inline-comment-range {
+  color: var(--fg-inactive);
+  /* Overrides the base rule's monospace: inside the popover this is a
+     label, not code. */
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.git-diff-comment-popover .git-diff-inline-comment-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.git-diff-comment-popover textarea {
+  width: 100%;
+  min-height: 64px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.git-diff-comment-popover .git-diff-comment-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.git-diff-comment-popover .git-diff-btn-primary,
+.git-diff-comment-popover .git-diff-btn-ghost {
+  font-size: 12px;
 }
 
 /* Weighted like the host app's own numbered badge convention
    (client/src/styles.css's .window-decoration-badge on session rows), sized
    a bit larger for standalone legibility here (it isn't sitting next to
    other row content the way that one is). */
+.git-diff-comment-badge.open {
+  outline: 1px solid var(--accent);
+}
+
+.git-diff-comment-badge {
+  font-family: system-ui, Ubuntu, "Droid Sans", sans-serif;
+  font-size: 11px;
+  line-height: 1;
+}
+
 .git-diff-comment-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  align-self: center;
   background: var(--fg-accent);
   color: var(--bg);
   border: none;
@@ -1294,4 +1448,474 @@
 .git-stash-row:hover .git-stash-time,
 .git-stash-row:focus-within .git-stash-time {
   visibility: hidden;
+}
+
+/* --- Branches pane --- */
+
+.git-ref-list.busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.git-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  min-height: 26px;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+
+.git-ref-row:hover {
+  background: var(--list-hover-bg);
+}
+
+.git-ref-row.indent {
+  padding-left: 22px;
+}
+
+.git-ref-row.current .git-ref-name {
+  font-weight: 600;
+}
+
+.git-ref-row.detached {
+  cursor: default;
+  color: var(--fg-inactive);
+}
+
+.git-ref-row.detached:hover {
+  background: none;
+}
+
+.git-ref-icon {
+  flex-shrink: 0;
+  color: var(--fg-inactive);
+}
+
+.git-ref-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-ref-current {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--git-added-fg);
+}
+
+/* Pushed right so the name column stays scannable however long the
+   tracking detail is; it truncates before the name does. */
+.git-ref-detail {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+  font-size: 12px;
+}
+
+.git-ref-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-ref-group:hover {
+  background: var(--list-hover-bg);
+}
+
+.git-ref-group-label {
+  flex: 1;
+}
+
+.git-ref-group-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.git-ref-subgroup {
+  padding: 2px 8px 2px 22px;
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+@keyframes git-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.git-spin {
+  display: inline-block;
+  animation: git-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .git-spin {
+    animation: none;
+  }
+}
+
+/* --- Commit details view --- */
+
+.git-commit-details {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  font-size: 13px;
+}
+
+/* Wide enough for both: the commit and its file list on the left, the
+   selected file's diff on the right, so reading a commit doesn't mean
+   opening a tab per file and losing the list. */
+/* The column widths come from the component, which remembers them. */
+.git-commit-details.two-column {
+  display: grid;
+  overflow: hidden;
+}
+
+/* The left column is the message above the file list, each scrolling on its
+   own. Without this a long commit message pushes the files - the part you
+   click - off the bottom of the column. The message gets at most half the
+   height; the files keep the rest. */
+.git-commit-details.two-column .git-commit-summary {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.git-commit-details.two-column .git-commit-head {
+  flex: 0 1 auto;
+  max-height: 50%;
+  overflow: auto;
+}
+
+.git-commit-details.two-column .git-commit-files-header {
+  flex: none;
+}
+
+.git-commit-details.two-column .git-commit-files {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.git-commit-details.dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.git-commit-details.dragging .git-commit-summary,
+.git-commit-details.dragging .git-commit-diff-pane {
+  pointer-events: none;
+}
+
+/* A 1px line in the layout - the columns sit exactly one pixel apart - with
+   the grab area widened by a pseudo-element that overflows it, so the
+   target is comfortable without the gap looking thick. */
+.git-commit-split-handle {
+  position: relative;
+  cursor: col-resize;
+  background: var(--border);
+}
+
+.git-commit-split-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.git-commit-split-handle:hover,
+.git-commit-split-handle:focus-visible,
+.git-commit-details.dragging .git-commit-split-handle {
+  background: var(--accent);
+  outline: none;
+}
+
+.git-commit-diff-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.git-commit-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-commit-diff-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--terminal-font, monospace);
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+.git-commit-file.selected {
+  background: var(--list-active-bg, var(--list-hover-bg));
+}
+
+.git-commit-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-commit-subject-line {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.git-commit-body {
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  color: var(--fg);
+}
+
+/* Label column sized to the longest label ("Parents") so the values line
+   up without a table. */
+.git-commit-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.git-commit-meta dt {
+  color: var(--fg-inactive);
+}
+
+.git-commit-meta dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.git-commit-hash,
+.git-commit-parent {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--fg-accent);
+  font-family: var(--terminal-font, monospace);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-commit-hash:hover,
+.git-commit-parent:hover {
+  text-decoration: underline;
+}
+
+.git-commit-parents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.git-commit-email {
+  color: var(--fg-inactive);
+}
+
+.git-commit-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.git-commit-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border: 1px solid var(--input-border);
+  border-radius: 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.git-commit-ref.head {
+  border-color: var(--accent);
+  color: var(--fg-accent);
+}
+
+.git-commit-ref.tag {
+  border-color: var(--git-renamed-fg);
+}
+
+.git-commit-files-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px 4px;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.git-commit-totals {
+  font-variant-numeric: tabular-nums;
+}
+
+.git-commit-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 14px;
+  min-height: 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.git-commit-file:hover {
+  background: var(--list-hover-bg);
+}
+
+.git-commit-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-commit-file-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--fg-inactive);
+  font-size: 12px;
+}
+
+.git-commit-file-stat {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.git-added {
+  color: var(--git-added-fg);
+}
+
+.git-removed {
+  color: var(--error);
+}
+
+.git-commit-binary {
+  color: var(--fg-inactive);
+}
+
+/* --- Commit search --- */
+
+.git-commits-search {
+  width: calc(100% - 16px);
+  margin: 4px 8px;
+  padding: 3px 6px;
+  box-sizing: border-box;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.git-commits-search:focus {
+  outline: none;
+  border-color: var(--focus-border);
+}
+
+.git-commits-list.busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* --- Syntax highlighting in the diff --- */
+/* github-dark.css (imported by DiffView, the same sheet markdown-preview
+   uses) colours the .hljs-* classes for a dark theme. On a light one its
+   values are unreadable, so the common token classes are overridden with
+   github-light's; an uncommon class falls back to the inherited text colour
+   rather than the dark sheet's. Same approach, and the same values, as
+   markdown-preview's own light block. */
+.git-diff-host[data-hl="light"] .hljs-comment,
+.git-diff-host[data-hl="light"] .hljs-quote {
+  color: #6a737d;
+}
+
+.git-diff-host[data-hl="light"] .hljs-keyword,
+.git-diff-host[data-hl="light"] .hljs-selector-tag,
+.git-diff-host[data-hl="light"] .hljs-literal {
+  color: #d73a49;
+}
+
+.git-diff-host[data-hl="light"] .hljs-string,
+.git-diff-host[data-hl="light"] .hljs-doctag {
+  color: #032f62;
+}
+
+.git-diff-host[data-hl="light"] .hljs-title,
+.git-diff-host[data-hl="light"] .hljs-section,
+.git-diff-host[data-hl="light"] .hljs-name {
+  color: #6f42c1;
+}
+
+.git-diff-host[data-hl="light"] .hljs-attr,
+.git-diff-host[data-hl="light"] .hljs-attribute,
+.git-diff-host[data-hl="light"] .hljs-variable,
+.git-diff-host[data-hl="light"] .hljs-number {
+  color: #005cc5;
+}
+
+.git-diff-host[data-hl="light"] .hljs-built_in,
+.git-diff-host[data-hl="light"] .hljs-type {
+  color: #e36209;
+}
+
+.git-diff-host[data-hl="light"] .hljs-meta {
+  color: #22863a;
+}
+
+/* The add/del row tints stay readable under the token colours: the tokens
+   set only the text colour, never a background. */
+.git-diff-line-text .hljs-comment,
+.git-diff-line-text .hljs-quote {
+  font-style: normal;
 }
