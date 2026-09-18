@@ -19,6 +19,17 @@ import { useListNavigation } from "../../_shared/useListNavigation";
 import { useLongPressMenu } from "../../_shared/useLongPressMenu";
 import { useMarqueeSelection } from "../../_shared/useMarqueeSelection";
 import DiffView from "./DiffView";
+import CommitDetails from "./CommitDetails";
+import { buildCommitMenuItems } from "./commitActions";
+import { parseSearchQuery } from "../searchQuery.mjs";
+import BranchesPanel, {
+  checkoutLocal,
+  checkoutRemote,
+  getRefs,
+  onRefsChange,
+  refreshRefs,
+  resetRefsStore,
+} from "./BranchesPanel";
 import { statusForEntry, type GitFileStatus } from "../statusModel.mjs";
 import {
   parseConflictSegments,
@@ -27,57 +38,82 @@ import {
   type ResolutionChoice,
   type ResolutionMap,
 } from "../conflictModel.mjs";
+import {
+  ApiError,
+  KEY_SEP,
+  OPERATION_LABEL,
+  apiGetJson,
+  apiPost,
+  apiPostJson,
+  bindHost,
+  changeCount,
+  confirmDialog,
+  decodeCommitKey,
+  decodeConflictKey,
+  decodeDiffKey,
+  encodeCommitKey,
+  encodeConflictKey,
+  encodeDiffKey,
+  extSettings,
+  formatRelativeTime,
+  getActiveContext,
+  getCurrentStatus,
+  getFileIcon,
+  getFolderIcon,
+  getPollCwd,
+  historyListeners,
+  onDidChangeContext,
+  onDidChangeIconTheme,
+  onFetchError,
+  openCommitDetails,
+  openDiffInEditor,
+  openFileTab,
+  openMergeInEditor,
+  openViewerTab,
+  authPromptListeners,
+  cancelPrompt,
+  getAuthPrompt,
+  pollIntervalChanged,
+  readPollInterval,
+  replyToPrompt,
+  runNetworkOp,
+  shortHash,
+  promptDialog,
+  refreshFiles,
+  refreshStatus,
+  registerRefreshHook,
+  restartPolling,
+  revealSidebarPanel,
+  setPollCwd,
+  setSidebarBadge,
+  statusListeners,
+  stopPolling,
+  unbindHost,
+  useSharedStatus,
+  type ActiveContext,
+  type AuthPrompt,
+  type CommitEntry,
+  type FileEntry,
+  type FileStatus,
+  type HistoryChange,
+  type NetworkKind,
+  type OperationKind,
+  type PanelProps,
+  type SettingsApi,
+  type StashEntry,
+  type StatusResponse,
+} from "./host";
 
 // ---- Module-level host bridge ----
 
-interface ActiveContext {
-  sessionName: string | null;
-  windowIndex: number | null;
-  cwd: string | null;
-}
-export interface SettingsApi {
-  get(key: string): unknown;
-  onDidChange(cb: () => void): () => void;
-}
 
-let serverFetch: ((path: string, init?: RequestInit) => Promise<Response>) | null = null;
-let getActiveContext: (() => ActiveContext) | null = null;
-let onDidChangeContext: ((cb: (ctx: ActiveContext) => void) => () => void) | null = null;
-let openViewerTab: ((viewerId: string, path: string, opts?: { title?: string }) => void) | null = null;
-let openDiffInEditor:
-  | ((req: {
-      title: string;
-      original: { content: string; label: string };
-      modified: { content: string; label: string; path?: string; readOnlyReason?: string };
-    }) => Promise<boolean>)
-  | null = null;
-let openMergeInEditor:
-  | ((req: {
-      title: string;
-      path: string;
-      ours: { content: string; label: string };
-      theirs: { content: string; label: string };
-      base?: { content: string; label: string } | null;
-      markResolved: () => Promise<void>;
-    }) => Promise<boolean>)
-  | null = null;
-let openFileTab: ((path: string) => void) | null = null;
-let refreshFiles: (() => void) | null = null;
-let setSidebarBadge: ((panelId: string, badge: number | null) => void) | null = null;
-let revealSidebarPanel: ((panelId: string) => void) | null = null;
-export let extSettings: SettingsApi | null = null;
-let getFileIcon: ((fileName: string) => IconResult) | null = null;
-let getFolderIcon: ((folderName: string, expanded: boolean) => IconResult) | null = null;
-let onDidChangeIconTheme: ((cb: () => void) => () => void) | null = null;
 let removeStylesheet: (() => void) | null = null;
+let removeRefreshHook: (() => void) | null = null;
+let removeFetchErrorListener: (() => void) | null = null;
+let removeRefsChangeListener: (() => void) | null = null;
 let removeContextListener: (() => void) | null = null;
 let removeSettingsListener: (() => void) | null = null;
 
-function readPollInterval(): number {
-  const raw = Number(extSettings?.get("gitScm.pollInterval"));
-  if (!Number.isFinite(raw) || raw <= 0) return 0;
-  return Math.max(1000, raw);
-}
 
 // 0 (the default) disables background fetch entirely — same "0 disables"
 // convention as gitScm.pollInterval, but off by default since a network
@@ -115,32 +151,6 @@ function writeViewMode(mode: ViewMode) {
 // pane now (see activate's second registerSidebarPanel), so the host's
 // accordion owns collapsing it, remembers that per user, and lets it be
 // dragged out of the Source Control tab entirely.
-interface CommitEntry {
-  hash: string;
-  author: string;
-  timestamp: number;
-  subject: string;
-}
-
-const RELATIVE_TIME_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ["year", 60 * 60 * 24 * 365],
-  ["month", 60 * 60 * 24 * 30],
-  ["week", 60 * 60 * 24 * 7],
-  ["day", 60 * 60 * 24],
-  ["hour", 60 * 60],
-  ["minute", 60],
-];
-const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
-function formatRelativeTime(unixSeconds: number): string {
-  const diffSeconds = unixSeconds - Math.floor(Date.now() / 1000);
-  for (const [unit, secondsInUnit] of RELATIVE_TIME_UNITS) {
-    if (Math.abs(diffSeconds) >= secondsInUnit) {
-      return relativeTimeFormatter.format(Math.round(diffSeconds / secondsInUnit), unit);
-    }
-  }
-  return relativeTimeFormatter.format(Math.round(diffSeconds / 60), "minute");
-}
 
 // ---- Collapsed directory state (tree mode) ----
 // Persisted per repo root + group + dir path so collapse state survives a
@@ -164,49 +174,6 @@ function writeCollapsedDirs(keys: Set<string>) {
 
 // ---- Status types (mirrors server.js's parseStatus output) ----
 
-type FileStatus = "modified" | "added" | "deleted" | "untracked" | "renamed" | "conflicted";
-
-interface FileEntry {
-  path: string;
-  origPath?: string;
-  status: FileStatus;
-}
-
-type OperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
-
-const OPERATION_LABEL: Record<OperationKind, string> = {
-  merge: "Merge",
-  rebase: "Rebase",
-  "cherry-pick": "Cherry-pick",
-  revert: "Revert",
-};
-
-interface StatusResponse {
-  root: string | null;
-  branch?: string | null;
-  upstream?: string | null;
-  ahead?: number;
-  behind?: number;
-  staged?: FileEntry[];
-  unstaged?: FileEntry[];
-  conflicted?: FileEntry[];
-  operation?: OperationKind | null;
-  // .git/MERGE_MSG content while operation is truthy — also written for a
-  // conflicted cherry-pick/revert, not just a merge. Used to prefill the
-  // commit box once per operation (see GitPanel's prefill effect).
-  mergeMsg?: string | null;
-  // HEAD's raw commit message (git log -1 --format=%B), null on an unborn
-  // branch — prefills the commit box when Amend is toggled on. See the
-  // amend-prefill effect below.
-  lastCommitMessage?: string | null;
-  // Drives the More Actions menu's "Pop Latest Stash" enabled state.
-  stashCount?: number;
-  // HEAD's hash and the newest stash entry's hash: the status poll watches
-  // them so COMMITS and STASH follow commits and stashes made in a
-  // terminal, not only ones made from this panel (see setSharedStatus).
-  head?: string | null;
-  stashHead?: string | null;
-}
 
 const STATUS_LABEL: Record<FileStatus, string> = {
   modified: "M",
@@ -337,114 +304,8 @@ function collectEntries(nodes: TreeNode[]): FileEntry[] {
 // after a fresh page load. NUL can't appear in any of these fields, so it's
 // a safe join separator. This composite string is never shown to the user;
 // the tab's visible title is set separately via openViewerTab's `title`.
-const KEY_SEP = "\u0000";
-
-// commitHash is a 6th, optional field appended after origPath — set only
-// for a COMMITS-row diff (see GitPanel's openCommitDiff), empty/absent for
-// every existing staged/working-tree/untracked diff. A key persisted before
-// this field existed simply decodes with commitHash undefined (split()
-// yields one fewer element than the destructure has names), so old tabs
-// restore unchanged.
-function encodeDiffKey(
-  cwd: string,
-  path: string,
-  staged: boolean,
-  untracked: boolean,
-  origPath?: string,
-  commitHash?: string,
-  // Show the commit against its FIRST parent rather than as a combined
-  // diff. Only stash entries ask for this: a stash is a merge commit (work
-  // tree + index, sometimes + untracked), and `git show` renders a merge as
-  // a "diff --cc" combined diff, which is not what anyone means by "what's
-  // in this stash".
-  firstParent?: boolean,
-): string {
-  return [
-    cwd,
-    path,
-    staged ? "1" : "0",
-    untracked ? "1" : "0",
-    origPath ?? "",
-    commitHash ?? "",
-    firstParent ? "1" : "",
-  ].join(KEY_SEP);
-}
-
-export function decodeDiffKey(key: string): {
-  cwd: string;
-  path: string;
-  staged: boolean;
-  untracked: boolean;
-  origPath?: string;
-  commitHash?: string;
-  firstParent: boolean;
-} {
-  const [cwd, path, stagedFlag, untrackedFlag, origPath, commitHash, firstParent] = key.split(KEY_SEP);
-  return {
-    cwd,
-    path,
-    staged: stagedFlag === "1",
-    untracked: untrackedFlag === "1",
-    origPath: origPath || undefined,
-    commitHash: commitHash || undefined,
-    firstParent: firstParent === "1",
-  };
-}
-
-// A conflict tab's key only ever needs cwd + path (there's no staged/
-// working-tree distinction for an unmerged path — see openEntry) — reusing
-// KEY_SEP keeps decode symmetric with encodeDiffKey even though there's
-// nothing else to encode.
-function encodeConflictKey(cwd: string, path: string): string {
-  return [cwd, path].join(KEY_SEP);
-}
-
-function decodeConflictKey(key: string): { cwd: string; path: string } {
-  const [cwd, path] = key.split(KEY_SEP);
-  return { cwd, path };
-}
 
 // ---- Shared fetch helpers ----
-
-class ApiError extends Error {
-  cancelled?: boolean;
-  constructor(message: string, cancelled?: boolean) {
-    super(message);
-    this.cancelled = cancelled;
-  }
-}
-
-async function apiPost(path: string, body: unknown): Promise<void> {
-  const res = await serverFetch!(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}) as { error?: string; cancelled?: boolean });
-    throw new ApiError(data.error || `${res.status} ${res.statusText}`, data.cancelled);
-  }
-}
-
-// apiPost for the one route whose reply is the point (/generate-message),
-// rather than a bare acknowledgement.
-async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await serverFetch!(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}) as Record<string, never>);
-  if (!res.ok) throw new ApiError((data as { error?: string }).error || `${res.status} ${res.statusText}`);
-  return data as T;
-}
-
-export async function apiGetJson<T>(path: string): Promise<T> {
-  const res = await serverFetch!(path);
-  const data = await res.json().catch(() => ({}) as Record<string, never>);
-  if (!res.ok) throw new ApiError((data as { error?: string }).error || `${res.status} ${res.statusText}`);
-  return data as T;
-}
 
 // ---- Small presentational pieces ----
 
@@ -638,12 +499,27 @@ function GroupHeader({
 // `.git-groups`, never picks these up), no group/selection wiring, single
 // click only, matching the plan's "keep it out of the marquee/multi-select
 // machinery" call.
-function CommitRow({ commit, unpushed, onClick }: { commit: CommitEntry; unpushed: boolean; onClick: () => void }) {
+function CommitRow({
+  commit,
+  unpushed,
+  onClick,
+  onContextMenu,
+  longPress,
+}: {
+  commit: CommitEntry;
+  unpushed: boolean;
+  onClick: () => void;
+  onContextMenu?: (e: ReactMouseEvent) => void;
+  // Touch/pen long-press opens the same menu the right-click does.
+  longPress?: ReturnType<ReturnType<typeof useLongPressMenu>>;
+}) {
   return (
     <div
       className="git-commit-row"
       title={`${commit.author}\n${commit.hash}`}
       onClick={onClick}
+      onContextMenu={onContextMenu}
+      {...longPress}
     >
       <span className={`git-commit-unpushed-dot${unpushed ? " visible" : ""}`} title="Not pushed yet" />
       <span className="git-commit-subject">{commit.subject}</span>
@@ -658,107 +534,32 @@ function CommitRow({ commit, unpushed, onClick }: { commit: CommitEntry; unpushe
 // without this the badge stayed empty until the user opened the tab at
 // least once. Started/stopped from activate()/deactivate(); GitPanel
 // subscribes to the same status stream instead of fetching its own copy.
-let currentStatus: StatusResponse | null = null;
-export const statusListeners = new Set<(status: StatusResponse | null) => void>();
-const fetchErrorListeners = new Set<(message: string) => void>();
-let pollCwd: string | null = null;
-let pollTimer: number | null = null;
-let lastPollMs = 0;
+// What the status poll's history/refs change means for this file's panes:
+// COMMITS follows HEAD, STASH follows the stash ref. BRANCHES subscribes to
+// the same stream from its own module (see BranchesPanel).
+// The quick switcher caps its own contribution — core caps its file
+// matches at 50 for the same reason.
+const SWITCHER_LIMIT = 12;
 
-// How many files a status describes as changed. Distinct paths: a file
-// that is both staged and modified again appears in two of the lists and
-// is still one change. Behind the sidebar badge and the status-bar item's
-// dirty marker, which must never disagree about it.
-function changeCount(status: StatusResponse | null): number {
-  if (!status?.root) return 0;
-  return new Set(
-    [...(status.staged ?? []), ...(status.unstaged ?? []), ...(status.conflicted ?? [])].map((e) => e.path),
-  ).size;
-}
-
-function updateBadge(status: StatusResponse | null) {
-  const count = changeCount(status);
-  setSidebarBadge?.("git", count > 0 ? count : null);
-}
-
-// What the last status said about history and stashes, so a poll tick can
-// tell a commit or stash made outside the panel (in a terminal, by an
-// agent) from one it already knows about. Compared within one repo only:
-// a repo switch is the panes' own business.
-let seenHistory: { root: string; head: string | null; stashHead: string | null; stashCount: number } | null = null;
-
-function setSharedStatus(next: StatusResponse | null) {
-  currentStatus = next;
-  updateBadge(next);
-  statusListeners.forEach((cb) => cb(next));
-  if (!next?.root) {
-    seenHistory = null;
-    return;
-  }
-  const now = { root: next.root, head: next.head ?? null, stashHead: next.stashHead ?? null, stashCount: next.stashCount ?? 0 };
-  if (seenHistory && seenHistory.root === now.root) {
-    if (seenHistory.head !== now.head) refreshCommits();
-    if (seenHistory.stashHead !== now.stashHead || seenHistory.stashCount !== now.stashCount) refreshStashes();
-  }
-  seenHistory = now;
-}
-
-async function fetchStatus(cwd: string) {
+// A switcher row runs with no panel mounted to report into: the refresh
+// below is what makes the result visible (the status bar's branch readout,
+// the FILES tree, the BRANCHES pane if it is open). A git refusal — a dirty
+// tree blocking the switch — surfaces in SOURCE CONTROL on its next poll.
+async function runSwitcherCheckout(fn: () => Promise<void>) {
   try {
-    const data = await apiGetJson<StatusResponse>(`/status?cwd=${encodeURIComponent(cwd)}`);
-    setSharedStatus(data);
-  } catch (err) {
-    setSharedStatus(null);
-    const message = err instanceof Error ? err.message : String(err);
-    fetchErrorListeners.forEach((cb) => cb(message));
+    await fn();
+  } catch {
+    // See the comment above.
+  } finally {
+    refreshStatus();
+    refreshFiles?.();
+    refreshRefs();
   }
 }
 
-function refreshStatus() {
-  if (pollCwd) fetchStatus(pollCwd);
-  // Manual refreshes are exactly the moments (post-op, refresh button)
-  // where tree badges must not lag a poll tick behind the panel.
-  refreshDecorationsNow();
-}
-
-function restartPolling() {
-  if (pollTimer != null) {
-    window.clearInterval(pollTimer);
-    pollTimer = null;
-  }
-  lastPollMs = readPollInterval();
-  if (!pollCwd) {
-    setSharedStatus(null);
-    return;
-  }
-  fetchStatus(pollCwd);
-  if (lastPollMs > 0) {
-    pollTimer = window.setInterval(() => fetchStatus(pollCwd!), lastPollMs);
-  }
-}
-
-function setPollCwd(cwd: string | null) {
-  if (cwd === pollCwd) return;
-  pollCwd = cwd;
-  restartPolling();
-  restartFetchTimer();
-}
-
-// Read the stream above from a component. Three things render off it — the
-// panel, the COMMITS pane and the status-bar item — and none of them owns a
-// fetch: whichever happen to be mounted all see the one poll started in
-// activate(). The mount-time re-read covers the gap between the initial
-// state and the subscription.
-function useSharedStatus(): StatusResponse | null {
-  const [status, setStatus] = useState<StatusResponse | null>(() => currentStatus);
-  useEffect(() => {
-    setStatus(currentStatus);
-    statusListeners.add(setStatus);
-    return () => {
-      statusListeners.delete(setStatus);
-    };
-  }, []);
-  return status;
+function onHistoryChange(change: HistoryChange) {
+  if (change.headChanged) refreshCommits();
+  if (change.stashChanged) refreshStashes();
 }
 
 // ---- COMMITS store ----
@@ -775,12 +576,15 @@ interface CommitsState {
   commits: CommitEntry[];
   limit: number;
   loading: boolean;
+  // The COMMITS search box's raw text, "" for an unfiltered log. Held here
+  // with the list so collapsing the pane doesn't drop the filter.
+  query: string;
   // The repo the list describes. Switching repos resets the paging limit
   // rather than paging into a fresh history at someone else's offset.
   root: string | null;
 }
 
-let commitsState: CommitsState = { commits: [], limit: COMMITS_PAGE, loading: false, root: null };
+let commitsState: CommitsState = { commits: [], limit: COMMITS_PAGE, loading: false, query: "", root: null };
 const commitsListeners = new Set<(state: CommitsState) => void>();
 
 function setCommitsState(next: CommitsState) {
@@ -788,18 +592,24 @@ function setCommitsState(next: CommitsState) {
   commitsListeners.forEach((cb) => cb(next));
 }
 
-async function fetchCommits(root: string, limit: number) {
-  const cwd = pollCwd;
+async function fetchCommits(root: string, limit: number, query = commitsState.query) {
+  const cwd = getPollCwd();
   if (!cwd) return;
-  setCommitsState({ ...commitsState, root, limit, loading: true });
+  setCommitsState({ ...commitsState, root, limit, query, loading: true });
   try {
-    const data = await apiGetJson<{ commits: CommitEntry[] }>(
-      `/log?cwd=${encodeURIComponent(cwd)}&limit=${limit}`,
-    );
+    const params = new URLSearchParams({ cwd, limit: String(limit) });
+    // The search box's three filters, already split apart by
+    // searchQuery.mjs — an empty one is left off rather than sent as an
+    // empty pattern that would match everything.
+    const parsed = parseSearchQuery(query);
+    if (parsed.grep) params.set("grep", parsed.grep);
+    if (parsed.author) params.set("author", parsed.author);
+    if (parsed.path) params.set("path", parsed.path);
+    const data = await apiGetJson<{ commits: CommitEntry[] }>(`/log?${params}`);
     // A repo switch mid-flight makes this response the wrong history —
     // drop it and let the switch's own fetch win.
     if (commitsState.root !== root) return;
-    setCommitsState({ commits: data.commits, limit, loading: false, root });
+    setCommitsState({ commits: data.commits, limit, loading: false, query, root });
   } catch {
     // Best-effort — keep the last-good list; the panel's error banner is
     // reserved for the change-list status fetch.
@@ -819,15 +629,6 @@ function refreshCommits() {
 // unmounts a collapsed pane outright, and the panel's own Stash/Pop actions
 // have to reach the list whether or not that pane is expanded.
 
-interface StashEntry {
-  // The commit the entry IS — what a row opens as an ordinary diff.
-  hash: string;
-  // "stash@{0}". Positional: every drop/pop renumbers the entries below it,
-  // which is why every mutation here refetches rather than splicing.
-  ref: string;
-  timestamp: number;
-  subject: string;
-}
 
 interface StashesState {
   stashes: StashEntry[];
@@ -880,9 +681,10 @@ let fetchTimer: number | null = null;
 let lastFetchMs = 0;
 
 async function backgroundFetch() {
-  if (!pollCwd) return;
+  const cwd = getPollCwd();
+  if (!cwd) return;
   try {
-    await apiPost("/fetch", { cwd: pollCwd });
+    await apiPost("/fetch", { cwd });
     refreshStatus();
   } catch {
     // Best-effort — see the section comment above.
@@ -895,13 +697,13 @@ function restartFetchTimer() {
     fetchTimer = null;
   }
   lastFetchMs = readFetchInterval();
-  if (lastFetchMs > 0 && pollCwd) {
+  if (lastFetchMs > 0 && getPollCwd()) {
     fetchTimer = window.setInterval(backgroundFetch, lastFetchMs);
   }
 }
 
 function onSettingsChanged() {
-  if (readPollInterval() !== lastPollMs) restartPolling();
+  if (pollIntervalChanged()) restartPolling();
   if (readFetchInterval() !== lastFetchMs) restartFetchTimer();
   // The gitScm.fileTreeDecorations toggle applies live: the provider reads
   // it on every provide call, so a bare re-render nudge is enough.
@@ -1040,24 +842,6 @@ function provideRootDecoration(rootPath: string): { label: string; tooltip?: str
 
 // ---- GitPanel (registerSidebarPanel component — no props) ----
 
-type NetworkKind = "push" | "pull" | "sync";
-
-// Mirrors server.js's pending-prompt shape: kind drives which form variant
-// renders, prompt is git/ssh's own text shown verbatim (for hostkey it
-// carries the fingerprint the user is confirming).
-interface AuthPrompt {
-  id: string;
-  kind: "username" | "password" | "passphrase" | "hostkey" | "generic";
-  prompt: string;
-}
-
-// Structurally matches the host's SidebarPanelHostProps (client/src/
-// extensions.ts) — a local copy, not an import, per extensions/_shared's
-// module comment on why extension code never imports client/src internals.
-interface PanelProps {
-  actionsTarget?: HTMLDivElement | null;
-  showMenu?: (x: number, y: number, items: MenuItem[]) => void;
-}
 
 function GitPanel({ actionsTarget, showMenu }: PanelProps) {
   const [activeCwd, setActiveCwd] = useState<string | null>(() => getActiveContext?.().cwd ?? null);
@@ -1074,11 +858,13 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
   // authSecret doubles as password/passphrase/generic-answer depending on
   // the prompt kind; the id-compare in the poll keeps a rerender from
   // clobbering in-progress typing.
-  const [authPrompt, setAuthPrompt] = useState<AuthPrompt | null>(null);
+  // The relay lives in host.ts so BRANCHES can start a remote operation
+  // too; this panel stays the one place its questions are answered.
+  const [authPrompt, setAuthPrompt] = useState<AuthPrompt | null>(() => getAuthPrompt());
   const [authUsername, setAuthUsername] = useState("");
   const [authSecret, setAuthSecret] = useState("");
   const [authRemember, setAuthRemember] = useState(false);
-  const opIdRef = useRef<string | null>(null);
+
   const [confirmDiscard, setConfirmDiscard] = useState<{ paths: string[]; untracked: string[] } | null>(null);
   const commitMessageRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1286,12 +1072,7 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.operation, status?.mergeMsg]);
 
-  useEffect(() => {
-    fetchErrorListeners.add(setError);
-    return () => {
-      fetchErrorListeners.delete(setError);
-    };
-  }, []);
+  useEffect(() => onFetchError(setError), []);
 
   const afterMutate = useCallback(async () => {
     refreshStatus();
@@ -1396,6 +1177,21 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
     }
   };
 
+  // Soft reset to the parent: HEAD moves back and the commit's changes are
+  // in the index, ready to be re-committed with a fixed message. It asks
+  // first only when the commit is already on the upstream, where undoing it
+  // means the branch and its remote have diverged.
+  const undoLastCommit = async () => {
+    if (status?.upstream && (status.ahead ?? 0) === 0) {
+      const ok = await confirmDialog?.(
+        "The last commit is already on the upstream. Undo it anyway? The branch will diverge from its remote.",
+        "Undo",
+      );
+      if (!ok) return;
+    }
+    void runOp(() => apiPost("/undo-commit", { cwd: activeCwd }));
+  };
+
   const stash = (includeUntracked: boolean) =>
     runOp(() => apiPost("/stash", { cwd: activeCwd, includeUntracked }));
   const stashPop = () => runOp(() => apiPost("/stash-pop", { cwd: activeCwd }));
@@ -1421,59 +1217,45 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
     setAuthRemember(false);
   }, []);
 
+  useEffect(() => {
+    authPromptListeners.add(setAuthPrompt);
+    return () => {
+      authPromptListeners.delete(setAuthPrompt);
+    };
+  }, []);
+
   const runNetwork = useCallback(
-    (kind: NetworkKind) => {
-      const opId = crypto.randomUUID();
-      opIdRef.current = opId;
-      // 300ms keeps a relayed prompt visible ≤ ~350ms after git asks (the
-      // plan's stated latency budget); polling only runs while this op's
-      // request is in flight.
-      const pollTimer = window.setInterval(async () => {
-        if (opIdRef.current !== opId) return;
+    (kind: NetworkKind, params: Record<string, unknown> = {}) =>
+      runOp(async () => {
         try {
-          const data = await apiGetJson<{ prompt: AuthPrompt | null }>(`/prompt?op=${opId}`);
-          if (opIdRef.current !== opId) return;
-          setAuthPrompt((cur) => (cur?.id === data.prompt?.id ? cur : data.prompt));
-        } catch {
-          // Transient poll failure — the op request itself surfaces errors.
-        }
-      }, 300);
-      return runOp(async () => {
-        try {
-          await apiPost(`/${kind}`, { cwd: activeCwd, opId });
+          await runNetworkOp(kind, { cwd: activeCwd, ...params });
         } catch (err) {
           // The user declining a prompt isn't an error worth displaying.
           if (err instanceof ApiError && err.cancelled) return;
           throw err;
         } finally {
-          window.clearInterval(pollTimer);
-          if (opIdRef.current === opId) opIdRef.current = null;
-          clearAuthForm();
+          setAuthUsername("");
+          setAuthSecret("");
+          setAuthRemember(false);
         }
-      });
-    },
-    [activeCwd, runOp, clearAuthForm],
+      }),
+    [activeCwd, runOp],
   );
-
-  // Fire-and-forget: the reply's outcome surfaces through the still-open
-  // network-op request, not this call.
-  const replyPrompt = (body: Record<string, unknown>) => {
-    if (!authPrompt || !opIdRef.current) return;
-    const payload = { op: opIdRef.current, id: authPrompt.id, ...body };
-    clearAuthForm();
-    apiPost("/prompt-reply", payload).catch(() => {});
-  };
 
   const submitPrompt = () => {
     if (!authPrompt) return;
     if (authPrompt.kind === "username") {
-      replyPrompt({ username: authUsername, password: authSecret, remember: authRemember });
+      replyToPrompt({ username: authUsername, password: authSecret, remember: authRemember });
     } else {
-      replyPrompt({ answer: authSecret });
+      replyToPrompt({ answer: authSecret });
     }
+    clearAuthForm();
   };
 
-  const cancelPrompt = () => replyPrompt({ cancel: true });
+  const dismissPrompt = () => {
+    cancelPrompt();
+    clearAuthForm();
+  };
 
   // Explicit, clickAction-independent opens — used directly by the context
   // menu (whose items name the action outright) and composed by openEntry
@@ -1990,10 +1772,10 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
       <button
         className="git-sync-button"
         disabled={busy}
-        title={status.upstream ? `Sync with ${status.upstream}` : "Publish branch"}
-        onClick={() => runNetwork("sync")}
+        title={status.upstream ? `Sync with ${status.upstream}` : "Publish Branch"}
+        onClick={() => runNetwork(status.upstream ? "sync" : "publish")}
       >
-        <Icon name="sync" />
+        <Icon name={status.upstream ? "sync" : "cloud-upload"} />
         {status.upstream && (
           <span className="git-sync-counts">
             {behind > 0 && (
@@ -2024,14 +1806,39 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
           // wouldn't apply, rather than shown disabled.
           const hasChanges = staged.length > 0 || unstaged.length > 0 || conflicted.length > 0;
           const stashCount = status.stashCount ?? 0;
+          // Undo Last Commit needs a commit with a parent under HEAD, and
+          // an unfinished merge/rebase must not have its HEAD moved.
+          const canUndo = Boolean(status.head) && !status.operation;
           showMenu?.(rect.left, rect.bottom, [
             { label: "Pull", onClick: () => runNetwork("pull") },
-            { label: "Push", onClick: () => runNetwork("push") },
+            { label: "Pull (Rebase)", onClick: () => runNetwork("pull-rebase") },
+            ...(status.upstream
+              ? [{ label: "Push", onClick: () => runNetwork("push") }]
+              : [{ label: "Publish Branch", onClick: () => runNetwork("publish") }]),
+            // Offered only where it applies: a branch that isn't behind has
+            // nothing to force past, and the lease is what makes it safe.
+            ...(status.upstream && behind > 0
+              ? [
+                  {
+                    label: "Push (Force with Lease)",
+                    danger: true,
+                    onClick: async () => {
+                      const ok = await confirmDialog?.(
+                        `Force push ${status.branch ?? "HEAD"} to ${status.upstream} with lease?`,
+                        "Force Push",
+                      );
+                      if (ok) runNetwork("push-force-lease");
+                    },
+                  },
+                ]
+              : []),
+            { label: "Sync", onClick: () => runNetwork("sync") },
             { label: "Fetch", onClick: manualFetch },
             {
               label: amend ? "✓ Amend Next Commit" : "Amend Next Commit",
               onClick: toggleAmend,
             },
+            ...(canUndo ? [{ label: "Undo Last Commit", onClick: undoLastCommit }] : []),
             ...(hasChanges
               ? [
                   { label: "Stash", onClick: () => stash(false) },
@@ -2148,10 +1955,10 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
           <div className="git-auth-prompt-text">{authPrompt.prompt}</div>
           {authPrompt.kind === "hostkey" ? (
             <div className="git-credential-buttons">
-              <button className="git-credential-cancel" onClick={cancelPrompt}>
+              <button className="git-credential-cancel" onClick={dismissPrompt}>
                 Cancel
               </button>
-              <button className="git-credential-submit" onClick={() => replyPrompt({ answer: "yes" })}>
+              <button className="git-credential-submit" onClick={() => { replyToPrompt({ answer: "yes" }); clearAuthForm(); }}>
                 Connect
               </button>
             </div>
@@ -2165,7 +1972,7 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
                   onChange={(e) => setAuthUsername(e.target.value)}
                   autoFocus
                   onKeyDown={(e) => {
-                    if (e.key === "Escape") cancelPrompt();
+                    if (e.key === "Escape") dismissPrompt();
                   }}
                 />
               )}
@@ -2184,7 +1991,7 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
                 autoFocus={authPrompt.kind !== "username"}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") submitPrompt();
-                  if (e.key === "Escape") cancelPrompt();
+                  if (e.key === "Escape") dismissPrompt();
                 }}
               />
               {authPrompt.kind === "username" && (
@@ -2198,7 +2005,7 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
                 </label>
               )}
               <div className="git-credential-buttons">
-                <button className="git-credential-cancel" onClick={cancelPrompt}>
+                <button className="git-credential-cancel" onClick={dismissPrompt}>
                   Cancel
                 </button>
                 <button
@@ -2535,11 +2342,16 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
 // module-level COMMITS store above, and owns nothing else — which is why
 // unmounting it, as the host does whenever the pane is collapsed, costs
 // nothing.
-function CommitsPanel(_props: PanelProps) {
+function CommitsPanel({ actionsTarget, showMenu }: PanelProps) {
   const status = useSharedStatus();
-  const [{ commits, limit, loading, root: loadedRoot }, setState] = useState<CommitsState>(
+  const [{ commits, limit, loading, query, root: loadedRoot }, setState] = useState<CommitsState>(
     () => commitsState,
   );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(() => commitsState.query !== "");
+  const [draft, setDraft] = useState(() => commitsState.query);
+  const bindMenu = useLongPressMenu();
 
   useEffect(() => {
     setState(commitsState);
@@ -2555,36 +2367,125 @@ function CommitsPanel(_props: PanelProps) {
   // Re-expanding the pane in the SAME repo hits the store's cached list
   // instead, keeping whatever Load More depth was already paid for.
   useEffect(() => {
-    if (root && root !== commitsState.root) fetchCommits(root, COMMITS_PAGE);
+    if (root && root !== commitsState.root) fetchCommits(root, COMMITS_PAGE, commitsState.query);
   }, [root]);
 
+  // Typing re-runs the log, but not on every keystroke: 300ms after the
+  // last one, the same beat the panel's other debounced reads use.
+  useEffect(() => {
+    if (!root || draft === query) return;
+    const timer = window.setTimeout(() => {
+      setCommitsState({ ...commitsState, query: draft });
+      fetchCommits(root, COMMITS_PAGE, draft);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [draft, query, root]);
+
   const loadMore = () => {
-    if (root) fetchCommits(root, limit + COMMITS_PAGE);
+    if (root) fetchCommits(root, limit + COMMITS_PAGE, query);
   };
 
-  // COMMITS rows are newest-first (git log's default order), so the first
-  // `ahead` entries are exactly the not-yet-pushed commits for a linear
-  // history — an approximation that can mislabel right after a fetch that
-  // hasn't been merged in yet, accepted as good enough over an extra
-  // `git rev-list @{u}..HEAD` call per /log fetch.
-  const unpushedCount = status?.upstream ? (status.ahead ?? 0) : 0;
+  const runOp = useCallback(async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (err) {
+      if (err instanceof ApiError && err.cancelled) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+      refreshStatus();
+      refreshFiles?.();
+      refreshCommits();
+      refreshRefs();
+    }
+  }, []);
 
-  // No header refresh: the list follows the status poll (HEAD moving
-  // reloads it) and the panel's own operations.
+  const menuFor = (commit: CommitEntry): MenuItem[] =>
+    buildCommitMenuItems({
+      root: root!,
+      commit,
+      status,
+      run: (fn) => void runOp(fn),
+      confirm: async (message, label) => (await confirmDialog?.(message, label)) ?? false,
+      ask: async (message, defaultValue) => {
+        const answer = await promptDialog?.(message, defaultValue);
+        const trimmed = answer?.trim();
+        return trimmed ? trimmed : null;
+      },
+    });
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setDraft("");
+    if (root && commitsState.query) {
+      setCommitsState({ ...commitsState, query: "" });
+      fetchCommits(root, COMMITS_PAGE, "");
+    }
+  };
+
+  // Only a search toggle: the list itself follows the status poll (HEAD
+  // moving reloads it) and the panel's own operations.
+  const headerActions =
+    root && (commits.length > 0 || query) ? (
+      <button
+        className="icon-button"
+        title={searchOpen ? "Close Search" : "Search Commits"}
+        onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+      >
+        <Icon name="search" />
+      </button>
+    ) : null;
+
+  // The unpushed markers count from the top of an unfiltered log; with a
+  // filter on, the rows are no longer HEAD's first N commits and the
+  // approximation would mislabel them.
+  const unpushedCount = !query && status?.upstream ? (status.ahead ?? 0) : 0;
+
   return (
     <div className="git-panel git-commits-panel">
+      {actionsTarget && headerActions && createPortal(headerActions, actionsTarget)}
+      {error && (
+        <div className="git-error" onClick={() => setError(null)}>
+          {error}
+        </div>
+      )}
+      {searchOpen && (
+        <input
+          className="git-commits-search"
+          type="search"
+          placeholder="Search commits (author: path:)"
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeSearch();
+            }
+          }}
+        />
+      )}
       {!root ? (
         <div className="git-empty">Not a git repository.</div>
       ) : commits.length === 0 ? (
-        <div className="git-empty">{loading || loadedRoot !== root ? "Loading…" : "No commits yet."}</div>
+        <div className="git-empty">
+          {loading || loadedRoot !== root ? "Loading…" : query ? "No commits match." : "No commits yet."}
+        </div>
       ) : (
-        <div className="git-commits-list">
+        <div className={`git-commits-list${busy ? " busy" : ""}`}>
           {commits.map((commit, i) => (
             <CommitRow
               key={commit.hash}
               commit={commit}
               unpushed={i < unpushedCount}
-              onClick={() => openCommitDiff(root, commit)}
+              onClick={() => openCommitDetails(root, commit.hash, commit.subject)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                showMenu?.(e.clientX, e.clientY, menuFor(commit));
+              }}
+              longPress={bindMenu((x, y) => showMenu?.(x, y, menuFor(commit)))}
             />
           ))}
           <button className="git-commits-load-more" disabled={loading} onClick={loadMore}>
@@ -2687,7 +2588,7 @@ function StashPanel({ actionsTarget }: PanelProps) {
               key={entry.hash}
               entry={entry}
               busy={busy}
-              onClick={() => openStashDiff(root, entry)}
+              onClick={() => openCommitDetails(root, entry.hash, entry.subject, true)}
               actions={[
                 { icon: "diff-added", title: "Apply (keep the stash)", onClick: () => apply(entry) },
                 { icon: "inbox", title: "Pop (apply and drop)", onClick: () => pop(entry) },
@@ -2765,18 +2666,19 @@ function StashRow({
   );
 }
 
-// A stash entry is a commit, so its diff is the commit diff — same key
-// shape a COMMITS row uses.
+// A stash entry is a commit, so its whole-entry patch is the commit patch
+// — same key shape a COMMITS row's Full Diff uses. Reached from the STASH
+// row menu; a row click opens the details view instead.
 function openStashDiff(root: string, entry: StashEntry) {
   const key = encodeDiffKey(root, "", false, false, undefined, entry.hash, true);
   openViewerTab?.("diff", key, { title: `${entry.ref} ${entry.subject}` });
 }
 
-// A COMMITS row click — reuses DiffView via the key's commitHash field
-// (see encodeDiffKey/decodeDiffKey) rather than a dedicated viewer.
+// The combined patch for a whole commit — the details view's Full Diff, and
+// what a COMMITS row itself used to open.
 function openCommitDiff(root: string, commit: CommitEntry) {
   const key = encodeDiffKey(root, "", false, false, undefined, commit.hash);
-  openViewerTab?.("diff", key, { title: `${commit.hash.slice(0, 7)} ${commit.subject}` });
+  openViewerTab?.("diff", key, { title: `${shortHash(commit.hash)} ${commit.subject}` });
 }
 
 // ---- ConflictView (registerFileViewer component, extensions: []) ----
@@ -3161,13 +3063,13 @@ export function activate(ctx: {
     // Another of THIS extension's panels, by its unnamespaced id, whose tab
     // this one starts out inside — see the host's registerSidebarPanel.
     defaultTab?: string;
-    component: typeof GitPanel | typeof CommitsPanel | typeof StashPanel;
+    component: typeof GitPanel | typeof CommitsPanel | typeof StashPanel | typeof BranchesPanel;
   }) => void;
   registerFileViewer: (v: {
     id: string;
     extensions: string[];
     mode?: "default" | "preview";
-    component: typeof DiffView | typeof ConflictView;
+    component: typeof DiffView | typeof ConflictView | typeof CommitDetails;
   }) => void;
   registerStatusBarItem: (item: {
     id: string;
@@ -3178,6 +3080,16 @@ export function activate(ctx: {
     component: typeof GitStatusBarItem;
   }) => void;
   registerCommand: (cmd: { id: string; label: string; defaultBinding?: string; run: () => void }) => void;
+  // Optional: an older host has no quick switcher provider point, and the
+  // pane works without one.
+  registerQuickSwitcherProvider?: (provider: {
+    id: string;
+    provideResults: (query: string) => {
+      label: string;
+      tag?: string;
+      run: (secondary: boolean) => void;
+    }[];
+  }) => { refresh(): void };
   registerFileDecorationProvider: (provider: {
     id: string;
     provideDecoration: (
@@ -3208,6 +3120,8 @@ export function activate(ctx: {
       markResolved: () => Promise<void>;
     }) => Promise<boolean>;
     refreshFiles: () => void;
+    confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean>;
+    promptDialog?: (message: string, defaultValue?: string) => Promise<string | null>;
     setSidebarBadge: (panelId: string, badge: number | null) => void;
     revealSidebarPanel: (panelId: string) => void;
     getFileIcon: (fileName: string) => IconResult;
@@ -3218,20 +3132,32 @@ export function activate(ctx: {
   assetUrl: (relPath: string) => string;
   settings: SettingsApi;
 }) {
-  serverFetch = ctx.serverFetch;
-  getActiveContext = ctx.app.getActiveContext;
-  onDidChangeContext = ctx.app.onDidChangeContext;
-  openViewerTab = ctx.app.openViewerTab;
-  openDiffInEditor = ctx.app.openDiff ?? null;
-  openMergeInEditor = ctx.app.openMerge ?? null;
-  openFileTab = ctx.app.openFileTab;
-  refreshFiles = ctx.app.refreshFiles;
-  setSidebarBadge = ctx.app.setSidebarBadge;
-  revealSidebarPanel = ctx.app.revealSidebarPanel;
-  getFileIcon = ctx.app.getFileIcon;
-  getFolderIcon = ctx.app.getFolderIcon;
-  onDidChangeIconTheme = ctx.app.onDidChangeIconTheme;
-  extSettings = ctx.settings;
+  // One call rather than a dozen assignments: the bridge lives in host.ts
+  // now, so every pane reads the same bindings without importing this file.
+  bindHost({
+    serverFetch: ctx.serverFetch,
+    getActiveContext: ctx.app.getActiveContext,
+    onDidChangeContext: ctx.app.onDidChangeContext,
+    openViewerTab: ctx.app.openViewerTab,
+    openDiffInEditor: ctx.app.openDiff ?? null,
+    openMergeInEditor: ctx.app.openMerge ?? null,
+    openFileTab: ctx.app.openFileTab,
+    refreshFiles: ctx.app.refreshFiles,
+    setSidebarBadge: ctx.app.setSidebarBadge,
+    revealSidebarPanel: ctx.app.revealSidebarPanel,
+    confirmDialog: ctx.app.confirmDialog ?? null,
+    promptDialog: ctx.app.promptDialog ?? null,
+    extSettings: ctx.settings,
+    getFileIcon: ctx.app.getFileIcon,
+    getFolderIcon: ctx.app.getFolderIcon,
+    onDidChangeIconTheme: ctx.app.onDidChangeIconTheme,
+  });
+  // The FILES-tree decoration scan runs on every manual refresh, so badges
+  // never lag a poll tick behind the panel.
+  removeRefreshHook = registerRefreshHook(refreshDecorationsNow);
+  // COMMITS and STASH follow work done outside the panel — a commit or a
+  // stash made in a terminal — off the same status poll.
+  historyListeners.add(onHistoryChange);
 
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   ctx.registerSidebarPanel({
@@ -3265,6 +3191,17 @@ export function activate(ctx: {
     defaultTab: "git",
     component: StashPanel,
   });
+  // Fourth and last of the SOURCE CONTROL stack (append-only panel-order
+  // reconciliation again): branches change less often than the history you
+  // read or the stash you dip into, so it sits at the bottom.
+  ctx.registerSidebarPanel({
+    id: "branches",
+    title: "Branches",
+    icon: "git-branch",
+    location: "tab",
+    defaultTab: "git",
+    component: BranchesPanel,
+  });
   // Far left of the bar, where VS Code puts it — before any other
   // extension's item, since the branch is the thing you glance at.
   ctx.registerStatusBarItem({
@@ -3281,6 +3218,9 @@ export function activate(ctx: {
   // ctx.app.openViewerTab from GitPanel's row clicks (see openEntry above).
   ctx.registerFileViewer({ id: "diff", extensions: [], mode: "default", component: DiffView });
   ctx.registerFileViewer({ id: "conflict", extensions: [], mode: "default", component: ConflictView });
+  // The commit details view — reached only from a row click (COMMITS, STASH,
+  // a tag) or a parent link inside another details tab.
+  ctx.registerFileViewer({ id: "commit", extensions: [], mode: "default", component: CommitDetails });
   // FILES tree badges/row colors + the branch root decoration — replaces
   // the status enrichment core /api/fs used to inline.
   decorHandle = ctx.registerFileDecorationProvider({
@@ -3292,8 +3232,8 @@ export function activate(ctx: {
 
   // Start the badge poller immediately so it's correct on app startup,
   // rather than only after the user opens the Source Control tab.
-  setPollCwd(ctx.app.getActiveContext().cwd);
-  removeContextListener = ctx.app.onDidChangeContext((c) => setPollCwd(c.cwd));
+  setPollCwd(ctx.app.getActiveContext().cwd, restartFetchTimer);
+  removeContextListener = ctx.app.onDidChangeContext((c) => setPollCwd(c.cwd, restartFetchTimer));
   removeSettingsListener = ctx.settings.onDidChange(onSettingsChanged);
 
   // Palette commands that work whether or not the Source Control tab is the
@@ -3342,6 +3282,42 @@ export function activate(ctx: {
       }
     },
   });
+  // Branch rows in the quick switcher's non-command mode (Ctrl+P). Reads
+  // the BRANCHES store rather than fetching: provideResults is called
+  // synchronously on every keystroke, and refresh() re-queries an open
+  // switcher whenever that store changes.
+  const switcherHandle = ctx.registerQuickSwitcherProvider?.({
+    id: "branches",
+    provideResults: (query: string) => {
+      const term = query.trim().toLowerCase();
+      // ">" is command mode and "!" is the host's own prefix — neither is
+      // asking for a branch.
+      if (!term || term.startsWith(">") || term.startsWith("!")) return [];
+      const refs = getRefs();
+      const root = refs.root;
+      if (!root) return [];
+      const rows: { label: string; tag?: string; run: (secondary: boolean) => void }[] = [];
+      for (const branch of refs.local) {
+        if (branch.name === refs.current || !branch.name.toLowerCase().includes(term)) continue;
+        rows.push({
+          label: branch.name,
+          tag: "branch",
+          run: () => void runSwitcherCheckout(() => checkoutLocal(root, branch.name)),
+        });
+      }
+      for (const branch of refs.remotes) {
+        if (!branch.ref.toLowerCase().includes(term)) continue;
+        rows.push({
+          label: branch.ref,
+          tag: "branch",
+          run: () => void runSwitcherCheckout(() => checkoutRemote(root, branch)),
+        });
+      }
+      return rows.slice(0, SWITCHER_LIMIT);
+    },
+  });
+  if (switcherHandle) removeRefsChangeListener = onRefsChange(() => switcherHandle.refresh());
+
   ctx.registerCommand({
     id: "refresh",
     label: "Git: Refresh",
@@ -3357,10 +3333,17 @@ export function deactivate() {
   removeContextListener = null;
   removeSettingsListener?.();
   removeSettingsListener = null;
-  if (pollTimer != null) {
-    window.clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  removeRefreshHook?.();
+  removeRefreshHook = null;
+  removeFetchErrorListener?.();
+  removeFetchErrorListener = null;
+  removeRefsChangeListener?.();
+  removeRefsChangeListener = null;
+  resetRefsStore();
+  historyListeners.delete(onHistoryChange);
+  // Clears the badge before the bridge goes, then stops the poll.
+  setSidebarBadge?.("git", null);
+  stopPolling();
   if (fetchTimer != null) {
     window.clearInterval(fetchTimer);
     fetchTimer = null;
@@ -3372,17 +3355,11 @@ export function deactivate() {
   decorHandle = null;
   decorCache.clear();
   decorSeen.clear();
-  pollCwd = null;
-  currentStatus = null;
-  commitsState = { commits: [], limit: COMMITS_PAGE, loading: false, root: null };
+  commitsState = { commits: [], limit: COMMITS_PAGE, loading: false, query: "", root: null };
   commitsListeners.clear();
   stashesState = { stashes: [], loading: false, root: null };
   stashesListeners.clear();
-  setSidebarBadge?.("git", null);
-  revealSidebarPanel = null;
-  getFileIcon = null;
-  getFolderIcon = null;
-  onDidChangeIconTheme = null;
+  unbindHost();
   removeStylesheet?.();
   removeStylesheet = null;
 }
