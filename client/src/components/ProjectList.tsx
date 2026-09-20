@@ -248,6 +248,10 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
   // fields are showing (the base input only exists in "new branch" mode).
   const popoverRef = useRef<HTMLDivElement>(null);
   const [popoverPos, setPopoverPos] = useState({ x: 0, y: 0 });
+  // Bumped when the viewport changes height under an open form (the soft
+  // keyboard, see the resize handler below) so the popover re-lands inside
+  // what is left of the screen.
+  const [reflowTick, setReflowTick] = useState(0);
   useLayoutEffect(() => {
     const el = popoverRef.current;
     if (!formFor || !el) return;
@@ -257,15 +261,18 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     // Flips above the anchor when there is no room below — the tree's lower
     // rows are exactly where a repo with many terminals puts its "+".
     const below = anchor.bottom + POPOVER_GAP;
-    const y =
+    const preferred =
       below + rect.height > innerHeight - POPOVER_EDGE
-        ? Math.max(POPOVER_EDGE, anchor.top - rect.height - POPOVER_GAP)
+        ? anchor.top - rect.height - POPOVER_GAP
         : below;
+    // Neither side fits when the keyboard has taken most of the screen and
+    // the anchor row sits under it — then the form simply goes wherever it
+    // is fully visible, anchoring be damned.
     setPopoverPos({
       x: Math.max(POPOVER_EDGE, Math.min(anchor.left, innerWidth - rect.width - POPOVER_EDGE)),
-      y,
+      y: Math.max(POPOVER_EDGE, Math.min(preferred, innerHeight - rect.height - POPOVER_EDGE)),
     });
-  }, [formFor, form.mode, formError, worktreeAgents.length]);
+  }, [formFor, form.mode, formError, worktreeAgents.length, reflowTick]);
 
   // Click-outside and Escape close it, the same way every other overlay in
   // the app does — the dismissing press is swallowed rather than passed on
@@ -278,16 +285,32 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
       if (e.key === "Escape") closeCreateForm();
     };
     window.addEventListener("keydown", onKeyDown);
-    // A scroll or resize moves the anchor out from under it; re-anchoring a
-    // form mid-typing would be worse than dismissing, and matches the menu.
-    const onReflow = () => closeCreateForm();
-    window.addEventListener("resize", onReflow);
-    containerRef.current?.addEventListener("scroll", onReflow);
+    // A scroll moves the anchor out from under it; re-anchoring a form
+    // mid-typing would be worse than dismissing, and matches the menu.
+    const onScroll = () => closeCreateForm();
+    // A resize used to dismiss for the same reason, which on a phone killed
+    // the form the instant it opened: focusing the branch input raises the
+    // soft keyboard, and interactive-widget=resizes-content (see
+    // client/index.html) shrinks the layout viewport for it — a plain window
+    // resize. The keyboard only ever changes the height, so a height-only
+    // resize just re-positions the popover; a width change (a desktop drag,
+    // a rotation) still dismisses.
+    let width = window.innerWidth;
+    const onResize = () => {
+      if (window.innerWidth === width) {
+        setReflowTick((t) => t + 1);
+        return;
+      }
+      width = window.innerWidth;
+      closeCreateForm();
+    };
+    window.addEventListener("resize", onResize);
+    containerRef.current?.addEventListener("scroll", onScroll);
     const list = containerRef.current;
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", onReflow);
-      list?.removeEventListener("scroll", onReflow);
+      window.removeEventListener("resize", onResize);
+      list?.removeEventListener("scroll", onScroll);
     };
   }, [formFor, closeCreateForm]);
 

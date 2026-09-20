@@ -1351,6 +1351,12 @@ body.resizing-row {
   z-index: 1000;
   width: 260px;
   max-width: calc(100vw - 16px);
+  /* The visible viewport, not the layout one: with the soft keyboard up
+     there may be only a few hundred pixels of screen left for the form, and
+     it scrolls rather than hanging off the bottom. --app-height is kept in
+     sync with visualViewport by App.tsx. */
+  max-height: calc(var(--app-height, 100dvh) - 8px);
+  overflow-y: auto;
   background: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
