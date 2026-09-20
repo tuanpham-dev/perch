@@ -112,12 +112,32 @@ type Row =
       parentId: string;
       // 0 directly under a project (today's position), 1 under a worktree.
       depth: 0 | 1;
+    }
+  // Stands in for a project's idle worktrees (see IDLE_WORKTREE_FOLD): one
+  // row that shows them all, and shows itself as "Show less" once they are.
+  | {
+      kind: "more";
+      id: string;
+      projectId: string;
+      count: number;
+      expanded: boolean;
+      parentId: string;
+      depth: 1;
     };
 
 // The create-worktree popover's offset from its anchor, and the margin it
 // keeps from the viewport edge — the same two numbers ContextMenu uses.
 const POPOVER_GAP = 4;
 const POPOVER_EDGE = 4;
+
+// A worktree with no terminal running in it is somewhere you aren't working
+// right now, and a long-lived repository collects those — so they fold away
+// behind a "Show N more" row. Two is the point where folding pays: replacing
+// a single idle row with a toggle row saves no space and costs a tap.
+const IDLE_WORKTREE_FOLD = 2;
+// Pinning a worktree is an explicit "keep this in front of me", so a pinned
+// one stays on screen however quiet it is.
+const isIdleWorktree = (node: WorktreeNode) => node.sessions.length === 0 && !node.pinned;
 
 const windowRowId = (sessionName: string, index: number) => `window:${sessionName}:${index}`;
 // Keyed by repo root for repository projects and by folder for plain ones
@@ -126,6 +146,7 @@ const windowRowId = (sessionName: string, index: number) => `window:${sessionNam
 // can't collide.
 const projectRowId = (node: ProjectNode) => `project:${node.key}`;
 const worktreeRowId = (node: WorktreeNode) => `worktree:${node.key}`;
+const moreRowId = (node: ProjectNode) => `more:${node.key}`;
 
 
 const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function ProjectList(
@@ -163,6 +184,10 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
   // Ephemeral, and shared by both collapsible kinds — project rows and
   // worktree rows are both just ids in here.
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
+  // Project rows whose idle worktrees are currently unfolded, by row id.
+  // Ephemeral like the collapse state above: the fold is a way of looking at
+  // the tree, not something to carry across reloads.
+  const [unfoldedRows, setUnfoldedRows] = useState<Set<string>>(new Set());
   // The open create-worktree popover: which project it is for, and the
   // viewport rect of the control it was opened from, which it anchors to.
   // One at a time — opening another closes the first.
@@ -190,6 +215,15 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
 
   const toggleCollapsed = (key: string) => {
     setCollapsedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleUnfolded = (key: string) => {
+    setUnfoldedRows((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -385,11 +419,28 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
         continue;
       }
       pushWindows(node.sessions, id, 0);
+      // The idle ones fold away behind a single row, and only once there are
+      // enough of them to be worth folding.
+      const idle = node.worktrees.filter(isIdleWorktree).length;
+      const folds = idle >= IDLE_WORKTREE_FOLD;
+      const unfolded = unfoldedRows.has(id);
       for (const wt of node.worktrees) {
+        if (folds && !unfolded && isIdleWorktree(wt)) continue;
         const wtId = worktreeRowId(wt);
         out.push({ kind: "worktree", id: wtId, node: wt, parentId: id, depth: 1 });
         if (collapsedRows.has(wtId)) continue;
         pushWindows(wt.sessions, wtId, 1);
+      }
+      if (folds) {
+        out.push({
+          kind: "more",
+          id: moreRowId(node),
+          projectId: id,
+          count: idle,
+          expanded: unfolded,
+          parentId: id,
+          depth: 1,
+        });
       }
       if (node.key !== activeProjectKey) continue;
       const last = out.length - 1;
@@ -398,7 +449,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
       if (last !== blockStart) pos.set(out[last].id, "end");
     }
     return { rows: out, blockPos: pos };
-  }, [nodes, collapsedRows, activeProjectKey]);
+  }, [nodes, collapsedRows, unfoldedRows, activeProjectKey]);
 
   // The bridge below runs outside React's data flow, so it reads the live
   // tree through a ref rather than closing over a render's copy.
@@ -477,6 +528,10 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     (id: string) => {
       const row = rowsById.get(id);
       if (!row) return;
+      if (row.kind === "more") {
+        toggleUnfolded(row.projectId);
+        return;
+      }
       if (row.kind === "window") {
         onOpenWindow(row.session.name, row.window.index);
         return;
@@ -518,7 +573,13 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
   const onExpand = useCallback(
     (id: string) => {
       const row = rowsById.get(id);
-      if (row && isCollapsible(row) && collapsedRows.has(row.id)) toggleCollapsed(row.id);
+      if (!row) return;
+      // ArrowRight unfolds the idle worktrees, the same way it opens a row.
+      if (row.kind === "more") {
+        if (!row.expanded) toggleUnfolded(row.projectId);
+        return;
+      }
+      if (isCollapsible(row) && collapsedRows.has(row.id)) toggleCollapsed(row.id);
     },
     [rowsById, collapsedRows],
   );
@@ -527,6 +588,11 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     (id: string) => {
       const row = rowsById.get(id);
       if (!row) return;
+      if (row.kind === "more") {
+        if (row.expanded) toggleUnfolded(row.projectId);
+        else focusRowRef.current(row.parentId);
+        return;
+      }
       if (isCollapsible(row) && !collapsedRows.has(row.id)) {
         toggleCollapsed(row.id);
       } else if (row.parentId) {
@@ -552,7 +618,11 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     (id: string, rect: DOMRect) => {
       const row = rowsById.get(id);
       if (!row) return;
-      onShowMenu(rect.left + 8, rect.bottom, menuItemsFor(row));
+      // A row with nothing to offer (the fold toggle) opens no menu at all
+      // rather than an empty one.
+      const items = menuItemsFor(row);
+      if (items.length === 0) return;
+      onShowMenu(rect.left + 8, rect.bottom, items);
     },
     [rowsById, menuItemsFor, onShowMenu],
   );
@@ -580,7 +650,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
   // The sessions a row's operation shortcuts act on: its own for a terminal,
   // the node's for a project or worktree row.
   const sessionsOfRow = (row: Row): TerminalSession[] =>
-    row.kind === "window" ? [row.session] : row.node.sessions;
+    row.kind === "window" ? [row.session] : row.kind === "more" ? [] : row.node.sessions;
 
   // projects.* operation commands (rebindable) — dispatched here, ahead of
   // the hook's own onKeyDown, exactly the split FileTree.tsx uses for
@@ -867,6 +937,36 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     );
   };
 
+  // The fold toggle standing in for a project's idle worktrees. No context
+  // menu, no "+" and no chevron of its own: it is a control, not a place.
+  const renderMoreRow = (row: Extract<Row, { kind: "more" }>) => {
+    const rowProps = nav.getRowProps(row.id);
+    return (
+      <div className="session-row">
+        <button
+          className="session-item worktree-more"
+          title={
+            row.expanded
+              ? "Hide the worktrees with no terminal running"
+              : `Show ${row.count} worktrees with no terminal running`
+          }
+          aria-expanded={row.expanded}
+          onClick={() => toggleUnfolded(row.projectId)}
+          // Nothing to offer on a right-click, but the native menu over the
+          // sidebar would be worse than nothing.
+          onContextMenu={(e) => e.preventDefault()}
+          tabIndex={rowProps.tabIndex}
+          ref={rowProps.ref}
+          onFocus={rowProps.onFocus}
+        >
+          <span className="chevron chevron-empty" />
+          <Icon name={row.expanded ? "chevron-up" : "ellipsis"} className="worktree-icon" />
+          <span className="session-name">{row.expanded ? "Show less" : `Show ${row.count} more`}</span>
+        </button>
+      </div>
+    );
+  };
+
   const renderWindowRow = (row: Extract<Row, { kind: "window" }>) => {
     const { session: s, window: w } = row;
     const isActive =
@@ -949,7 +1049,9 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
               ? renderProjectRow(row)
               : row.kind === "worktree"
                 ? renderWorktreeRow(row)
-                : renderWindowRow(row)}
+                : row.kind === "more"
+                  ? renderMoreRow(row)
+                  : renderWindowRow(row)}
           </li>
         ))}
         {rows.length === 0 && <li className="session-empty">No projects open</li>}
