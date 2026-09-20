@@ -1321,6 +1321,18 @@ body.resizing-row {
   color: var(--fg-inactive);
 }
 
+/* The row that stands in for a project's folded-away idle worktrees. Reads
+   as a control rather than a place: muted, and without the dot and badges a
+   real worktree row carries. */
+.worktree-more {
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+.worktree-more:hover {
+  color: var(--fg);
+}
+
 /* The codicon stylesheet sizes every glyph via `.codicon[class*="codicon-"]`,
    which outranks a single class — so anything resizing a codicon has to be
    at least as specific, or it silently does nothing. */
