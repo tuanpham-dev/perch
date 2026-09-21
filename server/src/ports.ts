@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFile, readlink } from "node:fs/promises";
+import { processLabel } from "perch-mux/process-label";
 import { buildProcessMap, type ProcInfo } from "./processes.js";
 import { readSettingsDoc } from "./settingsStore.js";
 import { listAllWindowPids } from "./terminals.js";
@@ -241,72 +242,6 @@ async function readTerminalOrigin(pid: number): Promise<TerminalOrigin | null> {
   }
 }
 
-// Node renames its main thread, so /proc's comm (and therefore ss's and
-// lsof's process column) reads "node-MainThread" for every Node program on
-// the box — true and useless. The command line says what it actually is.
-const RUNTIMES = new Set([
-  "node", "node-MainThread", "deno", "bun", "electron",
-  "python", "python2", "python3", "ruby", "php", "perl", "java", "dotnet",
-]);
-// Flags whose value is the NEXT argv entry, so the value isn't mistaken for
-// the script. Node takes --require/--import/--loader this way.
-const VALUE_FLAGS = new Set([
-  "-r", "--require", "--import", "--loader", "--experimental-loader",
-  "--env-file", "--conditions", "-e", "--eval",
-]);
-// `python3 -m http.server` has no script: the module IS the name.
-const MODULE_FLAGS = new Set(["-m", "--module"]);
-// A script named after its position rather than its job: the folder it runs
-// in says far more than "index.ts" does.
-const GENERIC_SCRIPT = /^(index|main|server|app|start|cli|run|__main__)\.\w+$/;
-// Folders that are equally a position rather than a name — qualified with
-// their parent ("perch/server") to stay tellable apart across checkouts.
-const GENERIC_DIR = new Set(["src", "server", "client", "app", "api", "web", "backend", "frontend", "lib"]);
-
-const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? p;
-
-/** The name to show for a process, from its argv and working directory. */
-export function processLabel(argv: string[], cwd: string | null): string | null {
-  const exe = argv[0] ? base(argv[0]) : null;
-  if (!exe) return null;
-  if (!RUNTIMES.has(exe)) return exe;
-  let script: string | null = null;
-  for (let i = 1; i < argv.length; i++) {
-    const arg = argv[i]!;
-    if (MODULE_FLAGS.has(arg) && argv[i + 1]) return argv[i + 1]!;
-    if (VALUE_FLAGS.has(arg)) {
-      i++;
-      continue;
-    }
-    if (arg.startsWith("-")) continue;
-    script = arg;
-    break;
-  }
-  if (script) {
-    // A dependency's CLI (vite, next, nodemon…) is named by its bin entry.
-    const bin = /(?:^|\/)node_modules\/\.bin\/([^/]+)$/.exec(script);
-    if (bin) return bin[1]!;
-    // Anything else out of node_modules is named after the package that owns
-    // it: a package's own entry file is called bin.js or index.js far more
-    // often than it is called anything useful.
-    const pkg = /(?:^|\/)node_modules\/(@[^/]+\/[^/]+|[^@][^/]*)\//g;
-    let owner: string | null = null;
-    for (let m = pkg.exec(script); m; m = pkg.exec(script)) owner = m[1]!;
-    if (owner && owner !== ".bin") return owner;
-    const name = base(script);
-    if (!GENERIC_SCRIPT.test(name)) return name;
-  }
-  if (cwd) {
-    const dir = base(cwd);
-    if (GENERIC_DIR.has(dir)) {
-      const parent = base(cwd.slice(0, cwd.length - dir.length - 1));
-      if (parent) return `${parent}/${dir}`;
-    }
-    return dir;
-  }
-  return script ? base(script) : exe;
-}
-
 // Linux only: the other platforms' listings already carry a usable name.
 async function describeProcess(pid: number): Promise<string | null> {
   if (process.platform !== "linux") return null;
@@ -371,8 +306,9 @@ async function scanTerminalPorts(): Promise<ListeningPort[]> {
 }
 
 // Fills in the process name from the command line, which is what a Node
-// program is actually called (see processLabel), keeping the listing's own
-// name when /proc can't say.
+// program is actually called (see perch-mux/process-label, shared with the
+// terminal daemon's window naming), keeping the listing's own name when
+// /proc can't say.
 async function withProcessName(port: RawPort, rest: Omit<ListeningPort, keyof RawPort>): Promise<ListeningPort> {
   const label = port.pid === undefined ? null : await describeProcess(port.pid);
   return { ...port, ...rest, process: label ?? port.process };

@@ -12,7 +12,8 @@
     "./protocol": "./src/protocol/messages.ts",
     "./config": "./src/util/config.ts",
     "./windows": "./src/platform/windows.ts",
-    "./spawn-env": "./src/util/spawn-env.ts"
+    "./spawn-env": "./src/util/spawn-env.ts",
+    "./process-label": "./src/util/process-label.ts"
   },
   "engines": {
     "node": ">=23"

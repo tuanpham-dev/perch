@@ -3,6 +3,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, linkSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { needsCommandLine, processLabel, withoutThreadName } from '../util/process-label.ts';
 import type { Platform } from './types.ts';
 
 const isLinux = process.platform === 'linux';
@@ -97,21 +98,28 @@ export const posix: Platform = {
     return run('pgrep', ['-P', String(pid)]).split('\n').filter(Boolean).map(Number).sort((a, b) => a - b);
   },
 
+  // comm is the THREAD name, a runtime name says nothing about the program
+  // anyway, and a package runner's title arrives here truncated to 15
+  // characters — all three hand off to processLabel, the same naming the
+  // ports listing uses, so a dev server is "vite" in every panel that names
+  // it rather than "node" in one and "node-MainThread" in the next.
   processName: (pid) => {
     if (isLinux) {
       try {
         const comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
-        // comm is the THREAD name, and Node renames its main thread: every
-        // Node program on the box reads "node-MainThread" (Electron and some
-        // Python runtimes do the same with a bare "MainThread"). The program
-        // it is actually running is argv[0].
-        if (!/(^|-)MainThread$/.test(comm)) return comm;
-        const argv0 = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0];
-        return argv0 ? argv0.split('/').pop() || comm : comm;
+        if (!needsCommandLine(comm)) return comm;
+        const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
+        return processLabel(argv, () => posix.cwdOf(pid)) ?? withoutThreadName(comm);
       } catch { return undefined; }
     }
-    const comm = run('ps', ['-o', 'comm=', '-p', String(pid)]).trim();
-    return comm ? comm.split('/').pop()!.replace(/^-/, '') : undefined;
+    const comm = run('ps', ['-o', 'comm=', '-p', String(pid)]).trim().split('/').pop()?.replace(/^-/, '');
+    if (!comm) return undefined;
+    if (!needsCommandLine(comm)) return comm;
+    // macOS keeps no /proc: the command line is one more ps column, and the
+    // working directory an lsof away (cwdOf) — both only for the handful of
+    // processes whose own name didn't answer.
+    const argv = run('ps', ['-o', 'command=', '-p', String(pid)]).trim().split(/\s+/).filter(Boolean);
+    return processLabel(argv, () => posix.cwdOf(pid)) ?? withoutThreadName(comm);
   },
 
   cwdOf: (pid) => {

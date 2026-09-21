@@ -343,11 +343,17 @@ export class Window {
    * read rather than tracked, so no poll exists just to keep it fresh. A name
    * that could not be a valid window name (all digits, odd characters) keeps
    * the stored one instead.
+   *
+   * "/" and "@" are allowed on top of the stored-name charset: a foreground
+   * command is named by processLabel, which qualifies a package ("@react-
+   * router/serve") or a folder ("perch/server") that way. Neither character
+   * is target syntax (":" splits session from window, "@" only leads a whole
+   * spec), so "sess:perch/server" still resolves.
    */
   displayName(): string {
     if (!this.autoName) return this.name;
     const fg = this.liveForegroundCommand();
-    return fg && /^[A-Za-z0-9_.-]+$/.test(fg) && !/^\d+$/.test(fg) ? fg : this.name;
+    return fg && /^[@A-Za-z0-9_./-]+$/.test(fg) && !/^\d+$/.test(fg) ? fg : this.name;
   }
 
   /**
