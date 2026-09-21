@@ -62,28 +62,50 @@ function errCode(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// Every connected tunnel client and the ports it says it has bound. The
-// server has no other way to know: channels only open when a local
-// connection actually arrives, so they say nothing about what is merely
-// listening. Module-level because /api/tunnel-status reads it from outside
-// any one socket's closure.
-const tunnels = new Map<WebSocket, Set<number>>();
+// Every connected tunnel client, the ports it says it has bound, and where
+// it connected from. The server has no other way to know the ports: channels
+// only open when a local connection actually arrives, so they say nothing
+// about what is merely listening. Module-level because /api/tunnel-status
+// reads it from outside any one socket's closure.
+const tunnels = new Map<WebSocket, { ports: Set<number>; address: string | null }>();
+
+// "Is this port reachable at localhost for the person asking?" is the only
+// question the status answers, and the answer is per-machine: a tunnel
+// running on someone else's laptop does nothing for this browser. The two
+// are matched on the address they reached the server from, which needs
+// nothing of the tunnel CLI (an already-running one keeps working) — an
+// IPv4-mapped IPv6 address and the two spellings of loopback are folded
+// together so a local browser and a local tunnel agree they're the same
+// machine. Behind a reverse proxy every client arrives as the proxy, so
+// there the question can't be answered any more finely than before.
+function sameMachineKey(address: string | null | undefined): string | null {
+  if (!address) return null;
+  const plain = address.startsWith("::ffff:") ? address.slice("::ffff:".length) : address;
+  return plain === "::1" ? "127.0.0.1" : plain;
+}
 
 export interface TunnelStatus {
   connected: boolean;
-  // The union across every connected client.
+  // The union across every client on the asking machine.
   ports: number[];
 }
 
-export function tunnelStatus(): TunnelStatus {
+/** The tunnel state as it looks from `address` — see sameMachineKey. */
+export function tunnelStatus(address: string | null | undefined): TunnelStatus {
+  const key = sameMachineKey(address);
   const ports = new Set<number>();
-  for (const reported of tunnels.values()) for (const port of reported) ports.add(port);
-  return { connected: tunnels.size > 0, ports: [...ports].sort((a, b) => a - b) };
+  let connected = false;
+  for (const tunnel of tunnels.values()) {
+    if (key === null || sameMachineKey(tunnel.address) !== key) continue;
+    connected = true;
+    for (const port of tunnel.ports) ports.add(port);
+  }
+  return { connected, ports: [...ports].sort((a, b) => a - b) };
 }
 
-export function handleTunnel(ws: WebSocket): void {
+export function handleTunnel(ws: WebSocket, address: string | null): void {
   const channels = new Map<number, Channel>();
-  tunnels.set(ws, new Set());
+  tunnels.set(ws, { ports: new Set(), address });
   // Channel ids with a terminal-ownership check in flight — guards against a
   // duplicate FRAME_OPEN for the same id (channels.has(id) can't catch it,
   // since the channel isn't created until the check resolves).
@@ -218,7 +240,7 @@ export function handleTunnel(ws: WebSocket): void {
   // frame carries a status readout, and a bad one must not cost the user
   // their forwarding.
   const reportPorts = (payload: Buffer) => {
-    const reported = tunnels.get(ws);
+    const reported = tunnels.get(ws)?.ports;
     if (!reported) return;
     let parsed: unknown;
     try {
