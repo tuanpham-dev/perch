@@ -97,6 +97,71 @@ function trimTrailing(s: string): string {
 // the @perch/engine-support shim.
 export const MAX_STITCH_LINES = 500;
 
+// ---- Paths a program broke across rows ----
+//
+// The terminal records its own soft wraps, and every engine's stitcher
+// rejoins them before detection runs. A program that word-wraps its own
+// output writes real newlines instead, so a path caught by one of those is
+// two unrelated lines as far as the buffer — and therefore the detector —
+// can see. On a desktop-width pane that barely ever happens; on a phone,
+// where Claude Code's box leaves around forty columns, it happens to nearly
+// every path it prints, so the terminal stops offering links at exactly the
+// width where reaching a file by hand is hardest.
+//
+// Rejoining two rows is a guess, so it stays narrow: the first row has to
+// have genuinely run out of room, and the halves have to read as one path
+// once joined. Callers try the unjoined candidate first and only fall back
+// to this one, and every path goes through the same existence check as any
+// other — so a wrong guess resolves to nothing and is quietly dropped.
+
+// How many columns a row may leave unused and still count as "full". A
+// program wrapping at the pane's width usually stops a column or two short:
+// Ink (Claude Code's renderer) reserves the final column outright, and a
+// wrap decision made on the *next* word can leave a little more.
+const WRAP_SLACK = 2;
+
+export interface WrappedPath {
+  /** The whole path, both halves, with any :line[:col] suffix stripped. */
+  target: string;
+  line?: number;
+  /** Where the path starts in the first row. */
+  headStart: number;
+  /** Where it resumes in the second row, and how much of it that row holds. */
+  contStart: number;
+  contLength: number;
+}
+
+/**
+ * The path split between `head` (one row's own text, right-padding and all)
+ * and `cont` (the row under it), or null when those two rows don't read as
+ * one. Both rows are given as the terminal prints them; `cols` is the pane's
+ * width.
+ */
+export function joinWrappedPath(head: string, cont: string, cols: number): WrappedPath | null {
+  const headText = head.replace(/\s+$/, "");
+  // Room to spare at the end means the program chose to stop there.
+  if (!headText || headText.length > cols || cols - headText.length > WRAP_SLACK) return null;
+  const headStart = Math.max(headText.lastIndexOf(" "), headText.lastIndexOf("\t")) + 1;
+  const headToken = headText.slice(headStart);
+  if (!headToken) return null;
+  // The continuation keeps the block's own indent, which isn't part of the path.
+  const contStart = cont.length - cont.replace(/^\s+/, "").length;
+  const contToken = /^\S+/.exec(cont.slice(contStart))?.[0];
+  if (!contToken) return null;
+  const joined = headToken + contToken;
+  const candidate = findCandidates(joined).find((c) => c.kind === "path" && c.startIdx === 0);
+  // Nothing to gain unless the match actually crosses the break: a path that
+  // ends on the first row is the ordinary single-row case, already detected.
+  if (!candidate || candidate.endIdx <= headToken.length) return null;
+  return {
+    target: candidate.target,
+    line: candidate.line,
+    headStart,
+    contStart,
+    contLength: candidate.endIdx - headToken.length,
+  };
+}
+
 export function isOpenGesture(event: MouseEvent): boolean {
   return event.ctrlKey || event.metaKey;
 }

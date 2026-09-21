@@ -450,22 +450,26 @@ export async function createXtermEngine(
     // the gesture by the time this is called, so these are this engine's
     // own temporary listeners, torn down on mouseup). term.select()'s row
     // is buffer-absolute (mobile-touch-select-copy-open.md spike finding),
-    // so screen rows here are offset by baseY, same as selectCells below.
+    // so screen rows here are resolved through viewportY, same as
+    // selectCells below. The anchor is resolved once, at press time: the
+    // view scrolls under a drag that reaches the edge (and new output moves
+    // the buffer under it either way), and the cell the gesture started on
+    // must not travel with it.
     beginLocalSelection: (clientX, clientY) => {
       endLocalSelectionDrag?.();
       const start = cellFromPointOnEngine(clientX, clientY);
       const startCol = start.col - 1;
-      const startRow = start.row - 1;
+      const startRow = term.buffer.active.viewportY + start.row - 1;
       const linear = (row: number, col: number) => row * term.cols + col;
       const startLinear = linear(startRow, startCol);
       const update = (clientX2: number, clientY2: number) => {
         const cur = cellFromPointOnEngine(clientX2, clientY2);
-        const curLinear = linear(cur.row - 1, cur.col - 1);
-        const baseY = term.buffer.active.baseY;
+        const curRow = term.buffer.active.viewportY + cur.row - 1;
+        const curLinear = linear(curRow, cur.col - 1);
         if (curLinear >= startLinear) {
-          term.select(startCol, baseY + startRow, curLinear - startLinear + 1);
+          term.select(startCol, startRow, curLinear - startLinear + 1);
         } else {
-          term.select(cur.col - 1, baseY + cur.row - 1, startLinear - curLinear + 1);
+          term.select(cur.col - 1, curRow, startLinear - curLinear + 1);
         }
       };
       update(clientX, clientY);
@@ -480,17 +484,17 @@ export async function createXtermEngine(
       };
     },
     // Spike finding: term.select()'s row is buffer-absolute, so a screen row
-    // (0 = top of the visible viewport) must add baseY.
+    // (0 = top of the visible viewport) must add viewportY.
     selectCells: (col, row, length) => {
-      term.select(col, term.buffer.active.baseY + row, length);
+      term.select(col, term.buffer.active.viewportY + row, length);
     },
     // Seam contract is screen-relative (0 = top of the visible viewport);
-    // stitchXtermLine works in absolute buffer rows, so offset by baseY
+    // stitchXtermLine works in absolute buffer rows, so offset by viewportY
     // both ways — same conversion readLine below already does.
     readStitchedLine: (row) => {
-      const baseY = term.buffer.active.baseY;
-      const stitched = stitchXtermLine(term, baseY + row);
-      return stitched ? { text: stitched.text, startLine: stitched.startLine - baseY } : null;
+      const viewportY = term.buffer.active.viewportY;
+      const stitched = stitchXtermLine(term, viewportY + row);
+      return stitched ? { text: stitched.text, startLine: stitched.startLine - viewportY } : null;
     },
     cellFromPoint: cellFromPointOnEngine,
     getCharHeight: () => cssCellDims().height,
@@ -566,10 +570,15 @@ export async function createXtermEngine(
       (term.element ?? screen).dispatchEvent(new WheelEvent("wheel", init));
     },
     // Global (0 = top of scrollback) and screen-relative indexing meet at
-    // buffer.baseY — the same offset buildXtermLinkProvider (terminalLinks.ts)
-    // already uses for the inverse conversion.
+    // buffer.viewportY — what the seam means by "screen" is what is on
+    // screen, which is only buffer.baseY while the pane sits at the live
+    // tail. Reading through baseY instead made every screen-row API answer
+    // about the bottom page whenever the pane was scrolled back: a
+    // long-press on a path up in the history hit-tested a row of the live
+    // screen, usually blank, so the press found nothing to select and the
+    // link menu never appeared.
     readLine: (row) => {
-      const idx = term.buffer.active.baseY + row;
+      const idx = term.buffer.active.viewportY + row;
       // xterm's buffer is a circular list: get() wraps the index modulo
       // length and never returns undefined, so out-of-range has to be
       // checked explicitly rather than relying on a falsy return.
@@ -578,7 +587,14 @@ export async function createXtermEngine(
       if (!line) return "";
       return line.translateToString(true, 0, term.cols);
     },
-    getCursor: () => ({ col: term.buffer.active.cursorX, row: term.buffer.active.cursorY }),
+    // xterm counts the cursor from the live screen; the seam counts screen
+    // rows from the viewport. They differ only while scrolled back, where
+    // the cursor is off-screen and the row lands outside 0..rows-1 — which
+    // is what a caller placing something at the cursor should see.
+    getCursor: () => ({
+      col: term.buffer.active.cursorX,
+      row: term.buffer.active.baseY + term.buffer.active.cursorY - term.buffer.active.viewportY,
+    }),
     // baseY: top of the bottom page when fully scrolled down. viewportY:
     // top of what's currently shown. Equal means pinned to the bottom.
     isScrolledUp: () => term.buffer.active.viewportY !== term.buffer.active.baseY,
