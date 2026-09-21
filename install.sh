@@ -74,7 +74,7 @@ fi
 heading "Done"
 PORT_LINE="$(sed -n 's/^PORT=//p' "$INSTALL_DIR/server/.env" 2>/dev/null | tail -n1 | tr -d '[:space:]')"
 echo "Perch is at http://127.0.0.1:${PORT_LINE:-3001}"
-echo "Config (PORT, AUTH_TOKEN, ALLOWED_HOSTS, NEW_SESSION_CWD) goes in $INSTALL_DIR/server/.env — see the README."
+echo "Config (PORT, AUTH_TOKEN, ALLOWED_HOSTS, NEW_SESSION_CWD) goes in $INSTALL_DIR/server/.env — see docs/INSTALL.md."
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) warn "$BIN_DIR is not on your PATH — add this to your shell profile: export PATH=\"$BIN_DIR:\$PATH\"" ;;

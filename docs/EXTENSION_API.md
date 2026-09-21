@@ -161,7 +161,10 @@ VS Code color-theme JSON, resolved relative to the theme file's own
 directory (`include` supported). The Settings → UI color-theme dropdown
 lists each entry as `<extensionId>:<label>`. Themes drive both the app's
 CSS variables and the terminal palette; keys the theme doesn't set keep the
-core hard-fallback values. Reference: `extensions/plastic-legacy-theme`.
+core hard-fallback values, which are pixel-identical to the bundled
+`plastic-legacy-theme` (the default selection), so a partial theme never
+breaks the UI. Applies live, no reload. Reference:
+`extensions/plastic-legacy-theme`.
 
 ### `contributes.iconThemes`
 
@@ -172,8 +175,14 @@ core hard-fallback values. Reference: `extensions/plastic-legacy-theme`.
 ```
 
 VS Code file-icon-theme JSON (icon definitions, font glyphs, per-extension/
-per-name mappings). `iconPath`/font paths resolve relative to the theme
-JSON's own directory. Reference: `extensions/seti-icons`.
+per-name mappings). Both icon styles VS Code themes use work: font-glyph
+(`fontCharacter`/`fontColor`, seti's style — the theme's own font loads at
+runtime via `FontFace`, under an internal namespaced family) and SVG
+(`iconPath`, the Material Icon Theme style). Matched by filename, then
+extension, then a theme-wide default, same as VS Code. `iconPath`/font paths
+resolve relative to the theme JSON's own directory. Selecting no icon theme
+("None") shows blank spacer icons rather than falling back to seti.
+Reference: `extensions/seti-icons`.
 
 ### `contributes.fonts`
 
@@ -199,9 +208,33 @@ terminal fonts:
 
 Within a group, entries sharing a `family` register different
 weights/styles/unicode-ranges of one font (include a bold face — xterm
-renders bold cells with it); entries with distinct families bundle
-companion fonts (e.g. a Nerd Font symbols face) that ride along in the
-stack when the group is picked. Reference: `extensions/ibm-plex-mono`.
+renders bold cells with it, and falls back to synthetic bold otherwise);
+entries with distinct families bundle companion fonts (e.g. a Nerd Font
+symbols face) that ride along in the stack when the group is picked. A
+group is the Settings → Terminal font picker's unit of selection: picking
+it writes **every** family in the group into the stack at once, with no
+separate step to combine them, and a **Secondary font** select can add
+another listed font (e.g. a symbols-only group) behind the primary one. One
+extension can contribute several groups — the same symbols font offered
+both inside a combo group and on its own, say.
+
+The picker only lists fonts the app can guarantee: "Use fallback fonts"
+(contributing nothing itself), the app's own bundled fonts, and whatever
+enabled extensions contribute. A system font installed only on this machine
+isn't offered — type it into the fallback field instead. A stored stack
+whose leading font matches no listed option (hand-typed, or from an
+extension since disabled) shows as "Use fallback fonts" with the whole
+stack in that field.
+
+Unlike themes, fonts aren't mutually exclusive and aren't loaded up front: a
+family's `FontFace`s are fetched only once that family is actually in the
+stack — whether from a group selection or a hand-typed fallback — and are
+dropped again when it leaves or its extension is disabled, the same
+selected-only-loads policy color and icon themes follow. It is per family,
+so a stack keeping one member of a group never loads the others. Each
+registers under its real family name (unlike icon-theme fonts), so the
+fallback field can name it directly. Applies live, no reload. Reference:
+`extensions/ibm-plex-mono`.
 
 ### `contributes.terminalEngines`
 

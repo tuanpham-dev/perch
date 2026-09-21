@@ -75,4 +75,4 @@ node (Join-Path $binDir 'perch') enable
 
 Heading 'Done'
 Write-Host 'Perch is at http://127.0.0.1:3001'
-Write-Host "Config (PORT, AUTH_TOKEN, ALLOWED_HOSTS, NEW_SESSION_CWD) goes in $InstallDir\server\.env - see the README."
+Write-Host "Config (PORT, AUTH_TOKEN, ALLOWED_HOSTS, NEW_SESSION_CWD) goes in $InstallDir\server\.env - see docs/INSTALL.md."
