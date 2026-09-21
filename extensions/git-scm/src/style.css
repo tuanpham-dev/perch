@@ -1452,6 +1452,17 @@
 
 /* --- Branches pane --- */
 
+/* The pane's scroll area, and the reason it has to be declared: .git-panel
+   is height: 100% with overflow: hidden, so a ref list taller than the pane
+   is clipped and the host's .panel-content fallback never sees an overflow
+   to scroll. Same flex: 1 / min-height: 0 / overflow-y: auto shape as
+   .git-groups, .git-commits-list and .git-stash-list. */
+.git-ref-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .git-ref-list.busy {
   opacity: 0.6;
   pointer-events: none;
