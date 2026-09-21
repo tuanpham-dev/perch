@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { fetchAiProfiles, type AiProfileOption } from "../../api";
+import type { RegisteredSettingsComponent } from "../../extensions";
+import { placeSettingsComponents } from "../../lib/settingsComponents";
 import type { ExtensionInfo } from "../../types";
 import AiModelField from "./AiModelField";
 import { NumberField } from "./controls";
@@ -17,14 +19,20 @@ import { useSettingsContext } from "./context";
 // command line is the one thing nothing can enumerate.
 const UNLISTABLE_PROVIDER = "custom";
 
+type ConfigProperty = ExtensionInfo["configuration"][number]["properties"][number];
+
 function ExtensionProperties({
   ext,
   overrides,
   onChange,
+  anchored,
 }: {
   ext: ExtensionInfo;
   overrides: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+  // Settings components placed after a particular property - see
+  // lib/settingsComponents.ts.
+  anchored: Map<string, RegisteredSettingsComponent[]>;
 }) {
   // For "ai-profile"/"ai-model" properties — every AI a job may be pointed at.
   //
@@ -77,150 +85,170 @@ function ExtensionProperties({
     onChange(next);
   };
 
+  const renderRow = (prop: ConfigProperty) => {
+    const value = prop.key in overrides ? overrides[prop.key] : prop.default;
+    const label = prop.description || prop.key;
+
+    if (prop.type === "boolean") {
+      return (
+        <label key={prop.key} className="settings-row checkbox-row" title={prop.key}>
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            onChange={(e) => setValue(prop.key, e.target.checked, prop.default)}
+          />
+          <span>{label}</span>
+        </label>
+      );
+    }
+
+    if (prop.type === "number" || prop.type === "integer") {
+      const numericValue = typeof value === "number" ? value : Number(prop.default) || 0;
+      return (
+        <label key={prop.key} className="settings-row" title={prop.key}>
+          <span className="settings-label">{label}</span>
+          <NumberField
+            value={numericValue}
+            min={prop.minimum ?? -1e9}
+            max={prop.maximum ?? 1e9}
+            step={prop.type === "integer" ? 1 : 0.1}
+            onCommit={(v) => setValue(prop.key, prop.type === "integer" ? Math.round(v) : v, prop.default)}
+          />
+        </label>
+      );
+    }
+
+    // A model box that knows what it would fall back to: the model
+    // configured on whichever profile this extension is pointed at
+    // (its own "ai-profile" property, else the app default), so the
+    // placeholder answers "and what do I get if I leave this empty?"
+    // without anyone opening Settings → AI Providers to look.
+    if (prop.format === "ai-model") {
+      // Which profile would answer if this box stays empty — the
+      // extension's own pick, else the app default. Mirrors ai.ts's
+      // resolveProfile, so the placeholder names the AI that would
+      // really run.
+      // The server list is already enabled-only and marks its own
+      // default, so this mirrors resolveProfile without re-deriving
+      // "enabled" on the client.
+      const chosen =
+        aiProfiles.find((p) => p.id === selectedAiProfileId) ??
+        aiProfiles.find((p) => p.isDefault) ??
+        aiProfiles[0];
+      const fallback = chosen?.model
+        ? `${chosen.model} (from ${chosen.label})`
+        : chosen
+          ? `${chosen.label}'s own default`
+          : "the provider's own default";
+      return (
+        <div key={prop.key} className="settings-row" title={prop.key}>
+          <span className="settings-label">{label}</span>
+          <AiModelField
+            // Namespaced by property key: two extensions' model
+            // fields must not share one <datalist>.
+            id={prop.key}
+            value={typeof value === "string" ? value : ""}
+            // "" is "the app default", which the server resolves the
+            // same way this placeholder does.
+            profileId={selectedAiProfileId}
+            fetchable={!!chosen && chosen.provider !== UNLISTABLE_PROVIDER}
+            placeholder={`Leave empty for ${fallback}`}
+            hint={`Runs on ${chosen ? chosen.label : "the app's default AI"}.`}
+            onChange={(next) => setValue(prop.key, next, prop.default)}
+          />
+        </div>
+      );
+    }
+
+    // An AI picker rather than a text box for the profile id: the
+    // ids come from Settings → AI Providers, and nobody should have to type
+    // one. Empty means "whatever the default profile is", which is
+    // also what ctx.ai.run does with an empty profileId.
+    if (prop.format === "ai-profile") {
+      return (
+        <label key={prop.key} className="settings-row" title={prop.key}>
+          <span className="settings-label">{label}</span>
+          <select
+            className="dialog-input settings-select"
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => setValue(prop.key, e.target.value, prop.default)}
+          >
+            <option value="">App default</option>
+            {aiProfiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+                {p.model ? ` · ${p.model}` : ""}
+              </option>
+            ))}
+          </select>
+          <div className="settings-hint">Configure the list in Settings → AI Providers.</div>
+        </label>
+      );
+    }
+
+    if (prop.enum && prop.enum.length > 0) {
+      return (
+        <label key={prop.key} className="settings-row" title={prop.key}>
+          <span className="settings-label">{label}</span>
+          <select
+            className="dialog-input settings-select"
+            value={String(value)}
+            onChange={(e) => setValue(prop.key, e.target.value, prop.default)}
+          >
+            {prop.enum.map((opt, optIndex) => (
+              <option key={opt} value={opt} title={prop.enumDescriptions?.[optIndex]}>
+                {prop.enumItemLabels?.[optIndex] ?? opt}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    return (
+      <label key={prop.key} className="settings-row" title={prop.key}>
+        <span className="settings-label">{label}</span>
+        <input
+          className="dialog-input"
+          value={typeof value === "string" ? value : String(value ?? "")}
+          onChange={(e) => setValue(prop.key, e.target.value, prop.default)}
+        />
+      </label>
+    );
+  };
+
   return (
     <>
       {ext.configuration.map((section, sectionIndex) => (
         <div key={sectionIndex}>
           {section.title && <h3 className="settings-subsection-title">{section.title}</h3>}
-          {section.properties.map((prop) => {
-            const value = prop.key in overrides ? overrides[prop.key] : prop.default;
-            const label = prop.description || prop.key;
-
-            if (prop.type === "boolean") {
-              return (
-                <label key={prop.key} className="settings-row checkbox-row" title={prop.key}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(value)}
-                    onChange={(e) => setValue(prop.key, e.target.checked, prop.default)}
-                  />
-                  <span>{label}</span>
-                </label>
-              );
-            }
-
-            if (prop.type === "number" || prop.type === "integer") {
-              const numericValue = typeof value === "number" ? value : Number(prop.default) || 0;
-              return (
-                <label key={prop.key} className="settings-row" title={prop.key}>
-                  <span className="settings-label">{label}</span>
-                  <NumberField
-                    value={numericValue}
-                    min={prop.minimum ?? -1e9}
-                    max={prop.maximum ?? 1e9}
-                    step={prop.type === "integer" ? 1 : 0.1}
-                    onCommit={(v) => setValue(prop.key, prop.type === "integer" ? Math.round(v) : v, prop.default)}
-                  />
-                </label>
-              );
-            }
-
-            // A model box that knows what it would fall back to: the model
-            // configured on whichever profile this extension is pointed at
-            // (its own "ai-profile" property, else the app default), so the
-            // placeholder answers "and what do I get if I leave this empty?"
-            // without anyone opening Settings → AI Providers to look.
-            if (prop.format === "ai-model") {
-              // Which profile would answer if this box stays empty — the
-              // extension's own pick, else the app default. Mirrors ai.ts's
-              // resolveProfile, so the placeholder names the AI that would
-              // really run.
-              // The server list is already enabled-only and marks its own
-              // default, so this mirrors resolveProfile without re-deriving
-              // "enabled" on the client.
-              const chosen =
-                aiProfiles.find((p) => p.id === selectedAiProfileId) ??
-                aiProfiles.find((p) => p.isDefault) ??
-                aiProfiles[0];
-              const fallback = chosen?.model
-                ? `${chosen.model} (from ${chosen.label})`
-                : chosen
-                  ? `${chosen.label}'s own default`
-                  : "the provider's own default";
-              return (
-                <div key={prop.key} className="settings-row" title={prop.key}>
-                  <span className="settings-label">{label}</span>
-                  <AiModelField
-                    // Namespaced by property key: two extensions' model
-                    // fields must not share one <datalist>.
-                    id={prop.key}
-                    value={typeof value === "string" ? value : ""}
-                    // "" is "the app default", which the server resolves the
-                    // same way this placeholder does.
-                    profileId={selectedAiProfileId}
-                    fetchable={!!chosen && chosen.provider !== UNLISTABLE_PROVIDER}
-                    placeholder={`Leave empty for ${fallback}`}
-                    hint={`Runs on ${chosen ? chosen.label : "the app's default AI"}.`}
-                    onChange={(next) => setValue(prop.key, next, prop.default)}
-                  />
-                </div>
-              );
-            }
-
-            // An AI picker rather than a text box for the profile id: the
-            // ids come from Settings → AI Providers, and nobody should have to type
-            // one. Empty means "whatever the default profile is", which is
-            // also what ctx.ai.run does with an empty profileId.
-            if (prop.format === "ai-profile") {
-              return (
-                <label key={prop.key} className="settings-row" title={prop.key}>
-                  <span className="settings-label">{label}</span>
-                  <select
-                    className="dialog-input settings-select"
-                    value={typeof value === "string" ? value : ""}
-                    onChange={(e) => setValue(prop.key, e.target.value, prop.default)}
-                  >
-                    <option value="">App default</option>
-                    {aiProfiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                        {p.model ? ` · ${p.model}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="settings-hint">Configure the list in Settings → AI Providers.</div>
-                </label>
-              );
-            }
-
-            if (prop.enum && prop.enum.length > 0) {
-              return (
-                <label key={prop.key} className="settings-row" title={prop.key}>
-                  <span className="settings-label">{label}</span>
-                  <select
-                    className="dialog-input settings-select"
-                    value={String(value)}
-                    onChange={(e) => setValue(prop.key, e.target.value, prop.default)}
-                  >
-                    {prop.enum.map((opt, optIndex) => (
-                      <option key={opt} value={opt} title={prop.enumDescriptions?.[optIndex]}>
-                        {prop.enumItemLabels?.[optIndex] ?? opt}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            }
-
-            return (
-              <label key={prop.key} className="settings-row" title={prop.key}>
-                <span className="settings-label">{label}</span>
-                <input
-                  className="dialog-input"
-                  value={typeof value === "string" ? value : String(value ?? "")}
-                  onChange={(e) => setValue(prop.key, e.target.value, prop.default)}
-                />
-              </label>
-            );
-          })}
+          {section.properties.map((prop) => (
+            <Fragment key={prop.key}>
+              {renderRow(prop)}
+              {anchored.get(prop.key)?.map((c) => <c.component key={c.id} />)}
+            </Fragment>
+          ))}
         </div>
       ))}
     </>
   );
 }
 
-export default function ExtensionConfigSection({ ext }: { ext: ExtensionInfo }) {
+// `components` are this extension's registered settings components. Each
+// renders after the property its `after` names, the rest below every scalar
+// control - which is where all of them rendered before placement existed.
+export default function ExtensionConfigSection({
+  ext,
+  components,
+}: {
+  ext: ExtensionInfo;
+  components: readonly RegisteredSettingsComponent[];
+}) {
   const { extensionSettings, onExtensionSettingsChange } = useSettingsContext();
+  const { anchored, trailing } = placeSettingsComponents(
+    components,
+    ext.configuration.flatMap((section) => section.properties.map((prop) => prop.key)),
+  );
 
   return (
     <>
@@ -234,7 +262,11 @@ export default function ExtensionConfigSection({ ext }: { ext: ExtensionInfo }) 
           else nextAll[ext.id] = next;
           onExtensionSettingsChange(nextAll);
         }}
+        anchored={anchored}
       />
+      {trailing.map((c) => (
+        <c.component key={c.id} />
+      ))}
     </>
   );
 }

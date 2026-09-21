@@ -1192,12 +1192,20 @@ breaking the list.
 ctx.registerSettingsComponent({
   id: string,
   component: React.ComponentType,   // no props
+  after?: string,                   // full dotted key of one of your properties
 });
 ```
 
 Renders your component inside your extension's own Settings section,
-**below** its scalar `contributes.configuration` controls. Registering one
-earns the extension a Settings section even with zero scalar properties.
+**below** its scalar `contributes.configuration` controls - or, with `after`,
+directly under the property that key names, so a custom control can sit with
+the field it belongs to (an API token beside the site URL it authenticates, a
+table editor under the JSON setting it edits). Several components after the
+same property render in registration order. An `after` that names none of your
+declared properties falls back to the bottom rather than disappearing, and a
+core older than `after` ignores it and renders the component at the bottom, so
+set it freely. Registering one earns the extension a Settings section even
+with zero scalar properties.
 The component takes no props — read and write through `ctx.settings`
 (stash it module-level in `activate()`), typically persisting rich state
 as a JSON-string configuration property. The section's "Reset … Settings
