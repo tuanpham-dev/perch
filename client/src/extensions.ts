@@ -468,9 +468,10 @@ export interface ExtensionContext {
     visibilitySetting?: string;
     component: ReactNS.ComponentType<StatusBarItemHostProps>;
   }): void;
-  // Renders a custom component inside this extension's Settings section,
-  // below its scalar configuration controls.
-  registerSettingsComponent(component: { id: string; component: ReactNS.ComponentType }): void;
+  // Renders a custom component inside this extension's Settings section:
+  // directly after the declared property `after` names (a full dotted key),
+  // or below every scalar control when it names none.
+  registerSettingsComponent(component: { id: string; component: ReactNS.ComponentType; after?: string }): void;
   app: {
     getActiveContext(): ActiveContext;
     onDidChangeContext(cb: (ctx: ActiveContext) => void): () => void;
@@ -902,6 +903,9 @@ export interface RegisteredSettingsComponent {
   id: string;
   extensionId: string;
   component: ReactNS.ComponentType;
+  // The full dotted key of the property to render after - see
+  // lib/settingsComponents.ts. Absent means the bottom of the section.
+  after?: string;
 }
 
 // A terminal engine implementation supplied by an extension — the app's
@@ -1846,6 +1850,9 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         id: `ext.${ext.id}.${component.id}`,
         extensionId: ext.id,
         component: component.component,
+        // Kept only when it is a string: a registration from an extension
+        // built against an older type can't smuggle anything else in.
+        after: typeof component.after === "string" ? component.after : undefined,
       });
       notify();
     },

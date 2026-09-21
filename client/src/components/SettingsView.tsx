@@ -185,11 +185,12 @@ export default function SettingsView({
           {section === "behavior" && <BehaviorSection />}
           {section === "ui" && <UiSection />}
           {section === "ai" && <AiProvidersSection />}
-          {activeExtension && <ExtensionConfigSection ext={activeExtension} />}
-          {activeExtension &&
-            extensionSettingsComponents
-              .filter((c) => c.extensionId === activeExtension.id)
-              .map((c) => <c.component key={c.id} />)}
+          {activeExtension && (
+            <ExtensionConfigSection
+              ext={activeExtension}
+              components={extensionSettingsComponents.filter((c) => c.extensionId === activeExtension.id)}
+            />
+          )}
 
           <div className="settings-footer">
             {!activeExtension && (
