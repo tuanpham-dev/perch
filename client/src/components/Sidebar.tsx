@@ -165,6 +165,9 @@ interface Props {
   onMoveTab: (tabId: string, side: SidebarSide, index: number) => void;
   // Rehome a section into a tab (either side).
   onMovePanel: (panelId: string, tabId: string) => void;
+  // Flip a section's user-hidden state — the same toggle the gear menu's
+  // Panes list drives, wired here for the header's own "Hide Pane" row.
+  onHidePanel: (panelId: string) => void;
   // The in-flight tab drag, shared by both strips so the one under the
   // pointer can draw the drop indicator.
   tabDrag: TabDragState | null;
@@ -250,6 +253,7 @@ export default function Sidebar({
   onReorderTab,
   onMoveTab,
   onMovePanel,
+  onHidePanel,
   tabDrag,
   onTabDragChange,
   registryCatalog,
@@ -707,21 +711,26 @@ export default function Sidebar({
   // Right-clicking a section header offers every tab it could move to, on
   // either side — the keyboard/menu counterpart of dragging the header onto
   // a tab icon. "Reset Location" appears only while the section is somewhere
-  // its extension didn't put it.
-  const panelMoveMenuItems = (panelId: PanelId): MenuItem[] => {
+  // its extension didn't put it; "Hide Pane" is the same toggle the gear
+  // menu's Panes list carries, reached from the pane itself.
+  const panelMenuItems = (panelId: PanelId): MenuItem[] => {
     const panel = panelsById.get(panelId);
     if (!panel) return [];
     const items: MenuItem[] = moveTargetsForPanel(layout, panel, panelState.order, tabEnv).map((target) => ({
       label: `Move to ${tabTitle(target.tabId)}${target.side === side ? "" : target.side === "right" ? " (right)" : " (left)"}`,
       onClick: () => onMovePanel(panelId, target.tabId),
     }));
+    if (items.length > 0) items.push({ label: "", separator: true, onClick: () => {} });
     if (layout.panelHome[panelId] !== undefined) {
-      if (items.length > 0) items.push({ label: "", separator: true, onClick: () => {} });
       items.push({
         label: `Reset Location (${tabTitle(defaultTabForPanel(panel))})`,
         onClick: () => onMovePanel(panelId, defaultTabForPanel(panel)),
       });
     }
+    // The header can only be right-clicked while the pane is showing, so
+    // this is always the hiding half of the toggle. Showing it again is the
+    // gear menu's Panes list.
+    items.push({ label: "Hide Pane", onClick: () => onHidePanel(panelId) });
     return items;
   };
 
@@ -744,7 +753,7 @@ export default function Sidebar({
             className={`panel-header${indicatorClass}${dragPanelId === id ? " dragging" : ""}`}
             onClick={() => togglePanelCollapsed(id)}
             onContextMenu={(e) => {
-              const items = panelMoveMenuItems(id);
+              const items = panelMenuItems(id);
               if (items.length === 0) return;
               e.preventDefault();
               e.stopPropagation();
@@ -826,7 +835,7 @@ export default function Sidebar({
         <div
           className={`panel-header ext-tab-header${dragPanelId === panel.id ? " dragging" : ""}`}
           onContextMenu={(e) => {
-            const items = panelMoveMenuItems(panel.id);
+            const items = panelMenuItems(panel.id);
             if (items.length === 0) return;
             e.preventDefault();
             e.stopPropagation();
