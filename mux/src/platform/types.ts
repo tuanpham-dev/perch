@@ -36,7 +36,10 @@ export interface Platform {
 
   /** Direct children of `pid`, oldest first. Empty when unknown. */
   childPids(pid: number): number[];
-  /** The executable name of `pid` ("vim", "zsh"), or undefined when gone. */
+  /** What `pid` is called ("vim", "zsh", "vite"), or undefined when gone.
+   *  A runtime that names only itself ("node", and the "node-MainThread" the
+   *  OS reports for it) is resolved through util/process-label.ts, so this
+   *  agrees with how the ports listing names the same process. */
   processName(pid: number): string | undefined;
   /** The live working directory of `pid`, or null when the OS won't say. */
   cwdOf(pid: number): string | null;

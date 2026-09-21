@@ -11,6 +11,7 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { closeSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { delimiter, join } from 'node:path';
+import { processLabel } from '../util/process-label.ts';
 import type { Platform } from './types.ts';
 
 /** The pipe for a state dir: per user and per state dir, so two instances don't meet. */
@@ -307,7 +308,14 @@ export const windows: Platform = {
   killTree: (pid) => taskkill(pid, true),
 
   childPids: (pid) => childrenOf(processes(), pid),
-  processName: (pid) => processes().find((e) => e.pid === pid)?.name,
+  // The CIM snapshot carries executable names only, not command lines (one
+  // more column on a whole-machine query every listing pays for), so a Node
+  // program here is still "node". processLabel is still what answers, so the
+  // runtime list stays in one place — it simply has only argv[0] to go on.
+  processName: (pid) => {
+    const name = processes().find((e) => e.pid === pid)?.name;
+    return name === undefined ? undefined : (processLabel([name], null) ?? name);
+  },
   cwdOf: () => null,
 
   defaultShell: () => pickShell(onPath, process.env.ComSpec ?? process.env.COMSPEC),
