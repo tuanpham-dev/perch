@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type HTMLAttributes } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -6,6 +6,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
+import { parse as parseYaml } from "yaml";
 import { common } from "lowlight";
 import apache from "highlight.js/lib/languages/apache";
 import dockerfile from "highlight.js/lib/languages/dockerfile";
@@ -17,6 +18,7 @@ import { fetchFileText, downloadUrl } from "../../_shared/fileApi";
 import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
+import { scalarText, splitFrontmatter } from "../frontmatter.mjs";
 
 // Set once from activate() — see the module comment on extSettings below.
 interface SettingsApi {
@@ -103,6 +105,66 @@ function readFontSize(): number {
 
 function readClickAction(): "edit" | "preview" {
   return extSettings?.get("markdown.clickAction") === "preview" ? "preview" : "edit";
+}
+
+// ---- YAML frontmatter ----
+// The split and the value reduction live in ../frontmatter.mjs (see its
+// comments for why a block needs lifting out of the Markdown at all); what is
+// left here is the rendering: a small table of metadata above the body.
+
+// A list of maps (a skill's `tools:` list, say) has no single-line form, so
+// each entry gets its own nested table rather than one run-on cell.
+function MetaValue({ value }: { value: unknown }) {
+  const text = scalarText(value);
+  if (text !== null) return <>{text}</>;
+  if (Array.isArray(value)) {
+    return (
+      <>
+        {value.map((item, i) => (
+          <MetaValue key={i} value={item} />
+        ))}
+      </>
+    );
+  }
+  return <MetaRows entries={Object.entries(value as Record<string, unknown>)} />;
+}
+
+function MetaRows({ entries }: { entries: [string, unknown][] }) {
+  return (
+    <table className="markdown-frontmatter-table">
+      <tbody>
+        {entries.map(([key, value]) => (
+          <tr key={key}>
+            <th scope="row">{key}</th>
+            <td>
+              <MetaValue value={value} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// The parsed block, or the raw text when it is not YAML this parser accepts —
+// a file whose frontmatter is malformed should still show what it says rather
+// than swallowing it.
+function Frontmatter({ meta }: { meta: string }) {
+  let entries: [string, unknown][] | null = null;
+  try {
+    const parsed = parseYaml(meta);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      entries = Object.entries(parsed as Record<string, unknown>);
+    }
+  } catch {
+    // Not YAML we can read — fall through to the raw block below.
+  }
+  if (entries && entries.length === 0) return null;
+  return (
+    <div className="markdown-frontmatter">
+      {entries ? <MetaRows entries={entries} /> : <pre className="markdown-frontmatter-raw">{meta}</pre>}
+    </div>
+  );
 }
 
 // ---- Cross-file anchors ----
@@ -315,6 +377,8 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
     [filePath, showLinkNotice],
   );
 
+  const { meta: frontmatter, body } = useMemo(() => splitFrontmatter(content ?? ""), [content]);
+
   const controls = (
     <>
       <button className="icon-button" title="Refresh" onClick={load}>
@@ -341,6 +405,7 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
         {!error && content === null && <div className="markdown-status">Loading…</div>}
         {!error && content !== null && (
           <div className="markdown-body" data-hl={hl} style={{ fontSize: `${fontSize}px` }}>
+            {frontmatter && <Frontmatter meta={frontmatter} />}
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw, rehypeSlug, rehypeSanitizePlugin, rehypeHighlightPlugin]}
@@ -372,7 +437,7 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
                 pre: (props) => <CodeBlock {...props} />,
               }}
             >
-              {content}
+              {body}
             </ReactMarkdown>
           </div>
         )}

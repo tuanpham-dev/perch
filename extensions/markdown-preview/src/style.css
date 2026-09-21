@@ -284,3 +284,67 @@
   border-radius: 4px;
 }
 
+
+/* ---- YAML frontmatter ---- */
+
+.markdown-frontmatter {
+  margin: 0 0 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-frontmatter .markdown-frontmatter-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+
+.markdown-frontmatter th,
+.markdown-frontmatter td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-frontmatter th {
+  width: 1%;
+  white-space: nowrap;
+  background: var(--panel-bg);
+  color: var(--fg-inactive);
+  font-weight: 600;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+/* A nested block fills its own cell rather than sitting inside a second
+   border - the outer row already draws one. */
+.markdown-frontmatter td > .markdown-frontmatter-table {
+  margin: -5px -10px;
+  width: calc(100% + 20px);
+}
+
+.markdown-frontmatter td > .markdown-frontmatter-table th,
+.markdown-frontmatter td > .markdown-frontmatter-table td {
+  border-width: 0 1px 1px 0;
+}
+
+.markdown-frontmatter td > .markdown-frontmatter-table tr:last-child th,
+.markdown-frontmatter td > .markdown-frontmatter-table tr:last-child td {
+  border-bottom-width: 0;
+}
+
+.markdown-frontmatter td > .markdown-frontmatter-table td:last-child {
+  border-right-width: 0;
+}
+
+.markdown-frontmatter-raw {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--fg-inactive);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
