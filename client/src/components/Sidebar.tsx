@@ -173,11 +173,16 @@ interface Props {
   tabDrag: TabDragState | null;
   onTabDragChange: (drag: TabDragState | null) => void;
   registryCatalog: RegistrySourceResult[];
+  // settings.autoUpdateExtensions, passed through to the Extensions panel's
+  // gear popover (the other half of the Settings checkbox).
+  autoUpdateExtensions: boolean;
+  onAutoUpdateChange: (autoUpdate: boolean) => void;
   registryLoading: boolean;
   onEnsureRegistryLoaded: () => void;
   onRefreshRegistry: (refresh: boolean) => void;
   onOpenExtensionPage: (id: string, source?: string) => void;
-  extensionUpdatesCount: number;
+  // Installable updates plus updates awaiting a page reload (App.tsx).
+  extensionsBadgeCount: number;
   // Live-resolved (defaults + user overrides) keybindings map, keyed by
   // command id — used to append each tab's current shortcut to its tooltip
   // (see tabInfos below) so a rebind in Settings shows up immediately.
@@ -257,11 +262,13 @@ export default function Sidebar({
   tabDrag,
   onTabDragChange,
   registryCatalog,
+  autoUpdateExtensions,
+  onAutoUpdateChange,
   registryLoading,
   onEnsureRegistryLoaded,
   onRefreshRegistry,
   onOpenExtensionPage,
-  extensionUpdatesCount,
+  extensionsBadgeCount,
   resolvedBindings,
   confirmDialog,
 }: Props) {
@@ -371,7 +378,7 @@ export default function Sidebar({
         id,
         title: `Extensions${shortcutSuffix("sidebar.focusExtensions")}`,
         icon: "extensions",
-        badge: extensionUpdatesCount,
+        badge: extensionsBadgeCount,
       };
     }
     const container = containerTab(id);
@@ -905,6 +912,8 @@ export default function Sidebar({
           onRegistriesChange={onExtensionRegistriesChange}
           defaultRegistry={defaultRegistry}
           registryCatalog={registryCatalog}
+          autoUpdate={autoUpdateExtensions}
+          onAutoUpdateChange={onAutoUpdateChange}
           registryLoading={registryLoading}
           onEnsureRegistryLoaded={onEnsureRegistryLoaded}
           onRefreshRegistry={onRefreshRegistry}

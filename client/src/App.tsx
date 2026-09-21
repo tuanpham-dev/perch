@@ -35,8 +35,10 @@ import {
   setKillSessionHandler,
   setDialogHandlers,
   setOpenSessionWindowHandler,
+  reloadPendingIds,
   resolveWindowActionIcon,
   useExtensionRegistry,
+  useExtensionRegistryVersion,
 } from "./extensions";
 import { useDialogs } from "./hooks/useDialogs";
 import { useSidebarLayout } from "./hooks/useSidebarLayout";
@@ -71,7 +73,7 @@ import {
 import { leaves } from "./lib/splits";
 import { emitPollTick } from "./lib/pollTick";
 import { rewriteLocalUrl } from "./lib/openUrlRewrite";
-import { compareVersions } from "./lib/version";
+import { outdatedExtensions } from "./lib/extensionUpdates";
 import { isAbsolutePath, parentPath } from "./lib/paths";
 
 const SIDEBAR_MIN = 180;
@@ -81,6 +83,11 @@ const SIDEBAR_MAX = 500;
 // index.html's <title> before this module ever loads, so capturing it here
 // — before the effect below overwrites it — picks up any custom name.
 const APP_NAME = document.title;
+
+// How often a long-lived page re-checks its registries for new extension
+// versions. Long on purpose: this is a background courtesy, not a poll
+// anything waits on, and the manual refresh button is right there.
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 // Commands that exist for Settings → Keyboard (rebindable) and their own
 // component's direct dispatch, but make no sense as a palette entry to
@@ -730,23 +737,66 @@ export default function App() {
     refreshRegistry(false);
   }, [refreshRegistry]);
 
-  // Available-updates count (registry version > installed version) — the
-  // Extensions tab's badge, visible even before that tab is ever opened this
-  // session as long as registryCatalog has already been fetched. Scoped to
-  // extensionRegistries' current membership so a just-removed source's
-  // still-cached catalog entries (stale until the next refetch) can't keep
-  // counting toward the badge — mirrors ExtensionsPanel's liveRegistryCatalog.
-  const extensionUpdatesCount = useMemo(() => {
-    let count = 0;
-    for (const src of registryCatalog) {
-      if (!effectiveRegistries.includes(src.source)) continue;
-      for (const entry of src.entries) {
-        const installed = extensions.find((e) => e.id === entry.id);
-        if (installed && compareVersions(entry.version, installed.version) > 0) count++;
+  // The catalog used to be fetched lazily, the first time the Extensions tab
+  // mounted — which meant the tab's own update badge only became true after
+  // you had already gone looking, and auto-update could never fire for
+  // someone who never opens the tab. Check once at startup and then on a
+  // long interval instead; ensureRegistryLoaded stays as the panel's
+  // fallback for when this first fetch failed.
+  useEffect(() => {
+    refreshRegistry(false);
+    const timer = setInterval(() => refreshRegistry(true), UPDATE_CHECK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [refreshRegistry]);
+
+
+  // The catalog is fetched at startup and re-checked on a timer (see the
+  // effect below), so both of these are meaningful before the Extensions tab
+  // has ever been opened.
+  const extensionUpdates = useMemo(
+    () => outdatedExtensions(extensions, registryCatalog, effectiveRegistries),
+    [extensions, registryCatalog, effectiveRegistries],
+  );
+  // Re-renders this component when an extension's activated version goes
+  // stale against the installed one — reloadPendingIds reads module state,
+  // not React state, and loadExtensions' notify is what moves it.
+  const extensionRegistryVersion = useExtensionRegistryVersion();
+  // What the Extensions tab's badge counts: updates you could install plus
+  // updates already installed that need a reload to take effect. An
+  // extension in both states counts once.
+  const extensionsBadgeCount = useMemo(() => {
+    const ids = new Set(extensionUpdates.keys());
+    for (const id of reloadPendingIds()) ids.add(id);
+    return ids.size;
+  }, [extensionUpdates, extensionRegistryVersion]);
+
+  // Auto-update, when the user has asked for it: every fresh catalog is a
+  // chance to install what it now offers. Installs run one at a time (they
+  // share an extensions directory and a state file), failures are logged and
+  // left for the next check, and nothing is reloaded on the user's behalf —
+  // the row's Reload Required button is how the new code actually starts
+  // running. A ref rather than state guards re-entry: a run that is already
+  // walking a list must not be restarted by the render its own installs cause.
+  const autoUpdatingRef = useRef(false);
+  useEffect(() => {
+    if (!settings.autoUpdateExtensions || autoUpdatingRef.current) return;
+    if (extensionUpdates.size === 0) return;
+    autoUpdatingRef.current = true;
+    void (async () => {
+      try {
+        for (const [id, update] of [...extensionUpdates]) {
+          try {
+            await api.installFromRegistry(update.source, id);
+          } catch (err) {
+            console.error(`auto-update: could not install ${id}:`, err);
+          }
+        }
+        reloadExtensions();
+      } finally {
+        autoUpdatingRef.current = false;
       }
-    }
-    return count;
-  }, [registryCatalog, extensions, effectiveRegistries]);
+    })();
+  }, [settings.autoUpdateExtensions, extensionUpdates, reloadExtensions]);
 
   // The extension detail page's "Extension Settings" shortcut — see
   // SettingsView's pendingFocusExtensionId prop doc.
@@ -2211,11 +2261,13 @@ export default function App() {
     onExtensionRegistriesChange={setExtensionRegistries}
     defaultRegistry={defaultRegistry}
     registryCatalog={registryCatalog}
+    autoUpdateExtensions={settings.autoUpdateExtensions}
+    onAutoUpdateChange={(autoUpdateExtensions) => setSettings((prev) => ({ ...prev, autoUpdateExtensions }))}
     registryLoading={registryLoading}
     onEnsureRegistryLoaded={ensureRegistryLoaded}
     onRefreshRegistry={refreshRegistry}
     onOpenExtensionPage={openExtensionPageTab}
-    extensionUpdatesCount={extensionUpdatesCount}
+    extensionsBadgeCount={extensionsBadgeCount}
     resolvedBindings={resolvedBindings}
     confirmDialog={confirmDialog}
           />
@@ -2528,11 +2580,13 @@ export default function App() {
     onExtensionRegistriesChange={setExtensionRegistries}
     defaultRegistry={defaultRegistry}
     registryCatalog={registryCatalog}
+    autoUpdateExtensions={settings.autoUpdateExtensions}
+    onAutoUpdateChange={(autoUpdateExtensions) => setSettings((prev) => ({ ...prev, autoUpdateExtensions }))}
     registryLoading={registryLoading}
     onEnsureRegistryLoaded={ensureRegistryLoaded}
     onRefreshRegistry={refreshRegistry}
     onOpenExtensionPage={openExtensionPageTab}
-    extensionUpdatesCount={extensionUpdatesCount}
+    extensionsBadgeCount={extensionsBadgeCount}
     resolvedBindings={resolvedBindings}
     confirmDialog={confirmDialog}
           />

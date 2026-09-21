@@ -2033,6 +2033,12 @@ interface ExtensionRuntime {
 }
 
 const activatedIds = new Set<string>();
+// What version of each extension this page actually imported. An install
+// over a running extension writes new files but cannot change the module
+// already in memory (an ES module is imported once per URL per page, and the
+// server hook can't be unloaded at all), so the gap between this and the
+// live list is exactly what "Reload Required" means — see reloadPendingIds.
+const activatedVersions = new Map<string, string>();
 const extensionRuntimes = new Map<string, ExtensionRuntime>();
 // One shared promise per in-flight activation, so concurrent callers (every
 // TerminalView mounting in the same tick calls loadEngine → here) all await
@@ -2065,6 +2071,7 @@ async function activateClientExtension(ext: ExtensionInfo): Promise<void> {
     // failures are deterministic (bad export, activate() bug), so a retry
     // could only duplicate registrations.
     activatedIds.add(ext.id);
+    activatedVersions.set(ext.id, ext.version);
     const runtime: ExtensionRuntime = {
       module: mod,
       contextListeners: new Set(),
@@ -2167,6 +2174,8 @@ function deactivateClientExtension(extId: string): void {
   extensionSettingsListeners.delete(extId);
   extensionRuntimes.delete(extId);
   activatedIds.delete(extId);
+  // Whatever runs next imports fresh, so there is nothing stale to report.
+  activatedVersions.delete(extId);
   notify();
 }
 
@@ -2231,6 +2240,25 @@ export async function loadExtensions(onListLoaded?: (list: ExtensionInfo[]) => v
 export async function activateExtensionById(id: string): Promise<void> {
   const ext = installedExtensions.find((e) => e.id === id);
   if (ext) await activateClientExtension(ext);
+}
+
+// Extensions whose code on disk has moved on from the code this page is
+// running: activated once, then updated underneath. Only a page reload
+// fixes it — activateClientExtension latches by id and never re-imports,
+// and re-importing the same URL would hand back the same module anyway.
+//
+// Page-session state by nature: a reload empties activatedVersions along
+// with everything else, which is exactly the right lifetime. An extension
+// that never activated (newly installed, disabled, or a terminal engine no
+// session resolved to) has no entry here and is never pending — it will run
+// its new code the first time anything asks for it.
+export function reloadPendingIds(): Set<string> {
+  const pending = new Set<string>();
+  for (const [id, version] of activatedVersions) {
+    const installed = installedExtensions.find((e) => e.id === id);
+    if (installed && installed.version !== version) pending.add(id);
+  }
+  return pending;
 }
 
 // Whether the first extension load has settled (see loadExtensions). A pane
