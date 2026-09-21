@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import * as api from "../api";
+import { reloadPendingIds, useExtensionRegistryVersion } from "../extensions";
 import { useListNavigation } from "../hooks/useListNavigation";
 import { isOfficialPublisher, parsePublisher } from "../lib/extensionId";
-import { compareVersions } from "../lib/version";
+import { outdatedExtensions } from "../lib/extensionUpdates";
 import type { ExtensionInfo, RegistryCatalogEntry, RegistrySourceResult } from "../types";
 import Icon from "./Icon";
 
@@ -21,6 +22,10 @@ interface Props {
   onEnsureRegistryLoaded: () => void;
   onRefreshRegistry: (refresh: boolean, sourcesOverride?: string[]) => void;
   onOpenExtensionPage: (id: string, source?: string) => void;
+  // settings.autoUpdateExtensions, mirrored here so the gear popover can
+  // flip it without a trip through Settings.
+  autoUpdate: boolean;
+  onAutoUpdateChange: (autoUpdate: boolean) => void;
 }
 
 function ExtIcon({ src }: { src: string | null }) {
@@ -98,6 +103,8 @@ export default function ExtensionsPanel({
   onEnsureRegistryLoaded,
   onRefreshRegistry,
   onOpenExtensionPage,
+  autoUpdate,
+  onAutoUpdateChange,
 }: Props) {
   const [search, setSearch] = useState("");
   const [installingId, setInstallingId] = useState<string | null>(null);
@@ -107,11 +114,17 @@ export default function ExtensionsPanel({
   const [newRegistry, setNewRegistry] = useState("");
   const [installedCollapsed, setInstalledCollapsed] = useState(false);
   const [availableCollapsed, setAvailableCollapsed] = useState(false);
+  // The updates chip's filter. Panel-local and deliberately not persisted:
+  // this panel remounts on every sidebar tab switch, and a filter that
+  // outlived the visit would hide extensions with no visible explanation.
+  const [updatesOnly, setUpdatesOnly] = useState(false);
+  const [updatingAll, setUpdatingAll] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     onEnsureRegistryLoaded();
   }, [onEnsureRegistryLoaded]);
+
 
   // Sidebar.tsx only renders the active sidebar tab, so this panel mounts
   // fresh every time the user switches to it (via sidebar.focusExtensions/
@@ -144,18 +157,26 @@ export default function ExtensionsPanel({
   const liveRegistryCatalog = registryCatalog.filter((src) => effectiveRegistries.includes(src.source));
 
   // {id -> {source, version}} for the highest-version registry entry that
-  // beats the installed version — drives the per-row "Update" action.
-  const updateBySource = new Map<string, { source: string; version: string }>();
-  for (const src of liveRegistryCatalog) {
-    for (const entry of src.entries) {
-      const installed = extensions.find((e) => e.id === entry.id);
-      if (!installed || compareVersions(entry.version, installed.version) <= 0) continue;
-      const current = updateBySource.get(entry.id);
-      if (!current || compareVersions(entry.version, current.version) > 0) {
-        updateBySource.set(entry.id, { source: src.source, version: entry.version });
-      }
-    }
-  }
+  // beats the installed version — drives the updates chip, "Update All" and
+  // each row's own Update action. Shared with the sidebar tab's badge (see
+  // lib/extensionUpdates.ts) so the count and the rows can't disagree.
+  const updateBySource = outdatedExtensions(extensions, registryCatalog, effectiveRegistries);
+  const updateCount = updateBySource.size;
+  // Extensions already updated on disk whose old code is still running —
+  // only a reload swaps it. Module state, so the hook is what re-renders us
+  // when it changes.
+  useExtensionRegistryVersion();
+  const reloadPending = reloadPendingIds();
+  // Installed order, so the banner reads the same way the list below does.
+  const pendingReload = installedExtensions.filter((e) => reloadPending.has(e.id));
+  const pendingReloadWithServer = pendingReload.filter((e) => e.hasServer);
+
+  // Updating the last outdated extension leaves the chip gone and the filter
+  // on, i.e. an empty list with nothing to explain it. Drop the filter with
+  // the chip that turned it on.
+  useEffect(() => {
+    if (updateCount === 0) setUpdatesOnly(false);
+  }, [updateCount]);
 
   const availableEntries: (RegistryCatalogEntry & { source: string })[] = [];
   for (const src of liveRegistryCatalog) {
@@ -172,7 +193,9 @@ export default function ExtensionsPanel({
     description.toLowerCase().includes(searchLower) ||
     id.toLowerCase().includes(searchLower);
 
-  const visibleInstalled = installedExtensions.filter((e) => matches(e.displayName, e.description, e.id));
+  const visibleInstalled = installedExtensions.filter(
+    (e) => matches(e.displayName, e.description, e.id) && (!updatesOnly || updateBySource.has(e.id)),
+  );
   const visibleAvailable = availableEntries.filter((e) => matches(e.displayName, e.description, e.id));
   const visibleAvailableBuiltins = uninstalledBuiltins.filter((e) => matches(e.displayName, e.description, e.id));
   const totalAvailable = availableEntries.length + uninstalledBuiltins.length;
@@ -199,6 +222,32 @@ export default function ExtensionsPanel({
       .then(onReloadExtensions)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setInstallingId(null));
+  };
+
+  // Sequential, not Promise.all: each install writes into the same
+  // extensions directory and rewrites the same state file, and a failure
+  // part-way should leave the ones already done installed rather than
+  // racing an unknown number of writes.
+  const runUpdateAll = async () => {
+    setUpdatingAll(true);
+    setError(null);
+    try {
+      for (const [id, update] of [...updateBySource]) {
+        setInstallingId(id);
+        try {
+          await api.installFromRegistry(update.source, id);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          break;
+        }
+      }
+    } finally {
+      setInstallingId(null);
+      setUpdatingAll(false);
+      // Unconditional: whatever did install has to be reflected, even when a
+      // later one failed.
+      onReloadExtensions();
+    }
   };
 
   const addRegistry = () => {
@@ -335,6 +384,14 @@ export default function ExtensionsPanel({
 
       {showRegistries && (
         <div className="extensions-registries">
+          <label className="settings-row checkbox-row extensions-auto-update-row">
+            <input
+              type="checkbox"
+              checked={autoUpdate}
+              onChange={(e) => onAutoUpdateChange(e.target.checked)}
+            />
+            <span>Auto-update extensions</span>
+          </label>
           {effectiveRegistries.length === 0 && (
             <div className="settings-hint">
               No registries configured. Add a URL serving an index.json, or a local directory path.
@@ -380,6 +437,41 @@ export default function ExtensionsPanel({
 
       {error && <div className="extension-error">{error}</div>}
 
+      {pendingReload.length > 0 && (
+        // One banner rather than a button per row: the reload is a single
+        // page-wide act, and the rows it concerns may be scrolled out of
+        // sight (or filtered away) when the user gets here.
+        <div className="extension-reload-banner">
+          <div className="extension-reload-banner-head">
+            <div className="extension-reload-banner-title">Reload required</div>
+            <button
+              className="dialog-button primary extension-reload-button"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
+          </div>
+          <div className="extension-reload-banner-body">
+            <div className="extension-reload-banner-names">
+              {pendingReload.map((e) => e.displayName).join(", ")}{" "}
+              {pendingReload.length === 1 ? "was updated" : "were updated"} - the page is still running
+              the old code
+            </div>
+            {pendingReloadWithServer.length > 0 && (
+              // A reload re-imports client code; a server hook is a module
+              // the server process can never unload. Name the ones that
+              // need the heavier fix rather than let the button look like
+              // it covers everything.
+              <div className="extension-reload-note">
+                {pendingReloadWithServer.map((e) => e.displayName).join(", ")}{" "}
+                {pendingReloadWithServer.length === 1 ? "also serves" : "also serve"} routes that keep
+                the old code until the server restarts - run <code>perch restart</code>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="extensions-panel-body" onKeyDown={nav.onKeyDown}>
         {(() => {
           const installedHeaderRowProps = nav.getRowProps("header:installed");
@@ -396,7 +488,36 @@ export default function ExtensionsPanel({
                 className="extensions-panel-section-chevron"
               />
               <span className="extensions-panel-section-title">Installed</span>
-              <span className="extensions-panel-section-badge">{installedExtensions.length}</span>
+              <span className="extensions-panel-section-badge">
+                {updatesOnly ? `${visibleInstalled.length} of ${installedExtensions.length}` : installedExtensions.length}
+              </span>
+              {updateCount > 0 && (
+                <button
+                  className={`extensions-updates-chip${updatesOnly ? " active" : ""}`}
+                  title={updatesOnly ? "Show all installed extensions" : "Show only extensions with updates"}
+                  aria-pressed={updatesOnly}
+                  onClick={(e) => {
+                    // The header itself toggles the section collapse.
+                    e.stopPropagation();
+                    setUpdatesOnly((v) => !v);
+                  }}
+                >
+                  {updateCount} {updateCount === 1 ? "update" : "updates"}
+                  <Icon name={updatesOnly ? "chevron-down" : "chevron-right"} />
+                </button>
+              )}
+              {updatesOnly && (
+                <button
+                  className="dialog-button secondary extensions-update-all"
+                  disabled={updatingAll}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void runUpdateAll();
+                  }}
+                >
+                  {updatingAll ? "Updating..." : "Update All"}
+                </button>
+              )}
             </div>
           );
         })()}
@@ -424,14 +545,19 @@ export default function ExtensionsPanel({
                   onOpen={() => onOpenExtensionPage(ext.id)}
                 >
                   {update && (
-                    <button
-                      className="dialog-button secondary"
-                      disabled={installingId === ext.id}
-                      title={`Update to v${update.version}`}
-                      onClick={() => runInstall(update.source, ext.id)}
-                    >
-                      {installingId === ext.id ? "Updating…" : `Update to v${update.version}`}
-                    </button>
+                    <>
+                      <span className="extension-row-version">
+                        {ext.version} -&gt; {update.version}
+                      </span>
+                      <button
+                        className="dialog-button secondary"
+                        disabled={installingId === ext.id}
+                        title={`Update to v${update.version}`}
+                        onClick={() => runInstall(update.source, ext.id)}
+                      >
+                        {installingId === ext.id ? "Updating..." : "Update"}
+                      </button>
+                    </>
                   )}
                 </ExtensionRow>
               );

@@ -3629,6 +3629,7 @@ body.scrollbar-dragging {
   margin-top: 3px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 5px;
   font-size: 11px;
   color: var(--fg-inactive);
@@ -3637,7 +3638,10 @@ body.scrollbar-dragging {
 
 .extension-row-publisher {
   flex: 1;
-  min-width: 0;
+  /* Enough to stay a readable name rather than a single ellipsed letter:
+     below this the footer wraps its action strip to the next line instead
+     of squeezing the publisher out of existence. */
+  min-width: 3.5em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3829,6 +3833,7 @@ body.scrollbar-dragging {
 .extensions-panel-section-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   margin: 12px 0 6px;
   cursor: pointer;
@@ -3869,6 +3874,130 @@ body.scrollbar-dragging {
   flex-shrink: 0;
   font-size: 11px;
   color: var(--fg-inactive);
+}
+
+/* The updates chip: a count and the filter toggle in one control, so the
+   number and the rows it stands for are never two separate clicks apart. */
+.extensions-updates-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 4px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.extensions-updates-chip:hover {
+  filter: brightness(1.1);
+}
+
+.extensions-updates-chip.active {
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.extensions-updates-chip .codicon {
+  font-size: 12px;
+}
+
+.extensions-panel-section-header .extensions-update-all {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 2px 10px;
+  font-size: 11px;
+}
+
+/* Auto-update sits above the registry list it depends on: the sources are
+   what the updates would come from. */
+.extensions-auto-update-row {
+  margin-bottom: 8px;
+}
+
+/* The version an update moves from and to, beside that row's button. */
+.extension-row-version {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-inactive);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The reload strip: one page-wide act, so one control above the list
+   rather than a button repeated down it. */
+/* The action sits on the heading line; the sentences below it get the full
+   width. A button column beside the whole text block would leave them two
+   or three words wide in a sidebar this narrow. */
+.extension-reload-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.extension-reload-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extension-reload-banner-body {
+  min-width: 0;
+}
+
+.extension-reload-banner-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.extension-reload-banner-names {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-inactive);
+}
+
+/* The theme's own primary-button pair (--button-bg/--button-fg), not an
+   amber-on-amber one: --warning is a pale highlight colour in several themes
+   (#e5c07b on a white ground is about 1.8:1), fine as the banner's border
+   and tint but not behind text. */
+.extension-reload-banner .extension-reload-button {
+  flex-shrink: 0;
+  padding: 3px 12px;
+  font-size: 12px;
+}
+
+.extension-reload-note {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-inactive);
+}
+
+/* Same reason as the button: the command reads in the body colour on the
+   theme's own hover tint, rather than in a foreground no theme guarantees
+   is legible. */
+.extension-reload-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--hover);
+  color: var(--fg);
 }
 
 /* ---- Extension detail page (ExtensionPageView) ---- */

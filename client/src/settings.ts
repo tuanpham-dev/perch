@@ -304,6 +304,13 @@ export interface AppSettings {
   // by usage count instead of their static COMMANDS order — see App.tsx's
   // paletteCommands memo and commandUsage below. The single most-recently-run
   // command always pins to row 1 regardless of this setting.
+  // Install new versions of installed extensions from the configured
+  // registries by themselves, as each update check finds them (app start,
+  // then every few hours). Off by default: an extension runs with full page
+  // access, and with a server hook as the server's user, so pulling new code
+  // in unattended is opt-in. The new code only runs after a reload either
+  // way — see the Extensions panel's Reload Required row.
+  autoUpdateExtensions: boolean;
   paletteSortByUsage: boolean;
   // Web-push a notification when a command reported by shell integration
   // (plans/warp-features.md) finishes after running at least this many
@@ -385,6 +392,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultProjectsFolder: "",
   colorTheme: "perch.plastic-legacy-theme:Plastic Legacy",
   iconTheme: "perch.seti-icons:seti",
+  autoUpdateExtensions: false,
   paletteSortByUsage: false,
   notifyCommandMinDuration: 0,
 };

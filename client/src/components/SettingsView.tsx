@@ -10,6 +10,7 @@ import { SettingsProvider } from "./settings/context";
 import ExtensionConfigSection from "./settings/ExtensionConfigSection";
 import EditorSection from "./settings/EditorSection";
 import TerminalSection from "./settings/TerminalSection";
+import ExtensionsSection from "./settings/ExtensionsSection";
 import UiSection from "./settings/UiSection";
 
 interface Props {
@@ -46,7 +47,7 @@ interface Props {
 // installing, and managing extensions themselves lives in the sidebar's
 // Extensions tab (ExtensionsPanel), not here — see
 // plans/extension-registry-and-extensions-tab.md.
-type Section = "terminal" | "backend" | "editor" | "behavior" | "ui" | "ai" | `ext:${string}`;
+type Section = "terminal" | "backend" | "editor" | "behavior" | "ui" | "extensions" | "ai" | `ext:${string}`;
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "terminal", label: "Terminal" },
@@ -54,6 +55,10 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: "editor", label: "Editor" },
   { id: "behavior", label: "Behavior" },
   { id: "ui", label: "UI" },
+  // Preferences about extensions, not the extensions themselves — those are
+  // the sidebar's Extensions tab. Sits above the per-extension `ext:` entries
+  // the divider separates.
+  { id: "extensions", label: "Extensions" },
   // Agents used to be its own entry. It is a group inside AI Providers now:
   // "which AIs does this app have" has one answer and one place to read it
   // (plans/consolidate-agents-into-ai-providers.md).
@@ -184,6 +189,7 @@ export default function SettingsView({
           {section === "editor" && <EditorSection />}
           {section === "behavior" && <BehaviorSection />}
           {section === "ui" && <UiSection />}
+          {section === "extensions" && <ExtensionsSection />}
           {section === "ai" && <AiProvidersSection />}
           {activeExtension && (
             <ExtensionConfigSection
