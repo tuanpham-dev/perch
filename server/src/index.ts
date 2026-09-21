@@ -2,6 +2,7 @@
 import "./loadEnv.js";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import type net from "node:net";
 import path from "node:path";
 import express from "express";
 import { WebSocketServer } from "ws";
@@ -296,8 +297,11 @@ server.on("upgrade", (req, socket, head) => {
       handleAttach(ws, req);
     });
   } else if (pathname === "/ws/tunnel") {
+    // The address the client reached us from is what pairs it with the
+    // browser on the same machine — see wsTunnel's sameMachineKey.
+    const address = (socket as net.Socket).remoteAddress ?? null;
     wss.handleUpgrade(req, socket, head, (ws) => {
-      handleTunnel(ws);
+      handleTunnel(ws, address);
     });
   } else if (subdomainPort !== null) {
     if (subdomainPort === PORT) {
