@@ -1717,6 +1717,20 @@ export default function TerminalView({
       // touch-action: none). Gesture endings are owned entirely by
       // onTouchEnd below.
       const TOUCH_SCROLL_THRESHOLD_PX = 8;
+      // Fling: a swipe released with speed keeps scrolling and eases out,
+      // the way every native scroller on a phone does. Velocity is read
+      // from the last ~100ms of finger travel, so a drag that stopped
+      // before lifting doesn't fling at all.
+      const FLING_MIN_VELOCITY_PX_PER_MS = 0.3;
+      const FLING_SAMPLE_WINDOW_MS = 100;
+      // Per-millisecond decay: velocity falls to ~5% in about a second.
+      const FLING_DECAY_PER_MS = 0.997;
+      let touchSamples: { y: number; t: number }[] = [];
+      let flingRaf = 0;
+      const stopFling = () => {
+        if (flingRaf) cancelAnimationFrame(flingRaf);
+        flingRaf = 0;
+      };
       let touchLast: { x: number; y: number } | null = null;
       let touchScrolling = false;
       // Finger travel not yet turned into whole lines of buffer scroll.
@@ -1752,6 +1766,9 @@ export default function TerminalView({
         // triggering any native touch handling at all.
         e.preventDefault();
         cancelLongPressTouch();
+        // A touch during a fling catches it, like a native scroller: the
+        // content stops under the finger.
+        stopFling();
         selectionArmedThisGesture = false;
         longPressFiredThisGesture = false;
         if (activeSel) {
@@ -1767,6 +1784,7 @@ export default function TerminalView({
         touchLast = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         touchScrolling = false;
         touchScrollPx = 0;
+        touchSamples = [{ y: touchLast.y, t: e.timeStamp }];
         const startX = touchLast.x;
         const startY = touchLast.y;
         longPressTouchTimer = window.setTimeout(() => {
@@ -1820,15 +1838,24 @@ export default function TerminalView({
         touchScrolling = true;
         e.preventDefault();
         touchLast = { x: t.clientX, y: t.clientY };
+        touchSamples.push({ y: t.clientY, t: e.timeStamp });
+        while (touchSamples.length > 2 && e.timeStamp - touchSamples[0].t > FLING_SAMPLE_WINDOW_MS) {
+          touchSamples.shift();
+        }
         // Dominant axis only: the wheel handler treats mixed deltas as
         // vertical, which would swallow slightly-diagonal horizontal swipes.
         const [deltaX, deltaY] = Math.abs(dx) > Math.abs(dy) ? [dx, 0] : [0, dy];
-        // A vertical swipe with history to read and no program asking for the
-        // mouse scrolls the buffer itself, a line per row of finger travel.
-        // Everything else (mouse-reporting programs, the alternate screen,
-        // horizontal scroll) keeps going through the wheel policy.
+        scrollByTouch(deltaX, deltaY, t.clientX, t.clientY);
+      };
+      // One step of touch scroll, from the finger or a fling. A vertical
+      // step with history to read and no program asking for the mouse
+      // scrolls the buffer itself, a line per row of travel. Everything else
+      // (mouse-reporting programs, the alternate screen, horizontal scroll)
+      // goes through the wheel policy. Returns false once there is nowhere
+      // left to scroll, which is what ends a fling at either end.
+      const scrollByTouch = (deltaX: number, deltaY: number, clientX: number, clientY: number): boolean => {
         if (deltaY !== 0 && !tracking()) {
-          const { viewportY, length, rows } = engine.getScrollState();
+          const { viewportY, baseY, length, rows } = engine.getScrollState();
           if (length > rows) {
             touchScrollPx += deltaY;
             const cell = engine.getCharHeight();
@@ -1837,17 +1864,47 @@ export default function TerminalView({
               touchScrollPx -= lines * cell;
               engine.scrollToLine(viewportY + lines);
             }
-            return;
+            return deltaY < 0 ? viewportY > 0 : viewportY < baseY;
           }
         }
         engine.dispatchSyntheticWheel({
           deltaX,
           deltaY,
-          clientX: t.clientX,
-          clientY: t.clientY,
+          clientX,
+          clientY,
           bubbles: true,
           cancelable: true,
         });
+        return true;
+      };
+      const startFling = (clientX: number, clientY: number, endedAt: number) => {
+        const first = touchSamples[0];
+        const last = touchSamples[touchSamples.length - 1];
+        if (!first || !last || endedAt - last.t > FLING_SAMPLE_WINDOW_MS) return;
+        const dt = last.t - first.t;
+        if (dt <= 0) return;
+        // Finger moving up (y shrinking) scrolls toward newer lines, the
+        // same sign convention as the drag deltas above.
+        let velocity = (first.y - last.y) / dt;
+        if (Math.abs(velocity) < FLING_MIN_VELOCITY_PX_PER_MS) return;
+        let prev = performance.now();
+        const step = (now: number) => {
+          const elapsed = Math.min(now - prev, 64);
+          prev = now;
+          const moved = velocity * elapsed;
+          velocity *= Math.pow(FLING_DECAY_PER_MS, elapsed);
+          if (
+            disposed ||
+            activeSel ||
+            Math.abs(velocity) < FLING_MIN_VELOCITY_PX_PER_MS / 4 ||
+            !scrollByTouch(0, moved, clientX, clientY)
+          ) {
+            flingRaf = 0;
+            return;
+          }
+          flingRaf = requestAnimationFrame(step);
+        };
+        flingRaf = requestAnimationFrame(step);
       };
       const onTouchEnd = (e: TouchEvent) => {
         cancelLongPressTouch();
@@ -1875,12 +1932,21 @@ export default function TerminalView({
         // focus.
         const wasTap = touchLast !== null && !touchScrolling && !longPressFiredThisGesture;
         if (!wasTap) suppressMouseUntil = performance.now() + 700;
+        if (touchScrolling && touchLast && e.type === "touchend") {
+          startFling(touchLast.x, touchLast.y, e.timeStamp);
+        }
         longPressFiredThisGesture = false;
         touchLast = null;
         touchScrolling = false;
         e.stopPropagation();
         if (e.cancelable) e.preventDefault();
-        if (wasTap && e.type === "touchend") engine.focusInput();
+        if (wasTap && e.type === "touchend") {
+          // Tapping the terminal means "I'm going to type": back to the live
+          // tail, the same snap a keypress does, so the prompt is what the
+          // keyboard opens over rather than whatever history was on screen.
+          if (snapToBottomRef.current && engine.isScrolledUp()) engine.scrollToBottom();
+          engine.focusInput();
+        }
       };
       screen.addEventListener("touchstart", onTouchStart, { passive: false });
       screen.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -2011,13 +2077,23 @@ export default function TerminalView({
       // ancestor/descendant chain straight back; the app's one legitimate
       // horizontal scroller (the touch key bar) is a sibling, never in the
       // chain, and the engine's scrollback viewport only scrolls vertically.
+      //
+      // The same reveal shifts it vertically when focus lands while the
+      // scrollback is scrolled up: the helper textarea still sits at the
+      // cursor's row, below the visible screen, and Chrome scrolls the
+      // host up to show it — the terminal slides out of view and leaves the
+      // touch key bar under the tabs with blank space below. Vertical
+      // scroll is snapped back too, except on an element that really
+      // scrolls vertically (the engine's scrollback viewport).
       const onCaretRevealScroll = (ev: Event) => {
         const body = terminalBodyRef.current;
         if (!body) return;
         const target = ev.target instanceof Element ? ev.target : document.scrollingElement;
         if (!target) return;
-        if ((body.contains(target) || target.contains(body)) && target.scrollLeft !== 0) {
-          target.scrollLeft = 0;
+        if (!body.contains(target) && !target.contains(body)) return;
+        if (target.scrollLeft !== 0) target.scrollLeft = 0;
+        if (target.scrollTop !== 0 && !/^(auto|scroll)$/.test(getComputedStyle(target).overflowY)) {
+          target.scrollTop = 0;
         }
       };
       document.addEventListener("scroll", onCaretRevealScroll, true);
@@ -2033,6 +2109,7 @@ export default function TerminalView({
         endPending();
         endHeld();
         cancelLongPressTouch();
+        stopFling();
         unsubTouchSelRenderCheck();
         for (const type of capturedMouseEvents) {
           screen.removeEventListener(type, onCapture, true);
