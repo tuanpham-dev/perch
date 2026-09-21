@@ -2158,6 +2158,7 @@ export default function App() {
             onReorderTab={reorderSidebarTab}
             onMoveTab={moveSidebarTab}
             onMovePanel={moveSidebarPanel}
+            onHidePanel={toggleSidebarPane}
             tabDrag={sidebarTabDrag}
             onTabDragChange={setSidebarTabDrag}
             onCollapse={() => setSidebarSideVisible("left", false)}
@@ -2474,6 +2475,7 @@ export default function App() {
             onReorderTab={reorderSidebarTab}
             onMoveTab={moveSidebarTab}
             onMovePanel={moveSidebarPanel}
+            onHidePanel={toggleSidebarPane}
             tabDrag={sidebarTabDrag}
             onTabDragChange={setSidebarTabDrag}
             onCollapse={() => setSidebarSideVisible("right", false)}
