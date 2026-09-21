@@ -37,7 +37,7 @@ import {
   focusReport,
   WheelLineAccumulator,
 } from "../mouseReports";
-import { isOpenGesture, openUrl } from "../terminalLinks";
+import { isOpenGesture, joinWrappedPath, openUrl } from "../terminalLinks";
 import type { MenuItem } from "../types";
 import { oversizeReason, uploadMaxBytes } from "../upload";
 
@@ -103,6 +103,27 @@ function uniqueUploadName(originalName: string | undefined, mime: string, index?
   // same millisecond (or sharing a name) still get distinct destinations.
   const prefix = index === undefined ? `${Date.now()}` : `${Date.now()}-${index}`;
   return `${prefix}-${base}`;
+}
+
+type PathCell = { row: number; col: number } | null;
+
+// The paths a press should offer the resolver, in the order they win: what
+// the row itself says first, and the two-row rejoin (see terminalLinks'
+// joinWrappedPath) only as the fallback, so a path that exists as printed is
+// never second-guessed. Each carries the screen cell it starts at, which is
+// what resolves it against the right pane's directory.
+function pathTries(
+  candidate: { kind: "url" | "path"; target: string; line?: number; cell: PathCell } | null,
+  wrapped: { target: string; line?: number; cell: PathCell } | null,
+): { target: string; line?: number; cell: PathCell }[] {
+  const tries: { target: string; line?: number; cell: PathCell }[] = [];
+  if (candidate?.kind === "path") {
+    tries.push({ target: candidate.target, line: candidate.line, cell: candidate.cell });
+  }
+  if (wrapped) {
+    tries.push({ target: wrapped.target, line: wrapped.line, cell: wrapped.cell });
+  }
+  return tries;
 }
 
 type SearchAction = "start" | "next" | "prev" | "cancel";
@@ -1617,14 +1638,38 @@ export default function TerminalView({
           open,
           interacting: true,
         });
-        if (range.candidate?.kind === "path") {
-          const target = range.candidate.target;
-          const line = range.candidate.line;
-          const cell = startRC.row >= 0 ? { row: startRC.row, col: startRC.col } : null;
-          resolvePathsRef.current([target], [cell]).then(([resolved]) => {
+        // A path the program's own word wrap split over two rows is offered
+        // alongside the row's own reading, and only wins if that one turns
+        // out not to exist — without it a wrapped path is just a word here,
+        // which is what phone-width panes turn nearly every path into.
+        const wrapped = wrappedPathAtRef.current(row, col);
+        const tries = pathTries(
+          range.candidate?.kind === "path"
+            ? { ...range.candidate, cell: liveScreenCellRef.current(startRC.row, startRC.col) }
+            : null,
+          wrapped,
+        );
+        if (tries.length > 0) {
+          resolvePathsRef.current(tries.map((t) => t.target), tries.map((t) => t.cell)).then((resolved) => {
             if (touchSelGen !== gen || !activeSel) return;
-            if (!resolved) return;
-            setActiveSel({ ...activeSel, open: { kind: "path", target: resolved, line } });
+            const i = resolved.findIndex((r) => r);
+            if (i === -1) return;
+            // A rejoined path that held up is worth showing as one: the
+            // selection grows over both halves, so what Open File will open
+            // is what's highlighted.
+            if (wrapped && tries[i].target === wrapped.target) {
+              selectRange(wrapped.start.col, wrapped.start.row, wrapped.end.col, wrapped.end.row);
+              setActiveSel({
+                ...activeSel,
+                anchorCol: wrapped.start.col,
+                anchorRow: wrapped.start.row,
+                headCol: wrapped.end.col,
+                headRow: wrapped.end.row,
+                open: { kind: "path", target: resolved[i]!, line: tries[i].line },
+              });
+              return;
+            }
+            setActiveSel({ ...activeSel, open: { kind: "path", target: resolved[i]!, line: tries[i].line } });
           });
         }
         return true;
@@ -2273,6 +2318,69 @@ export default function TerminalView({
   // made before any path resolution (paste-mode right-click). A path
   // candidate here is only a candidate: whether the file exists is settled
   // by resolvePaths.
+  // A viewport row (what every hit-test speaks) as a row of the LIVE screen,
+  // which is the space a pane layout is described in and therefore the space
+  // a path's resolve cell has to be in. Null for a row that is scrollback
+  // rather than live screen, which resolves against the active pane instead.
+  const liveScreenCell = (row: number, col: number): PathCell => {
+    const engine = engineRef.current;
+    if (!engine) return null;
+    const { viewportY, baseY, rows } = engine.getScrollState();
+    const liveRow = row + viewportY - baseY;
+    return liveRow >= 0 && liveRow < rows ? { row: liveRow, col } : null;
+  };
+
+  // One screen row's own text (padding included), plus where it sits in the
+  // logical line it belongs to — what tells a soft wrap the engine already
+  // stitched apart from a newline the program itself wrote.
+  const rowTextAt = (row: number) => {
+    const engine = engineRef.current;
+    if (!engine || row < 0 || row >= engine.rows) return null;
+    const line = engine.readStitchedLine(row);
+    if (!line) return null;
+    const cols = engine.cols;
+    const offset = (row - line.startLine) * cols;
+    const used = line.text.replace(/\s+$/, "").length;
+    const lastRow = line.startLine + Math.max(0, Math.ceil(used / cols) - 1);
+    return { text: line.text.slice(offset, offset + cols), first: row === line.startLine, last: row >= lastRow };
+  };
+
+  // The path a program's own word wrap split over two rows, for a press that
+  // landed on either half — see joinWrappedPath for why this is worth
+  // guessing at and what keeps the guess honest. The rows have to belong to
+  // different logical lines: a soft wrap is already stitched.
+  const wrappedPathAt = (row: number, col: number) => {
+    const here = rowTextAt(row);
+    if (!here) return null;
+    const engine = engineRef.current;
+    if (!engine) return null;
+    const found = (headRow: number, joined: ReturnType<typeof joinWrappedPath>) =>
+      joined && {
+        target: joined.target,
+        line: joined.line,
+        cell: liveScreenCell(headRow, joined.headStart),
+        start: { row: headRow, col: joined.headStart },
+        end: { row: headRow + 1, col: joined.contStart + joined.contLength - 1 },
+      };
+    if (here.last) {
+      const cont = rowTextAt(row + 1);
+      const joined = cont?.first ? joinWrappedPath(here.text, cont.text, engine.cols) : null;
+      if (joined && col >= joined.headStart) return found(row, joined);
+    }
+    if (here.first) {
+      const head = rowTextAt(row - 1);
+      const joined = head?.last ? joinWrappedPath(head.text, here.text, engine.cols) : null;
+      if (joined && col >= joined.contStart && col < joined.contStart + joined.contLength) {
+        return found(row - 1, joined);
+      }
+    }
+    return null;
+  };
+  const wrappedPathAtRef = useRef(wrappedPathAt);
+  wrappedPathAtRef.current = wrappedPathAt;
+  const liveScreenCellRef = useRef(liveScreenCell);
+  liveScreenCellRef.current = liveScreenCell;
+
   const candidateAtPoint = (clientX: number, clientY: number) => {
     const engine = engineRef.current;
     if (!engine) return null;
@@ -2286,7 +2394,7 @@ export default function TerminalView({
     // The candidate's first screen cell, so its path resolves against the
     // pane it's printed in (null when that cell is above the live screen).
     const startRow = stitched.startLine + Math.floor(candidate.startIdx / engine.cols);
-    const startCell = startRow >= 0 ? { row: startRow, col: candidate.startIdx % engine.cols } : null;
+    const startCell = liveScreenCell(startRow, candidate.startIdx % engine.cols);
     return { ...candidate, cell: startCell };
   };
   const candidateAtPointRef = useRef(candidateAtPoint);
@@ -2363,17 +2471,20 @@ export default function TerminalView({
       return;
     }
     const candidate = candidateAtPoint(clientX, clientY);
-    if (!candidate) {
-      show(null);
-      return;
-    }
-    if (candidate.kind === "url") {
+    if (candidate?.kind === "url") {
       show({ kind: "url", target: candidate.target });
       return;
     }
-    resolvePathsRef.current([candidate.target], [candidate.cell])
-      .then(([resolved]) => {
-        show(resolved ? { kind: "path", target: resolved, line: candidate.line } : null);
+    const cell = engine.cellFromPoint(clientX, clientY);
+    const tries = pathTries(candidate, wrappedPathAt(cell.row - 1, cell.col - 1));
+    if (!tries.length) {
+      show(null);
+      return;
+    }
+    resolvePathsRef.current(tries.map((t) => t.target), tries.map((t) => t.cell))
+      .then((resolved) => {
+        const i = resolved.findIndex((r) => r);
+        show(i === -1 ? null : { kind: "path", target: resolved[i]!, line: tries[i].line });
       })
       .catch(() => show(null));
   };

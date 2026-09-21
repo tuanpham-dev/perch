@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findCandidates } from "./terminalLinks";
+import { findCandidates, joinWrappedPath } from "./terminalLinks";
 
 const paths = (text: string) =>
   findCandidates(text)
@@ -82,5 +82,54 @@ describe("findCandidates: Windows paths", () => {
 
   it("does not read a URL's scheme as a drive", () => {
     expect(paths("open https://x.y/z now").filter((p) => /^[A-Za-z]:/.test(p.target))).toEqual([]);
+  });
+});
+
+describe("joinWrappedPath: a path a program broke across rows", () => {
+  // Real rows from a 48-column phone pane: Claude Code wrapped its own echo
+  // of the prompt mid-path, which left both halves unlinkable.
+  const cols = 48;
+  const head = "  else: extensions/markdown-preview/src/client.";
+  const cont = "  tsx:209";
+
+  it("rejoins the halves, suffix and all", () => {
+    expect(joinWrappedPath(head.padEnd(cols), cont.padEnd(cols), cols)).toEqual({
+      target: "extensions/markdown-preview/src/client.tsx",
+      line: 209,
+      headStart: 8,
+      contStart: 2,
+      contLength: 7,
+    });
+  });
+
+  it("does not need the row padded out", () => {
+    expect(joinWrappedPath(head, cont, cols)?.target).toBe("extensions/markdown-preview/src/client.tsx");
+  });
+
+  it("leaves a row that had room to spare alone", () => {
+    expect(joinWrappedPath("  else: extensions/markdown/client.", cont, cols)).toBeNull();
+  });
+
+  it("refuses when the halves don't read as one path", () => {
+    expect(joinWrappedPath("run the tests and then report back to me".padEnd(cols), "  again later", cols)).toBeNull();
+  });
+
+  it("still joins a row that only looks full, and leaves the arbitrating to the resolver", () => {
+    // Two rows that were never one path can still pass the shape test: here
+    // "src/app.ts" was simply the last thing that fit. The joiner can't tell
+    // and doesn't try - callers ask about the unjoined path first, and a
+    // "src/app.tsand" that exists nowhere is dropped by the existence check.
+    expect(joinWrappedPath("open src/app.ts".padEnd(15), "  and read it", 15)?.target).toBe("src/app.tsand");
+  });
+
+  it("refuses an empty row on either side", () => {
+    expect(joinWrappedPath("".padEnd(cols), cont, cols)).toBeNull();
+    expect(joinWrappedPath(head, "".padEnd(cols), cols)).toBeNull();
+  });
+
+  it("rejoins a path broken right after a slash", () => {
+    const j = joinWrappedPath("see client/src/components/Terminal".padEnd(34), "View.tsx now", 34);
+    expect(j?.target).toBe("client/src/components/TerminalView.tsx");
+    expect(j?.contLength).toBe(8);
   });
 });
