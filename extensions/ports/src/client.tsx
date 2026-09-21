@@ -75,6 +75,9 @@ interface ListeningPort {
   process?: string;
   pid?: number;
   session: string;
+  // The process outlived the terminal it was started in (or no terminal
+  // started it): `session` is then the name it remembers, or empty.
+  orphan?: boolean;
 }
 
 interface TunnelAuth {
@@ -135,6 +138,25 @@ const MASK = "••••";
 
 function isLoopback(address: string): boolean {
   return address === "127.0.0.1" || address === "::1" || address.startsWith("127.");
+}
+
+// Which terminal a port belongs to. A process that outlived its terminal
+// still says which one it was started in, and reads as faded rather than as
+// a live session; one no terminal started has nothing to name at all.
+function SessionBadge({ port }: { port: ListeningPort }) {
+  if (!port.orphan) return <span className="port-session">{port.session}</span>;
+  return (
+    <span
+      className="port-session port-session-orphan"
+      title={
+        port.session
+          ? `Still listening after the "${port.session}" terminal closed`
+          : "Listening outside your terminals"
+      }
+    >
+      {port.session || "no terminal"}
+    </span>
+  );
 }
 
 // Wraps a value in single quotes for a POSIX shell, escaping embedded single
@@ -1036,7 +1058,7 @@ function PortsPanel({ actionsTarget, showMenu, confirmDialog }: PanelProps) {
               >
                 <span className="port-number">{p.port}</span>
                 {p.process && <span className="port-process">{p.process}</span>}
-                <span className="port-session">{p.session}</span>
+                <SessionBadge port={p} />
                 {!isLoopback(p.address) && <span className="port-address">{p.address}</span>}
               </button>
               <div className="port-actions">
@@ -1232,7 +1254,7 @@ function PortsStatusPopover({ context }: StatusItemProps) {
               {forwarded.has(p.port) && <Icon name="plug" className="port-forwarded-dot" />}
               <span className="port-number">{p.port}</span>
               {p.process && <span className="port-process">{p.process}</span>}
-              <span className="port-session">{p.session}</span>
+              <SessionBadge port={p} />
             </button>
             {/* The same three row actions the panel offers. */}
             <div className="port-actions">

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readlink } from "node:fs/promises";
 import { buildProcessMap, type ProcInfo } from "./processes.js";
+import { readSettingsDoc } from "./settingsStore.js";
 import { listAllWindowPids } from "./terminals.js";
 
 export interface ListeningPort {
@@ -8,7 +9,13 @@ export interface ListeningPort {
   address: string;
   process?: string;
   pid?: number;
+  // The terminal session the process belongs to, or the one it remembers
+  // being started from when `orphan` is set. Empty only for a port the
+  // "user" scope swept in, which no terminal ever started.
   session: string;
+  // The process outlived the terminal that started it (or was never started
+  // by one): still yours, still listening, but no live pane owns it.
+  orphan?: boolean;
 }
 
 export interface RawPort {
@@ -193,40 +200,152 @@ function attributeToSession(
   return "unknown";
 }
 
-// Linux only (other systems have no readable process environment; their
-// orphaned listeners simply go unattributed). PERCH_WINDOW survives reparenting: when the shell/agent that spawned a
-// process exits, the process is reparented to pid 1 and the ppid walk above
-// dead-ends, but the window id it was spawned in stays in its (immutable)
-// /proc environ.
+// What a process remembers about the terminal it was started in. Linux only
+// (other systems have no readable process environment; their orphaned
+// listeners simply go unattributed).
+//
+// These survive reparenting: when the shell/agent that spawned a process
+// exits, the process is reparented to pid 1 and the ppid walk above
+// dead-ends, but the window id and session name it was spawned in stay in
+// its (immutable) /proc environ. The window id is the precise key — it finds
+// the live session even after a rename — and the session name is the
+// fallback for when that window is closed, which is the whole point: the dev
+// server is still listening long after you closed the pane you started it in.
+//
 // Same-user readable only — the same constraint ss's process column already
 // imposes, so this can never attribute a port ss couldn't name.
-async function readWindowFromEnviron(pid: number): Promise<string | null> {
+interface TerminalOrigin {
+  windowId: string | null;
+  session: string | null;
+}
+
+async function readTerminalOrigin(pid: number): Promise<TerminalOrigin | null> {
   try {
     const raw = await readFile(`/proc/${pid}/environ`, "utf8");
     let windowId: string | null = null;
+    let session: string | null = null;
     for (const entry of raw.split("\0")) {
       if (entry.startsWith("PERCH_WINDOW=") && entry.length > "PERCH_WINDOW=".length) {
-        return entry.slice("PERCH_WINDOW=".length);
+        windowId = entry.slice("PERCH_WINDOW=".length);
+      } else if (entry.startsWith("PERCH_SESSION=") && entry.length > "PERCH_SESSION=".length) {
+        session = entry.slice("PERCH_SESSION=".length);
+      } else if (entry.startsWith("TMUX_PANE=%") && !windowId) {
+        // A pane of the tmux backend: its window id comes from tmux's pane id.
+        windowId = `tmux-${entry.slice("TMUX_PANE=%".length)}`;
       }
-      // A pane of the tmux backend: its window id comes from tmux's pane id.
-      if (entry.startsWith("TMUX_PANE=%")) windowId = `tmux-${entry.slice("TMUX_PANE=%".length)}`;
     }
-    if (windowId) return windowId;
+    return windowId || session ? { windowId, session } : null;
   } catch {
     // Exited, foreign-user, or no /proc (macOS) — unattributable.
+    return null;
   }
-  return null;
+}
+
+// Node renames its main thread, so /proc's comm (and therefore ss's and
+// lsof's process column) reads "node-MainThread" for every Node program on
+// the box — true and useless. The command line says what it actually is.
+const RUNTIMES = new Set([
+  "node", "node-MainThread", "deno", "bun", "electron",
+  "python", "python2", "python3", "ruby", "php", "perl", "java", "dotnet",
+]);
+// Flags whose value is the NEXT argv entry, so the value isn't mistaken for
+// the script. Node takes --require/--import/--loader this way.
+const VALUE_FLAGS = new Set([
+  "-r", "--require", "--import", "--loader", "--experimental-loader",
+  "--env-file", "--conditions", "-e", "--eval",
+]);
+// `python3 -m http.server` has no script: the module IS the name.
+const MODULE_FLAGS = new Set(["-m", "--module"]);
+// A script named after its position rather than its job: the folder it runs
+// in says far more than "index.ts" does.
+const GENERIC_SCRIPT = /^(index|main|server|app|start|cli|run|__main__)\.\w+$/;
+// Folders that are equally a position rather than a name — qualified with
+// their parent ("perch/server") to stay tellable apart across checkouts.
+const GENERIC_DIR = new Set(["src", "server", "client", "app", "api", "web", "backend", "frontend", "lib"]);
+
+const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? p;
+
+/** The name to show for a process, from its argv and working directory. */
+export function processLabel(argv: string[], cwd: string | null): string | null {
+  const exe = argv[0] ? base(argv[0]) : null;
+  if (!exe) return null;
+  if (!RUNTIMES.has(exe)) return exe;
+  let script: string | null = null;
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (MODULE_FLAGS.has(arg) && argv[i + 1]) return argv[i + 1]!;
+    if (VALUE_FLAGS.has(arg)) {
+      i++;
+      continue;
+    }
+    if (arg.startsWith("-")) continue;
+    script = arg;
+    break;
+  }
+  if (script) {
+    // A dependency's CLI (vite, next, nodemon…) is named by its bin entry.
+    const bin = /(?:^|\/)node_modules\/\.bin\/([^/]+)$/.exec(script);
+    if (bin) return bin[1]!;
+    // Anything else out of node_modules is named after the package that owns
+    // it: a package's own entry file is called bin.js or index.js far more
+    // often than it is called anything useful.
+    const pkg = /(?:^|\/)node_modules\/(@[^/]+\/[^/]+|[^@][^/]*)\//g;
+    let owner: string | null = null;
+    for (let m = pkg.exec(script); m; m = pkg.exec(script)) owner = m[1]!;
+    if (owner && owner !== ".bin") return owner;
+    const name = base(script);
+    if (!GENERIC_SCRIPT.test(name)) return name;
+  }
+  if (cwd) {
+    const dir = base(cwd);
+    if (GENERIC_DIR.has(dir)) {
+      const parent = base(cwd.slice(0, cwd.length - dir.length - 1));
+      if (parent) return `${parent}/${dir}`;
+    }
+    return dir;
+  }
+  return script ? base(script) : exe;
+}
+
+// Linux only: the other platforms' listings already carry a usable name.
+async function describeProcess(pid: number): Promise<string | null> {
+  if (process.platform !== "linux") return null;
+  try {
+    const [raw, cwd] = await Promise.all([
+      readFile(`/proc/${pid}/cmdline`, "utf8"),
+      readlink(`/proc/${pid}/cwd`).catch(() => null),
+    ]);
+    return processLabel(raw.split("\0").filter(Boolean), cwd);
+  } catch {
+    // Exited or unreadable — the listing's own name stands.
+    return null;
+  }
+}
+
+// How far past "a terminal that is still open" the listing reaches. The
+// proxy and the tunnel serve exactly what this returns (getTunnelablePorts),
+// so this setting is also the allowlist for both — see the hint on it in
+// Settings → Behavior.
+export type PortScope = "open" | "launched" | "user";
+
+async function readPortScope(): Promise<PortScope> {
+  const settings = ((await readSettingsDoc()).settings ?? {}) as Record<string, unknown>;
+  const scope = settings.portScope;
+  return scope === "open" || scope === "user" ? scope : "launched";
 }
 
 // Listening ports whose owning process lives inside a terminal's process
-// tree, by ppid walk or — for orphaned trees — by PERCH_WINDOW environ.
-// Everything else (system services, perch's own server and dev
-// tooling, processes from panes since closed) is excluded.
+// tree, by ppid walk or — for orphaned trees — by the PERCH_WINDOW /
+// PERCH_SESSION breadcrumbs in its environ. perch's own server and the dev
+// tooling around it are always excluded, and so is any socket whose owner
+// the kernel won't name for us (root's, another user's): scope only decides
+// how much of the rest comes along.
 async function scanTerminalPorts(): Promise<ListeningPort[]> {
-  const [ports, panes, procMap] = await Promise.all([
+  const [ports, panes, procMap, scope] = await Promise.all([
     listPorts(),
     listAllWindowPids(),
     buildProcessMap(),
+    readPortScope(),
   ]);
   const ownAncestors = computeOwnAncestors(procMap, panes.byPid);
 
@@ -235,13 +354,28 @@ async function scanTerminalPorts(): Promise<ListeningPort[]> {
       if (port.pid === undefined) return null;
       const result = attributeToSession(port.pid, procMap, panes.byPid, ownAncestors);
       if (result === "own") return null;
-      if (result !== "unknown") return { ...port, session: result.session };
-      const windowId = await readWindowFromEnviron(port.pid);
-      const session = windowId ? panes.byWindowId.get(windowId) : undefined;
-      return session ? { ...port, session } : null;
+      if (result !== "unknown") return withProcessName(port, { session: result.session });
+      // The chain dead-ended: a process reparented to init when whatever
+      // started it exited. Its own environ still says where it came from.
+      const origin = await readTerminalOrigin(port.pid);
+      const live = origin?.windowId ? panes.byWindowId.get(origin.windowId) : undefined;
+      // That window is still open — an ordinary attribution, not an orphan,
+      // and the one case every scope agrees on.
+      if (live) return withProcessName(port, { session: live });
+      if (scope === "open") return null;
+      if (origin) return withProcessName(port, { session: origin.session ?? "", orphan: true });
+      return scope === "user" ? withProcessName(port, { session: "", orphan: true }) : null;
     }),
   );
   return attributed.filter((p): p is ListeningPort => p !== null);
+}
+
+// Fills in the process name from the command line, which is what a Node
+// program is actually called (see processLabel), keeping the listing's own
+// name when /proc can't say.
+async function withProcessName(port: RawPort, rest: Omit<ListeningPort, keyof RawPort>): Promise<ListeningPort> {
+  const label = port.pid === undefined ? null : await describeProcess(port.pid);
+  return { ...port, ...rest, process: label ?? port.process };
 }
 
 const SCAN_CACHE_TTL_MS = 2_000;

@@ -99,7 +99,16 @@ export const posix: Platform = {
 
   processName: (pid) => {
     if (isLinux) {
-      try { return readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return undefined; }
+      try {
+        const comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+        // comm is the THREAD name, and Node renames its main thread: every
+        // Node program on the box reads "node-MainThread" (Electron and some
+        // Python runtimes do the same with a bare "MainThread"). The program
+        // it is actually running is argv[0].
+        if (!/(^|-)MainThread$/.test(comm)) return comm;
+        const argv0 = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0];
+        return argv0 ? argv0.split('/').pop() || comm : comm;
+      } catch { return undefined; }
     }
     const comm = run('ps', ['-o', 'comm=', '-p', String(pid)]).trim();
     return comm ? comm.split('/').pop()!.replace(/^-/, '') : undefined;

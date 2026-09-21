@@ -189,6 +189,25 @@ export default function BehaviorSection() {
         />
       </label>
 
+      <label className="settings-row">
+        <span className="settings-label">Ports to list</span>
+        <div className="settings-hint">
+          A process keeps listening after you close the terminal you started it in. This is also what
+          the proxy and the tunnel will serve: a port that is not listed cannot be opened or
+          forwarded. Ports held by another user (system services like a database or ssh) are never
+          listed.
+        </div>
+        <select
+          className="dialog-input settings-select"
+          value={settings.portScope}
+          onChange={(e) => set("portScope", e.target.value as AppSettings["portScope"])}
+        >
+          <option value="open">Only while their terminal is open</option>
+          <option value="launched">Anything a terminal started</option>
+          <option value="user">Every port my user owns</option>
+        </select>
+      </label>
+
       <label className="settings-row checkbox-row">
         <input
           type="checkbox"

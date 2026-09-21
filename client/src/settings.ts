@@ -214,6 +214,13 @@ export interface AppSettings {
   // inside the repository, its top folder is added to .git/info/exclude so it
   // stays out of git status (your committed .gitignore is never modified).
   worktreeLocation: string;
+  // How far the Ports listing reaches past the terminals that are still
+  // open. The proxy and the tunnel serve exactly what it lists, so this is
+  // also the allowlist for both.
+  //   "open"     only while the terminal that started it is still open
+  //   "launched" anything a terminal started, even after that terminal closed
+  //   "user"     every listening port your user account owns
+  portScope: "open" | "launched" | "user";
   // The API providers the user has added, in their own order - a keyed API
   // for the jobs worth paying for, or a custom command. CLIs are not stored
   // here: every agent that can answer a single prompt is offered as a
@@ -360,6 +367,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pasteDropUploadDir: "{tmp}",
   localEchoWhen: "claude",
   worktreeLocation: "{repo}/.worktrees/{branch}",
+  portScope: "launched",
   aiProfiles: [],
   aiProfileId: "",
   aiDefaultModel: "",
