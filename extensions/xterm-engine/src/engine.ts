@@ -519,6 +519,16 @@ export async function createXtermEngine(
       fit.fit();
       return { cols: term.cols, rows: term.rows };
     },
+    measure: () => {
+      if (disposed) return null;
+      if (screen.clientWidth === 0 || screen.clientHeight === 0) return null;
+      const dims = fit.proposeDimensions();
+      return dims && dims.cols > 0 && dims.rows > 0 ? { cols: dims.cols, rows: dims.rows } : null;
+    },
+    resize: (cols, rows) => {
+      if (disposed || (cols === term.cols && rows === term.rows)) return;
+      term.resize(cols, rows);
+    },
     // xterm has no render-suppression-while-hidden to undo — refresh(...)
     // just forces a repaint in case anything was missed, which is cheap
     // and safe even when nothing actually needs it.
