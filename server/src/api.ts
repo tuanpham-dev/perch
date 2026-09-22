@@ -1328,11 +1328,15 @@ api.get("/download", async (req, res) => {
     // honors that header and would download the file instead of rendering
     // it. sendFile derives the right Content-Type from the extension and
     // sets no disposition header at all.
+    //
+    // dotfiles: "allow" because send's default 404s any path whose basename
+    // starts with a dot, which made .zshrc or .gitignore unopenable in every
+    // viewer and editor that reads through this route.
     if (req.query.inline === "1") {
-      res.sendFile(targetPath);
+      res.sendFile(targetPath, { dotfiles: "allow" });
       return;
     }
-    res.download(targetPath, path.basename(targetPath));
+    res.download(targetPath, path.basename(targetPath), { dotfiles: "allow" });
   } catch (err) {
     res.status(400).json({ error: errMessage(err) });
   }
