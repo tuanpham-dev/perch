@@ -212,6 +212,14 @@ export interface TerminalEngineHandle {
   // if the container isn't measurable yet (zero size) — the caller is
   // responsible for telling the server about a real resize.
   fit(): { cols: number; rows: number } | null;
+  // The grid `screen`'s box would fit, without applying it, and an explicit
+  // grid to show. Together they let a view that isn't the one its window is
+  // sized for mirror the window's real grid (the backend sizes a window to
+  // its most recently used viewer, and output is drawn for that grid) while
+  // still noticing its own box changing. Optional: an engine without them
+  // keeps fitting its box, and garbles while another viewer drives the size.
+  measure?(): { cols: number; rows: number } | null;
+  resize?(cols: number, rows: number): void;
   // Forces a full repaint — used when a hidden/backgrounded terminal
   // becomes visible again and may be showing a stale or blank frame.
   reveal(): void;

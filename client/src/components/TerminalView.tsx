@@ -841,11 +841,25 @@ export default function TerminalView({
       // reflows to it), and the terminal re-measures for plenty of idle
       // reasons (a settings sync, a reconnect, a phone's address bar).
       let sentSize = "";
+      // The window's real grid, as the backend last reported it. It differs
+      // from this view's own box while another viewer (a phone, a second
+      // tab, a split showing the same window) is the one the window is sized
+      // for, and output is drawn for that grid: fitted to our own box
+      // instead, every line wraps or pads at the wrong column. So the engine
+      // shows this grid, cropped or with room to spare, until this view is
+      // used again (focus, click, typing, its box resizing) and claims the
+      // window back. Null until the current connection reports one.
+      let windowGrid: { cols: number; rows: number } | null = null;
+      const showWindowGrid = () => {
+        if (!windowGrid || !engine.resize) return;
+        engine.resize(windowGrid.cols, windowGrid.rows);
+      };
       const refit = () => {
         // fit() itself no-ops (returns null) on a disposed/zero-size
         // terminal; a ResizeObserver callback can still fire after cleanup
         // disconnects it.
-        const result = engine.fit();
+        const mirrors = engine.measure !== undefined && engine.resize !== undefined;
+        const result = mirrors ? engine.measure!() : engine.fit();
         if (result) {
           // LocalEcho caches cellMetrics at construction time (before this
           // terminal's very first fit ever runs, since refit is defined and
@@ -860,7 +874,14 @@ export default function TerminalView({
           const size = `${result.cols}x${result.rows}`;
           if (ws.readyState === WebSocket.OPEN && size !== sentSize) {
             sentSize = size;
+            // A changed box claims the window, so show it at the new size
+            // now rather than a round trip later.
+            if (mirrors) engine.resize!(result.cols, result.rows);
             ws.send(JSON.stringify({ type: "resize", cols: result.cols, rows: result.rows }));
+          } else if (mirrors) {
+            // Re-measured for an idle reason: keep showing the window's grid.
+            if (windowGrid) showWindowGrid();
+            else engine.resize!(result.cols, result.rows);
           }
         }
       };
@@ -965,6 +986,7 @@ export default function TerminalView({
           lastFrameAt = Date.now();
           container.classList.remove("reconnecting");
           sentSize = "";
+          windowGrid = null;
           refit();
         };
 
@@ -992,6 +1014,11 @@ export default function TerminalView({
             };
             if (engine.whenWritten) engine.whenWritten(release);
             else release();
+          } else if (msg.type === "resize" && Number.isInteger(msg.cols) && Number.isInteger(msg.rows)) {
+            if (msg.cols > 0 && msg.rows > 0) {
+              windowGrid = { cols: msg.cols, rows: msg.rows };
+              showWindowGrid();
+            }
           } else if (msg.type === "windowSwitched" && Number.isFinite(msg.windowIndex)) {
             onWindowSwitchRef.current?.(msg.windowIndex);
           } else if (
