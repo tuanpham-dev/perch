@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import "./style.css";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
+import { parseLayout } from "../layout.mjs";
 import { DEFAULT_TOUCH_KEYS, type TouchKey } from "./touchKeys";
 import FloatingTouchKeys from "./FloatingTouchKeys";
 import TouchKeyBar from "./TouchKeyBar";
@@ -39,30 +40,12 @@ export function readStyle(): "bar" | "floating" {
 }
 
 // The layout persists as a JSON string setting (extension configuration
-// properties are scalar-only); a malformed stored value falls back to the
-// defaults rather than rendering a broken bar.
-export function readKeys(): TouchKey[] {
-  const raw = extSettings?.get("touchKeys.keys");
-  if (typeof raw !== "string" || !raw.trim()) return DEFAULT_TOUCH_KEYS;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      Array.isArray(parsed) &&
-      parsed.every(
-        (k) =>
-          typeof k === "object" &&
-          k !== null &&
-          typeof (k as TouchKey).label === "string" &&
-          typeof (k as TouchKey).send === "string" &&
-          typeof (k as TouchKey).when === "string",
-      )
-    ) {
-      return parsed as TouchKey[];
-    }
-  } catch {
-    // fall through to defaults
-  }
-  return DEFAULT_TOUCH_KEYS;
+// properties are scalar-only). An empty one means the default layout; a
+// broken one comes back as an error with no keys, which the bar, the
+// floating toggle and the layout editor all show, rather than quietly
+// swapping in the defaults - see layout.mjs.
+export function readLayout(): { keys: TouchKey[]; error: string | null } {
+  return parseLayout(extSettings?.get("touchKeys.keys"), DEFAULT_TOUCH_KEYS);
 }
 
 export function writeKeys(keys: TouchKey[]): void {
@@ -109,10 +92,12 @@ function isVisible(ctx: TerminalAccessoryContext): boolean {
 function BarAccessory({ context }: { context: TerminalAccessoryContext }) {
   useTouchKeySettingsTick();
   if (readStyle() === "floating") return null;
+  const layout = readLayout();
   return (
     <TouchKeyBar
       visible={isVisible(context)}
-      keys={readKeys()}
+      keys={layout.keys}
+      layoutError={layout.error}
       currentCommand={context.command}
       stickyCtrl={context.stickyCtrl}
       onToggleStickyCtrl={context.toggleStickyCtrl}
@@ -126,10 +111,12 @@ function BarAccessory({ context }: { context: TerminalAccessoryContext }) {
 function OverlayAccessory({ context }: { context: TerminalAccessoryContext }) {
   useTouchKeySettingsTick();
   if (readStyle() !== "floating") return null;
+  const layout = readLayout();
   return (
     <FloatingTouchKeys
       visible={isVisible(context)}
-      keys={readKeys()}
+      keys={layout.keys}
+      layoutError={layout.error}
       currentCommand={context.command}
       stickyCtrl={context.stickyCtrl}
       onToggleStickyCtrl={context.toggleStickyCtrl}
