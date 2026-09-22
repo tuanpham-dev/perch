@@ -178,6 +178,36 @@ function authHeaders(auth: TunnelAuth): { name: string; value: string }[] {
 // variant (see cli/tunnel.mjs): forwarding a fixed snapshot of ports went
 // stale the moment a dev server restarted on a new port, so the panel no
 // longer asks which ports you meant.
+// This browser's own id for tunnel pairing: the copied command passes it to
+// the CLI (--client), and the status asks only about tunnels carrying it, so
+// a tunnel shows as forwarded in the browser that started it and nowhere
+// else. The server can't tell machines apart any other way behind a reverse
+// proxy, where every connection arrives from the proxy. Kept per browser
+// (localStorage) so a copied command keeps matching across reloads; when
+// storage is unavailable it lasts for this page only.
+// getRandomValues rather than randomUUID, which needs a secure context and
+// so fails on a plain-http LAN address.
+const TUNNEL_CLIENT_KEY = "perch.ports.tunnelClient";
+let tunnelClientId: string | null = null;
+
+function tunnelClient(): string {
+  if (tunnelClientId) return tunnelClientId;
+  try {
+    const stored = localStorage.getItem(TUNNEL_CLIENT_KEY);
+    if (stored && /^[A-Za-z0-9_-]{1,64}$/.test(stored)) return (tunnelClientId = stored);
+  } catch {
+    // storage blocked: fall through to a page-lifetime id
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  tunnelClientId = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  try {
+    localStorage.setItem(TUNNEL_CLIENT_KEY, tunnelClientId);
+  } catch {
+    // keep the in-memory id
+  }
+  return tunnelClientId;
+}
+
 function buildCommand(origin: string, auth: TunnelAuth, mask: boolean): string {
   const headers = authHeaders(auth).map((h) => ({ ...h, value: mask ? MASK : h.value }));
   const curlArgs = headers.map((h) => `-H ${shellQuote(`${h.name}: ${h.value}`)}`).join(" ");
@@ -187,7 +217,7 @@ function buildCommand(origin: string, auth: TunnelAuth, mask: boolean): string {
   // path that breaks on Windows. --input-type=module because stdin scripts
   // default to CommonJS.
   const curl = `curl -s ${curlArgs ? `${curlArgs} ` : ""}${origin}/tunnel.mjs`;
-  const node = `node --input-type=module - --url ${origin} ${nodeArgs ? `${nodeArgs} ` : ""}--all`;
+  const node = `node --input-type=module - --url ${origin} ${nodeArgs ? `${nodeArgs} ` : ""}--client ${tunnelClient()} --all`;
   return `${curl} | ${node}`;
 }
 
@@ -757,7 +787,9 @@ interface TunnelStatus {
 const NO_TUNNEL: TunnelStatus = { connected: false, ports: [], allForwarded: false };
 
 function fetchTunnelStatus(): Promise<TunnelStatus> {
-  return fetch("/api/tunnel-status").then((res) => readJson<TunnelStatus>(res));
+  return fetch(`/api/tunnel-status?client=${encodeURIComponent(tunnelClient())}`).then((res) =>
+    readJson<TunnelStatus>(res),
+  );
 }
 
 // The ports list plus the tunnel state, on one timer for the whole extension.
