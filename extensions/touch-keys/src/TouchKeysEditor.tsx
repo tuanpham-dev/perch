@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_TOUCH_KEYS, parseSend, snippetIdOf, type TouchKey } from "./touchKeys";
 import { TouchKeyButton, visibleKeys } from "./TouchKeyBar";
-import { readKeys, useTouchKeySettingsTick, writeKeys } from "./client";
+import { readLayout, useTouchKeySettingsTick, writeKeys } from "./client";
 
 // Drop position for an in-progress row drag: `id` is the target row's drop
 // indicator id (its index in settings.touchKeys), `edge` says above or below
@@ -20,9 +20,9 @@ const MOVE_SLOP_PX = 5;
 // when touch keys became this extension).
 export default function TouchKeysEditor() {
   // Layout persists as this extension's touchKeys.keys JSON setting —
-  // readKeys/writeKeys in client.tsx own the (de)serialization.
+  // readLayout/writeKeys in client.tsx own the (de)serialization.
   useTouchKeySettingsTick();
-  const keys = readKeys();
+  const { keys, error: layoutError } = readLayout();
   const set = (_key: "touchKeys", next: TouchKey[]) => writeKeys(next);
 
   const [previewTag, setPreviewTag] = useState("All");
@@ -201,6 +201,28 @@ export default function TouchKeysEditor() {
     window.addEventListener("pointerup", onPointerUpWindow);
     window.addEventListener("pointercancel", onPointerCancelWindow);
   };
+
+  // A broken stored layout gets no row editor: every edit writes the whole
+  // list back, so editing from an empty list would overwrite the pasted
+  // text the user is about to fix. They fix it in the JSON field above, or
+  // start over from the defaults.
+  if (layoutError) {
+    return (
+      <div className="settings-row">
+        <span className="settings-label">Touch keys</span>
+        <div className="touch-key-layout-error-details" role="alert">
+          <strong>The layout above can't be used, so the key bar shows no keys until it's fixed.</strong>
+          {"\n"}
+          {layoutError}
+        </div>
+        <div className="touch-key-editor-buttons">
+          <button type="button" className="dialog-button secondary" onClick={restoreDefaultKeys}>
+            Restore default keys
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="settings-row">

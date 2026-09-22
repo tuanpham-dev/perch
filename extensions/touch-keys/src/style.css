@@ -289,3 +289,24 @@
     overflow-wrap: anywhere;
   }
 }
+
+/* A broken touchKeys.keys layout (layout.mjs): a one-line notice in the bar
+   or the floating cluster, and the full list of problems in the editor. */
+.touch-key-layout-error {
+  align-self: center;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--error, #e05252);
+  white-space: nowrap;
+}
+
+.touch-key-layout-error-details {
+  flex-basis: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--error, #e05252);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--error, #e05252);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

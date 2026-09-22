@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { TouchKey } from "./touchKeys";
-import { TouchKeyButton, visibleKeys } from "./TouchKeyBar";
+import { TouchKeyButton, TouchKeyLayoutError, visibleKeys } from "./TouchKeyBar";
 
 interface Props {
   visible: boolean;
   keys: TouchKey[];
+  // See TouchKeyBar's layoutError: shown in the cluster in place of keys.
+  layoutError?: string | null;
   currentCommand: string;
   stickyCtrl: boolean;
   onToggleStickyCtrl: () => void;
@@ -82,6 +84,7 @@ function nextOpenUp(openUp: boolean, clusterHeight: number, spaceAbove: number, 
 export default function FloatingTouchKeys({
   visible,
   keys,
+  layoutError,
   currentCommand,
   stickyCtrl,
   onToggleStickyCtrl,
@@ -210,7 +213,7 @@ export default function FloatingTouchKeys({
 
   return createPortal(
     <>
-      {expanded && shown.length > 0 && (
+      {expanded && (shown.length > 0 || layoutError) && (
         <div
           ref={clusterRef}
           className="touch-key-fab-cluster"
@@ -223,6 +226,7 @@ export default function FloatingTouchKeys({
             top: `${clusterTop}px`,
           }}
         >
+          {layoutError && <TouchKeyLayoutError />}
           {shown.map(({ key, data }, i) => (
             <TouchKeyButton
               key={i}

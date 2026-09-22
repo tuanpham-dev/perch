@@ -6,6 +6,9 @@ import { isVoiceInputSupported, VoiceInput } from "./voiceInput";
 interface Props {
   visible: boolean;
   keys: TouchKey[];
+  // Set when the stored layout is broken (see layout.mjs): the bar says so
+  // in place of keys, rather than showing a layout the user didn't choose.
+  layoutError?: string | null;
   // Pushed by the server's attach watcher; gates each key's `when`. See
   // TerminalView's "command" WS message handling.
   currentCommand: string;
@@ -285,9 +288,21 @@ export function TouchKeyButton({
 // Onscreen keys a mobile keyboard can't send (Esc, Tab, arrows, Ctrl+C by
 // default) plus sticky Ctrl — fully user-customizable via Settings > UI
 // (touchKeys.ts). Renders nothing when no key currently matches `when`.
+// What the bar and the floating cluster show in place of keys while the
+// stored layout is broken. The details (which key, which field) are in the
+// layout editor, where there's room for them and where the fix happens.
+export function TouchKeyLayoutError() {
+  return (
+    <span className="touch-key-layout-error">
+      Touch keys layout is invalid - see Settings, Touch Keys
+    </span>
+  );
+}
+
 export default function TouchKeyBar({
   visible,
   keys,
+  layoutError,
   currentCommand,
   stickyCtrl,
   onToggleStickyCtrl,
@@ -296,6 +311,13 @@ export default function TouchKeyBar({
   onUploadImages,
 }: Props) {
   if (!visible) return null;
+  if (layoutError) {
+    return (
+      <div className="touch-key-bar">
+        <TouchKeyLayoutError />
+      </div>
+    );
+  }
   const shown = visibleKeys(keys, currentCommand);
   if (shown.length === 0) return null;
 
