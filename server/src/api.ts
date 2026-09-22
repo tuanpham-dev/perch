@@ -866,17 +866,17 @@ api.get("/tunnel-auth", (req, res) => {
 });
 
 // What the app needs to say whether a port is reachable at localhost:<port>
-// FOR THE MACHINE ASKING: whether a tunnel client on that machine is
-// connected, which ports it reports having bound, and whether that covers
-// everything currently listening. Scoped per-machine because the answer
-// drives a localhost link and a "forwarded" marker, and a tunnel someone
-// else is running makes neither of those true here (see wsTunnel's
-// sameMachineKey). `allForwarded` is the honest form of "all forwarded" —
+// FOR THE BROWSER ASKING (?client=<its id>): whether a tunnel started from
+// its command is connected, which ports it reports having bound, and whether
+// that covers everything currently listening. Scoped per-browser because the
+// answer drives a localhost link and a "forwarded" marker, and a tunnel
+// someone else is running makes neither of those true here (see wsTunnel's
+// tunnelStatus). `allForwarded` is the honest form of "all forwarded" —
 // --all skips a port it cannot bind locally, so a connected tunnel is not a
 // complete one.
 api.get("/tunnel-status", async (req, res) => {
   try {
-    const status = tunnelStatus(req.socket.remoteAddress);
+    const status = tunnelStatus(typeof req.query.client === "string" ? req.query.client : null);
     const listening = await getTunnelablePorts();
     const forwarded = new Set(status.ports);
     res.json({

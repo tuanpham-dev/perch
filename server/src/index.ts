@@ -297,11 +297,11 @@ server.on("upgrade", (req, socket, head) => {
       handleAttach(ws, req);
     });
   } else if (pathname === "/ws/tunnel") {
-    // The address the client reached us from is what pairs it with the
-    // browser on the same machine — see wsTunnel's sameMachineKey.
-    const address = (socket as net.Socket).remoteAddress ?? null;
+    // The id of the browser whose command started this tunnel, which is
+    // what pairs the two - see wsTunnel's tunnelStatus.
+    const client = searchParams.get("client");
     wss.handleUpgrade(req, socket, head, (ws) => {
-      handleTunnel(ws, address);
+      handleTunnel(ws, client);
     });
   } else if (subdomainPort !== null) {
     if (subdomainPort === PORT) {

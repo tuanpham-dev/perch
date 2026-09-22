@@ -62,50 +62,51 @@ function errCode(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// Every connected tunnel client, the ports it says it has bound, and where
-// it connected from. The server has no other way to know the ports: channels
-// only open when a local connection actually arrives, so they say nothing
-// about what is merely listening. Module-level because /api/tunnel-status
-// reads it from outside any one socket's closure.
-const tunnels = new Map<WebSocket, { ports: Set<number>; address: string | null }>();
+// Every connected tunnel client, the ports it says it has bound, and which
+// browser it was started for. The server has no other way to know the ports:
+// channels only open when a local connection actually arrives, so they say
+// nothing about what is merely listening. Module-level because
+// /api/tunnel-status reads it from outside any one socket's closure.
+const tunnels = new Map<WebSocket, { ports: Set<number>; client: string | null }>();
 
 // "Is this port reachable at localhost for the person asking?" is the only
 // question the status answers, and the answer is per-machine: a tunnel
-// running on someone else's laptop does nothing for this browser. The two
-// are matched on the address they reached the server from, which needs
-// nothing of the tunnel CLI (an already-running one keeps working) — an
-// IPv4-mapped IPv6 address and the two spellings of loopback are folded
-// together so a local browser and a local tunnel agree they're the same
-// machine. Behind a reverse proxy every client arrives as the proxy, so
-// there the question can't be answered any more finely than before.
-function sameMachineKey(address: string | null | undefined): string | null {
-  if (!address) return null;
-  const plain = address.startsWith("::ffff:") ? address.slice("::ffff:".length) : address;
-  return plain === "::1" ? "127.0.0.1" : plain;
+// running on someone else's laptop does nothing for this browser. Matching
+// on the address both reached the server from can't tell machines apart
+// behind a reverse proxy, where everyone arrives as the proxy - so a tunnel
+// anywhere lit up every browser. Instead the browser keeps a random id of its
+// own, the command it hands out passes it (--client), and the CLI sends it
+// back on connect: a tunnel counts only for the browser whose command
+// started it. A tunnel with no id (an older CLI, a hand-typed command) counts
+// for no one; re-copying the command picks the id up.
+const CLIENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function parseTunnelClientId(value: string | null | undefined): string | null {
+  return value && CLIENT_ID_RE.test(value) ? value : null;
 }
 
 export interface TunnelStatus {
   connected: boolean;
-  // The union across every client on the asking machine.
+  // The union across every tunnel started for the asking browser.
   ports: number[];
 }
 
-/** The tunnel state as it looks from `address` — see sameMachineKey. */
-export function tunnelStatus(address: string | null | undefined): TunnelStatus {
-  const key = sameMachineKey(address);
+/** The tunnel state as the browser holding `client` sees it. */
+export function tunnelStatus(client: string | null | undefined): TunnelStatus {
+  const id = parseTunnelClientId(client);
   const ports = new Set<number>();
   let connected = false;
   for (const tunnel of tunnels.values()) {
-    if (key === null || sameMachineKey(tunnel.address) !== key) continue;
+    if (id === null || tunnel.client !== id) continue;
     connected = true;
     for (const port of tunnel.ports) ports.add(port);
   }
   return { connected, ports: [...ports].sort((a, b) => a - b) };
 }
 
-export function handleTunnel(ws: WebSocket, address: string | null): void {
+export function handleTunnel(ws: WebSocket, client: string | null): void {
   const channels = new Map<number, Channel>();
-  tunnels.set(ws, { ports: new Set(), address });
+  tunnels.set(ws, { ports: new Set(), client: parseTunnelClientId(client) });
   // Channel ids with a terminal-ownership check in flight — guards against a
   // duplicate FRAME_OPEN for the same id (channels.has(id) can't catch it,
   // since the channel isn't created until the check resolves).
@@ -255,7 +256,21 @@ export function handleTunnel(ws: WebSocket, address: string | null): void {
     }
   };
 
+  // A tunnel whose CLI was stopped without a clean close (a laptop asleep,
+  // a network change, a proxy that holds the upstream socket open) would
+  // otherwise stay registered, and keep saying "forwarded", until the OS
+  // gave up on the TCP connection. The CLI answers every ping, so a whole
+  // interval with no pong means it's gone.
+  let alive = true;
+  ws.on("pong", () => {
+    alive = true;
+  });
   const pingTimer = setInterval(() => {
+    if (!alive) {
+      ws.terminate();
+      return;
+    }
+    alive = false;
     if (ws.readyState === WebSocket.OPEN) ws.ping();
   }, 30_000);
 

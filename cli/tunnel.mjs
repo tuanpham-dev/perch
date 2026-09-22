@@ -173,7 +173,7 @@ class FrameParser {
   }
 }
 
-function connectWebSocket(urlStr, headers) {
+function connectWebSocket(urlStr, headers, client) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
     const isTls = url.protocol === "https:" || url.protocol === "wss:";
@@ -191,7 +191,9 @@ function connectWebSocket(urlStr, headers) {
     const req = mod.request({
       hostname: url.hostname,
       port: url.port || (isTls ? 443 : 80),
-      path: `${url.pathname === "/" ? "" : url.pathname}/ws/tunnel`,
+      // ?client= names the browser whose command started this tunnel, so the
+      // app shows it as forwarded there and nowhere else.
+      path: `${url.pathname === "/" ? "" : url.pathname}/ws/tunnel${client ? `?client=${encodeURIComponent(client)}` : ""}`,
       headers: reqHeaders,
     });
 
@@ -262,9 +264,10 @@ function httpGetJson(urlStr, apiPath, headers) {
 // --- Mux layer -----------------------------------------------------------
 
 class WsTunnel {
-  constructor(urlStr, headers) {
+  constructor(urlStr, headers, client) {
     this.urlStr = urlStr;
     this.headers = headers;
+    this.client = client;
     this.socket = null;
     this.parser = null;
     this.channels = new Map();
@@ -287,7 +290,7 @@ class WsTunnel {
   }
 
   async _connect() {
-    const { socket, head } = await connectWebSocket(this.urlStr, this.headers);
+    const { socket, head } = await connectWebSocket(this.urlStr, this.headers, this.client);
     this.socket = socket;
     this.parser = new FrameParser((opcode, payload) => this._onWsFrame(opcode, payload));
     socket.on("data", (chunk) => this.parser.push(chunk));
@@ -466,7 +469,12 @@ const AUTO_POLL_MS = 3000;
 
 function startAutoForward(tunnel, urlStr, headers, skipPorts) {
   const active = new Map(); // remote port -> local net.Server
-  const reportBound = () => tunnel.reportPorts([...active.keys()].filter((p) => !bindFailed.has(p)));
+  // Ports whose local listener is actually up. Not `active`: a listener is
+  // added there before its bind resolves, and a port that can't be bound is
+  // retried (and re-added) on every poll, so reporting `active` marked
+  // unbindable ports forwarded.
+  const bound = new Set();
+  const reportBound = () => tunnel.reportPorts([...bound]);
   const bindFailed = new Set(); // local bind failures already reported
   let lastFetchError = null;
 
@@ -497,9 +505,14 @@ function startAutoForward(tunnel, urlStr, headers, skipPorts) {
       const label = `${entry.process ?? "?"} in ${entry.session}`;
       const server = tunnel.forward(port, port, {
         label,
-        onListen: () => bindFailed.delete(port),
+        onListen: () => {
+          bindFailed.delete(port);
+          bound.add(port);
+          reportBound();
+        },
         onListenError: (err) => {
           active.delete(port);
+          if (bound.delete(port)) reportBound();
           if (!bindFailed.has(port)) {
             bindFailed.add(port);
             console.error(`skipping ${port} (${label}): cannot listen locally: ${err.message}`);
@@ -512,6 +525,7 @@ function startAutoForward(tunnel, urlStr, headers, skipPorts) {
     for (const [port, server] of active) {
       if (!current.has(port)) {
         active.delete(port);
+        bound.delete(port);
         server.close();
         console.log(`localhost:${port} closed (no longer listening on server)`);
       }
@@ -520,9 +534,10 @@ function startAutoForward(tunnel, urlStr, headers, skipPorts) {
     for (const port of bindFailed) {
       if (!current.has(port)) bindFailed.delete(port);
     }
-    // Only ports actually bound: a port in bindFailed is listening on the
-    // server but NOT reachable at localhost here, and reporting it would put
-    // a "forwarded" marker on a dead link.
+    // Only ports actually bound (see `bound`): one that failed is listening
+    // on the server but NOT reachable at localhost here, and reporting it
+    // would put a "forwarded" marker on a dead link. Re-sent every poll so a
+    // vanished port's withdrawal lands too.
     reportBound();
   };
 
@@ -536,12 +551,14 @@ function startAutoForward(tunnel, urlStr, headers, skipPorts) {
 
 function printUsage() {
   console.error(
-    "Usage: node tunnel.mjs [--url http://host:port] [--header 'Name: value']... [--all] [<spec>...]\n" +
+    "Usage: node tunnel.mjs [--url http://host:port] [--header 'Name: value']... [--client ID] [--all] [<spec>...]\n" +
       "  spec = PORT            forward localhost:PORT -> remote 127.0.0.1:PORT\n" +
       "       | LOCAL:REMOTE    forward localhost:LOCAL -> remote 127.0.0.1:REMOTE\n" +
       "  --all                  forward every port listening inside the server's terminals\n" +
       "                         sessions; polls so new ports are picked up and vanished\n" +
-      "                         ones closed without restarting",
+      "                         ones closed without restarting\n" +
+      "  --client ID            the browser this tunnel is for, so it shows as forwarded\n" +
+      "                         there (the app's copied command fills it in)",
   );
 }
 
@@ -568,6 +585,7 @@ function parseSpec(spec) {
 function parseArgs(argv) {
   let url = process.env.PERCH_URL || "http://127.0.0.1:3001";
   let all = false;
+  let client = null;
   const headers = {};
   const specs = [];
   for (let i = 0; i < argv.length; i++) {
@@ -576,6 +594,8 @@ function parseArgs(argv) {
       url = argv[++i];
     } else if (arg === "--all") {
       all = true;
+    } else if (arg === "--client") {
+      client = argv[++i] ?? null;
     } else if (arg === "--header") {
       const raw = argv[++i] ?? "";
       const idx = raw.indexOf(":");
@@ -589,7 +609,7 @@ function parseArgs(argv) {
     }
   }
   if (specs.length === 0 && !all) throw new Error("no port specs given (or use --all)");
-  return { url, headers, specs, all };
+  return { url, headers, specs, all, client };
 }
 
 function main() {
@@ -602,7 +622,7 @@ function main() {
     process.exit(1);
   }
 
-  const tunnel = new WsTunnel(args.url, args.headers);
+  const tunnel = new WsTunnel(args.url, args.headers, args.client);
   // Report a spec's remote port only once its local listener is actually up
   // (and withdraw it if the bind fails) — the same rule --all follows, so
   // the app never marks a port reachable at a localhost address that isn't
