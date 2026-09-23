@@ -13,6 +13,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { readSettingsDoc } from "./settingsStore.js";
 
 const GIT_TIMEOUT = 15000;
 
@@ -229,7 +230,11 @@ async function ensureExcluded(repo: string, target: string): Promise<void> {
   const rel = path.relative(repo, target);
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return;
   const top = rel.split(path.sep)[0];
-  const pattern = rel === top ? `/${top}` : `/${top}/`;
+  await appendExcludes(repo, [rel === top ? `/${top}` : `/${top}/`]);
+}
+
+// Appends each pattern not already present to the shared info/exclude.
+async function appendExcludes(repo: string, patterns: string[]): Promise<void> {
   let excludeFile: string;
   try {
     excludeFile = path.join(await gitCommonDir(repo), "info", "exclude");
@@ -242,11 +247,13 @@ async function ensureExcluded(repo: string, target: string): Promise<void> {
   } catch {
     // No info/exclude yet (or unreadable) — created below.
   }
-  if (current.split("\n").some((line) => line.trim() === pattern)) return;
+  const existing = new Set(current.split("\n").map((line) => line.trim()));
+  const missing = patterns.filter((p, i) => !existing.has(p) && patterns.indexOf(p) === i);
+  if (missing.length === 0) return;
   try {
     fs.mkdirSync(path.dirname(excludeFile), { recursive: true });
     const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
-    fs.appendFileSync(excludeFile, `${prefix}${pattern}\n`);
+    fs.appendFileSync(excludeFile, `${prefix}${missing.join("\n")}\n`);
   } catch {
     // Best-effort: a read-only .git shouldn't block creating the worktree.
   }
@@ -266,6 +273,104 @@ function pruneEmptyContainer(repo: string, worktreePath: string): void {
   } catch {
     // Not empty, not there, or not ours to remove — nothing to clean up.
   }
+}
+
+// ---- Carry-over ----
+//
+// A fresh worktree has only tracked files, so the things a checkout needs but
+// git ignores (.env, node_modules, a .backups folder) are missing. The
+// worktreeCarryOver setting lists them as paths relative to the repo root;
+// each one the MAIN worktree has and ignores is symlinked into the new
+// worktree. Anything else on the list is left alone.
+
+// Trims, strips "./" and a trailing "/", and refuses anything that could
+// reach outside the repo (absolute paths, ".." segments). The setting is
+// user-editable on disk, so this runs even though the client normalizes too.
+export function normalizeCarryOverPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") continue;
+    let p = raw.trim().replace(/\\/g, "/");
+    while (p.startsWith("./")) p = p.slice(2);
+    p = p.replace(/\/+$/, "");
+    if (!p || p.startsWith("/") || path.isAbsolute(p)) continue;
+    if (p.split("/").includes("..")) continue;
+    if (!out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
+async function ignoredPaths(repo: string, paths: string[]): Promise<Set<string> | null> {
+  return new Promise((resolve) => {
+    execFile(
+      "git",
+      ["check-ignore", "--", ...paths],
+      { cwd: repo, encoding: "utf8", timeout: GIT_TIMEOUT },
+      (err, stdout, stderr) => {
+        // Exit 1 is "nothing is ignored", a normal answer.
+        if (err && (err as { code?: unknown }).code !== 1) {
+          console.warn("worktree carry-over: git check-ignore failed:", stderr.trim() || err.message);
+          resolve(null);
+          return;
+        }
+        resolve(new Set(stdout.split("\n").map((l) => l.trim().replace(/\/+$/, "")).filter(Boolean)));
+      },
+    );
+  });
+}
+
+// Links each listed path that `repo` ignores into `target`, in list order.
+// Best effort throughout: a path that is tracked, missing in the repo, or
+// already present in the worktree is skipped, and a link that can't be made
+// is logged, never thrown - the checkout already exists and must open.
+export async function carryOverIgnored(repo: string, target: string, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  const ignored = await ignoredPaths(repo, paths);
+  if (!ignored) return;
+  const linked: string[] = [];
+  for (const p of paths) {
+    if (!ignored.has(p)) continue;
+    try {
+      const source = path.join(repo, p);
+      let isDir: boolean;
+      try {
+        isDir = fs.statSync(source).isDirectory();
+      } catch {
+        continue;
+      }
+      const dest = path.join(target, p);
+      try {
+        fs.lstatSync(dest);
+        continue;
+      } catch {
+        // Nothing there yet - the only case that gets a link.
+      }
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.symlinkSync(source, dest, isDir ? "dir" : "file");
+      linked.push(p);
+    } catch (err) {
+      console.warn(`worktree carry-over skipped ${p}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  // git sees a symlink as a file, so a folder-only pattern ("node_modules/")
+  // that ignored the real folder doesn't match the link to it, and the link
+  // would show up as untracked. Those get an exact entry in info/exclude,
+  // which every worktree shares and which already ignored them in the main
+  // one - the committed .gitignore is never touched.
+  if (linked.length === 0) return;
+  const stillIgnored = await ignoredPaths(target, linked);
+  if (!stillIgnored) return;
+  await appendExcludes(
+    repo,
+    linked.filter((p) => !stillIgnored.has(p)).map((p) => `/${p}`),
+  );
+}
+
+async function carryOverSetting(): Promise<string[]> {
+  const settings = (await readSettingsDoc()).settings;
+  if (!settings || typeof settings !== "object") return [];
+  return normalizeCarryOverPaths((settings as Record<string, unknown>).worktreeCarryOver);
 }
 
 // Thrown by createWorktree/removeWorktree so the route can map a refusal to
@@ -288,6 +393,9 @@ export async function createWorktree(opts: {
   base?: string;
   mode: "new" | "existing";
   location?: string;
+  // Paths to link from the main worktree; defaults to the worktreeCarryOver
+  // setting, so an extension's create gets the same links as the tree's.
+  carryOver?: string[];
 }): Promise<{ path: string; branch: string }> {
   const branch = opts.branch.trim();
   if (!branch) throw new WorktreeError("a branch name is required", 400);
@@ -306,6 +414,8 @@ export async function createWorktree(opts: {
       ? ["worktree", "add", target, branch]
       : ["worktree", "add", "-b", branch, target, ...(base ? [base] : [])];
   await git(args, repo);
+  const carryOver = opts.carryOver ? normalizeCarryOverPaths(opts.carryOver) : await carryOverSetting();
+  await carryOverIgnored(repo, target, carryOver);
   return { path: target, branch };
 }
 
