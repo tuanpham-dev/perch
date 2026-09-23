@@ -214,6 +214,10 @@ export interface AppSettings {
   // inside the repository, its top folder is added to .git/info/exclude so it
   // stays out of git status (your committed .gitignore is never modified).
   worktreeLocation: string;
+  // Paths relative to the repository root that git ignores but a checkout
+  // needs (.env, node_modules). The server symlinks each one the main
+  // worktree has and ignores into every new worktree; the rest are skipped.
+  worktreeCarryOver: string[];
   // How far the Ports listing reaches past the terminals that are still
   // open. The proxy and the tunnel serve exactly what it lists, so this is
   // also the allowlist for both.
@@ -374,6 +378,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pasteDropUploadDir: "{tmp}",
   localEchoWhen: "claude",
   worktreeLocation: "{repo}/.worktrees/{branch}",
+  worktreeCarryOver: [],
   portScope: "launched",
   aiProfiles: [],
   aiProfileId: "",
@@ -428,6 +433,10 @@ function appliedSettingsMigrations(): string[] {
 
 export function migrateSettings(settings: AppSettings): AppSettings {
   const next = { ...settings };
+  // A hand-edited or older document could hold anything here.
+  next.worktreeCarryOver = Array.isArray(next.worktreeCarryOver)
+    ? next.worktreeCarryOver.filter((p): p is string => typeof p === "string")
+    : [];
   if (next.colorTheme === "") next.colorTheme = DEFAULT_SETTINGS.colorTheme;
   if (next.iconTheme === "") next.iconTheme = DEFAULT_SETTINGS.iconTheme;
   if (next.fontFamily === LEGACY_DEFAULT_FONT_FAMILY) next.fontFamily = DEFAULT_SETTINGS.fontFamily;

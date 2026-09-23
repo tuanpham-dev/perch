@@ -4651,6 +4651,29 @@ body.scrollbar-dragging {
   cursor: pointer;
 }
 
+/* A plain list row (no expander): the path takes the slack, Remove holds the
+   right end. */
+.settings-entry-path {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono-font, monospace);
+  font-size: 13px;
+}
+
+.settings-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-add-row .dialog-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .settings-entry-name > span:first-of-type {
   overflow: hidden;
   text-overflow: ellipsis;

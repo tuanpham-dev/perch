@@ -814,6 +814,9 @@ export interface ExtensionHostApi {
       base?: string;
       mode: "new" | "existing";
       location?: string;
+      // Ignored paths to symlink in from the main worktree; defaults to the
+      // "Carry into new worktrees" setting.
+      carryOver?: string[];
     }): Promise<{ path: string; branch: string }>;
     // Removes the checkout, keeping the branch. Never the main worktree.
     remove(opts: { cwd: string; path: string; force?: boolean }): Promise<{ removed: string }>;

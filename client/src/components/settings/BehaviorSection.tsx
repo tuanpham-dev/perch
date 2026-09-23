@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchShellIntegrationStatus } from "../../api";
 import { copyText } from "../../clipboard";
+import { normalizeCarryOverPath } from "../../lib/carryOverPaths";
+import Icon from "../Icon";
 import {
   disablePush,
   enablePush,
@@ -124,6 +126,81 @@ function ShellIntegrationCard() {
   );
 }
 
+// The "Carry into new worktrees" list: one row per path with a remove button
+// at its right end, and an input that adds to the end of the list.
+function CarryOverList() {
+  const { settings, set } = useSettingsContext();
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const paths = settings.worktreeCarryOver;
+
+  const add = () => {
+    const p = normalizeCarryOverPath(draft);
+    if (p === null) {
+      setError(draft.trim() ? "Use a path relative to the repository root, without '..'." : "");
+      return;
+    }
+    setError("");
+    setDraft("");
+    if (!paths.includes(p)) set("worktreeCarryOver", [...paths, p]);
+  };
+
+  return (
+    <div className="settings-row">
+      <span className="settings-label">Carry into new worktrees</span>
+      <div className="settings-hint">
+        Paths relative to the repository root that git ignores but a checkout needs, such as .env or
+        node_modules. Each one is symlinked from the repository&apos;s main worktree into a new worktree. A
+        path that is not ignored, or does not exist there, is skipped.
+      </div>
+      {paths.length > 0 && (
+        <div className="settings-entry-list">
+          {paths.map((p) => (
+            <div key={p} className="settings-entry">
+              <div className="settings-entry-head">
+                <span className="settings-entry-path" title={p}>
+                  {p}
+                </span>
+                <button
+                  className="icon-button"
+                  title="Remove"
+                  aria-label={`Remove ${p}`}
+                  onClick={() => set("worktreeCarryOver", paths.filter((q) => q !== p))}
+                >
+                  <Icon name="trash" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="settings-add-row">
+        <input
+          id="worktree-carry-over-input"
+          className="dialog-input"
+          placeholder="node_modules"
+          aria-label="Path to carry into new worktrees"
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (error) setError("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button className="dialog-button secondary" onClick={add} disabled={!draft.trim()}>
+          Add
+        </button>
+      </div>
+      {error && <div className="settings-hint settings-error">{error}</div>}
+    </div>
+  );
+}
+
 export default function BehaviorSection() {
   const { settings, set } = useSettingsContext();
 
@@ -188,6 +265,8 @@ export default function BehaviorSection() {
           onChange={(e) => set("worktreeLocation", e.target.value)}
         />
       </label>
+
+      <CarryOverList />
 
       <label className="settings-row">
         <span className="settings-label">Ports to list</span>
