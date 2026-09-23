@@ -616,11 +616,22 @@ export default function Sidebar({
   // at drag start, clamped so neither panel shrinks below MIN_PANEL_HEIGHT;
   // only these two panels' weights change, so any other expanded panel's
   // share of the remaining space is undisturbed.
+  //
+  // Every expanded panel is seeded, not just those two: a panel that has
+  // never been dragged has no stored size and renders at weight 1, while a
+  // dragged one carries a pixel height (a few hundred). Mixing the two
+  // units made the first drag in a tab of three or more panels squash the
+  // untouched ones to a sliver - they jumped instead of staying put. Seeded
+  // from what's on screen, so it changes nothing by itself.
   const startPanelResize = (e: React.PointerEvent, aId: PanelId, bId: PanelId) => {
     e.preventDefault();
     const aEl = panelRefs.current[aId];
     const bEl = panelRefs.current[bId];
     if (!aEl || !bEl) return;
+    const seeded: Record<string, number> = {};
+    for (const [id, el] of Object.entries(panelRefs.current)) {
+      if (el && !isPanelCollapsed(id as PanelId)) seeded[id] = el.getBoundingClientRect().height;
+    }
     const startHeightA = aEl.getBoundingClientRect().height;
     const startHeightB = bEl.getBoundingClientRect().height;
     const totalHeight = startHeightA + startHeightB;
@@ -637,7 +648,7 @@ export default function Sidebar({
       const newHeightB = totalHeight - newHeightA;
       setPanelState((prev) => ({
         ...prev,
-        sizes: { ...prev.sizes, [aId]: newHeightA, [bId]: newHeightB },
+        sizes: { ...prev.sizes, ...seeded, [aId]: newHeightA, [bId]: newHeightB },
       }));
     };
     const end = (ev: PointerEvent) => {
