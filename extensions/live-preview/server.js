@@ -1,10 +1,10 @@
 // Server hook for the live-preview extension — serves an HTML file (and its
-// sibling assets) by absolute path, and reports the max mtime of that folder
-// for the client's reload-on-change poll. Plain ESM: the server runs under
+// sibling assets) by absolute path, and reports the mtimes of the files the
+// preview has actually loaded for the client's reload-on-change poll. Plain ESM: the server runs under
 // tsx in both dev and prod (see server/package.json), so no build step is
 // needed here, unlike the client entry (see extensions/build.mjs).
 import { randomBytes } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 // Injected into HTML responses so the previewed page can report its scroll
@@ -164,6 +164,28 @@ function resolveWithinRoot(root, relPath) {
 const dirTokens = new Map();
 const tokenDirs = new Map();
 
+// token -> the root-relative paths the preview has requested through
+// /public/serve: the HTML, and every stylesheet, script, image or fetch it
+// made. These, and only these, are what the reload poll watches. Watching
+// the whole folder reloaded the page whenever anything else in it changed -
+// a log, an agent's notes, a build writing next door - and a reload throws
+// away the page's own state (an open popup, a filled form) every few
+// seconds. A path that 404ed is kept too, so creating it reloads the page
+// that wanted it. Shared by every preview of the same folder, since they
+// share the token; capped so a page that fetches endlessly-new URLs can't
+// grow it without bound.
+const servedPaths = new Map();
+const MAX_WATCHED = 500;
+
+function noteServed(token, relPath) {
+  let paths = servedPaths.get(token);
+  if (!paths) {
+    paths = new Set();
+    servedPaths.set(token, paths);
+  }
+  if (paths.size < MAX_WATCHED) paths.add(relPath);
+}
+
 export function activate({ router }) {
   // Origin-checked normally (not under /public/) — see
   // server/src/security.ts's isOriginExemptPath for why that matters: this
@@ -208,6 +230,7 @@ export function activate({ router }) {
       res.status(400).json({ error: "path escapes preview root" });
       return;
     }
+    noteServed(req.params.token, path.relative(root, target));
     // ORB (Chrome's Opaque Response Blocking) requires an explicit opt-in
     // for subresource loads made from an opaque-origin (sandboxed iframe)
     // context, even when served by this same process. Module scripts
@@ -237,23 +260,26 @@ export function activate({ router }) {
     });
   });
 
+  // Each watched file's mtime, -1 when it doesn't exist. The client reloads
+  // when a file it saw before now reads differently; a path that is new to
+  // the list is just the page loading something, not a change.
   router.get("/public/mtime", async (req, res) => {
-    const dir = tokenDirs.get(typeof req.query.token === "string" ? req.query.token : "");
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    const dir = tokenDirs.get(token);
     if (!dir) {
       res.status(404).json({ error: "unknown or expired preview" });
       return;
     }
-    try {
-      const entries = await readdir(dir, { withFileTypes: true });
-      let max = 0;
-      for (const entry of entries) {
-        if (!entry.isFile() || entry.name === ".git") continue;
-        const s = await stat(path.join(dir, entry.name));
-        if (s.mtimeMs > max) max = s.mtimeMs;
-      }
-      res.json({ mtime: max });
-    } catch {
-      res.status(400).json({ error: "cannot read directory" });
-    }
+    const files = {};
+    await Promise.all(
+      [...(servedPaths.get(token) ?? [])].map(async (relPath) => {
+        try {
+          files[relPath] = (await stat(path.join(dir, relPath))).mtimeMs;
+        } catch {
+          files[relPath] = -1;
+        }
+      }),
+    );
+    res.json({ files });
   });
 }

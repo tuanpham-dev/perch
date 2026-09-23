@@ -13,14 +13,14 @@
         "livePreview.autoRefresh": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically reload the preview when the HTML file or a sibling file in its folder changes."
+          "description": "Automatically reload the preview when the HTML file or anything it loaded (stylesheets, scripts, images, fetched files) changes. Other files in the folder can change without reloading it."
         },
         "livePreview.pollInterval": {
           "type": "integer",
           "default": 1000,
           "minimum": 250,
           "maximum": 10000,
-          "description": "How often (ms) to check the previewed folder for changes when auto-refresh is on."
+          "description": "How often (ms) to check the previewed files for changes when auto-refresh is on."
         },
         "livePreview.sendAutoSubmit": {
           "type": "boolean",
