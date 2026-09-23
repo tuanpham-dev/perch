@@ -181,7 +181,8 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor }: Props) {
   const [reloadTick, setReloadTick] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
   const [pollInterval, setPollInterval] = useState(readPollInterval);
-  const lastMtime = useRef<number | null>(null);
+  // Watched file -> mtime as of the last poll (see server.js's servedPaths).
+  const lastMtimes = useRef<Record<string, number>>({});
   const scrollRef = useRef<[number, number] | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -222,6 +223,7 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor }: Props) {
     let cancelled = false;
     setToken(null);
     setError(null);
+    lastMtimes.current = {};
     setActivePick(null);
     setPickComment("");
     setPendingComments([]);
@@ -244,20 +246,24 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor }: Props) {
     };
   }, [dir]);
 
-  // Reload-on-change poll — shallow (the HTML's own folder only, not
-  // subfolders), only while this tab is visible and autoRefresh is on. No
-  // general file-watcher exists in this app; this is a deliberate tradeoff
-  // (see plans/live-preview-extension.md).
+  // Reload-on-change poll over the files the preview actually loaded (the
+  // HTML and whatever it requested, subfolders included), only while this
+  // tab is visible and autoRefresh is on. Anything else in the folder can
+  // change without resetting the page. No general file-watcher exists in
+  // this app; this is a deliberate tradeoff (see plans/live-preview-extension.md).
   useEffect(() => {
     if (!active || !autoRefresh || !token) return;
     let cancelled = false;
     const poll = () => {
       fetch(`${hookBase}/public/mtime?token=${token}`)
         .then((res) => res.json())
-        .then((data: { mtime?: number }) => {
-          if (cancelled || typeof data.mtime !== "number") return;
-          if (lastMtime.current !== null && data.mtime !== lastMtime.current) refresh();
-          lastMtime.current = data.mtime;
+        .then((data: { files?: Record<string, number> }) => {
+          if (cancelled || !data.files) return;
+          const seen = lastMtimes.current;
+          // A path missing from `seen` is newly loaded, not changed.
+          const changed = Object.entries(data.files).some(([rel, mtime]) => rel in seen && seen[rel] !== mtime);
+          lastMtimes.current = data.files;
+          if (changed) refresh();
         })
         .catch(() => {
           // Transient fetch failure — next tick retries; no need to surface.
