@@ -99,9 +99,19 @@ export interface FsEntry {
 
 export async function listDir(dirPath: string): Promise<FsEntry[]> {
   const entries = await readdir(dirPath, { withFileTypes: true });
-  return entries
-    .filter((e) => e.name !== ".git")
-    .map((e) => ({ name: e.name, dir: e.isDirectory() }))
+  // A dirent reports a symlink as a symlink, whatever it points at, so a
+  // linked folder (a `.backups -> /elsewhere` link, say) would list as a file
+  // and never expand. Resolve those through stat, which follows the link; a
+  // dangling one stays a file.
+  const listed = await Promise.all(
+    entries
+      .filter((e) => e.name !== ".git")
+      .map(async (e) => ({
+        name: e.name,
+        dir: e.isSymbolicLink() ? await isDirectory(path.join(dirPath, e.name)) : e.isDirectory(),
+      })),
+  );
+  return listed
     .sort((a, b) => {
       if (a.dir !== b.dir) return a.dir ? -1 : 1;
       return a.name.localeCompare(b.name);
