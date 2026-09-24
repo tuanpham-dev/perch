@@ -21,6 +21,11 @@ import { findAgent, listAgents, oneShotArgs, probeAgentPrograms } from "./agents
 import { readAiSecrets, readSettingsDoc } from "./settingsStore.js";
 
 const TIMEOUT_MS = 60_000;
+// The ceiling a caller may raise the wait to with AiRunOptions.timeoutMs. A
+// job that legitimately runs for minutes — a CLI agent asked to read a
+// repository before answering — needs more than the default, but an unbounded
+// wait turns one mistyped number into a request that never returns.
+const MAX_TIMEOUT_MS = 15 * 60_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 // Long enough for a commit message or a refined prompt; this is a one-shot
 // text call, not a conversation.
@@ -303,12 +308,19 @@ export async function probeCliProviders(): Promise<Record<string, boolean>> {
   return value;
 }
 
-function runCli(bin: string, args: string[], provider: string, cwd?: string, env?: Record<string, string>): Promise<string> {
+function runCli(
+  bin: string,
+  args: string[],
+  provider: string,
+  cwd?: string,
+  env?: Record<string, string>,
+  timeoutMs: number = TIMEOUT_MS,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       bin,
       args,
-      { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER, cwd, env: env ? { ...process.env, ...env } : undefined },
+      { encoding: "utf8", timeout: timeoutMs, maxBuffer: MAX_BUFFER, cwd, env: env ? { ...process.env, ...env } : undefined },
       (err, stdout, stderr) => {
         if (err) {
           const detail = (stderr || err.message || "").trim().slice(0, 300);
@@ -317,6 +329,18 @@ function runCli(bin: string, args: string[], provider: string, cwd?: string, env
               new AiError(
                 "missing-binary",
                 `CLI "${bin}" not found - install it, or pick another AI in Settings → AI Providers`,
+              ),
+            );
+            return;
+          }
+          // execFile's own timeout kills the child, and the generic "CLI
+          // failed" wording hid that. A caller that raised the wait needs to
+          // know WHICH limit it hit before it can offer a shorter job instead.
+          if ((err as { killed?: boolean }).killed) {
+            reject(
+              new AiError(
+                "provider-failed",
+                `${provider} CLI timed out after ${Math.round(timeoutMs / 1000)}s`,
               ),
             );
             return;
@@ -337,16 +361,25 @@ function runCli(bin: string, args: string[], provider: string, cwd?: string, env
   });
 }
 
-async function postJson(url: string, headers: Record<string, string>, body: unknown, provider: string) {
+async function postJson(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  provider: string,
+  timeoutMs: number = TIMEOUT_MS,
+) {
   let res: Response;
   try {
     res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
+    if ((err as Error).name === "TimeoutError") {
+      throw new AiError("provider-failed", `${provider} request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
     throw new AiError("provider-failed", `${provider} request failed: ${(err as Error).message}`);
   }
   const text = await res.text();
@@ -379,7 +412,12 @@ async function resolveKey(profile: AiProfile, custom: boolean): Promise<string> 
   return key ?? "";
 }
 
-async function runAnthropic(prompt: string, model: string, profile: AiProfile): Promise<string> {
+async function runAnthropic(
+  prompt: string,
+  model: string,
+  profile: AiProfile,
+  timeoutMs: number = TIMEOUT_MS,
+): Promise<string> {
   const baseUrl = profile.baseUrl;
   const key = await resolveKey(profile, !!baseUrl);
   const data = await postJson(
@@ -391,12 +429,18 @@ async function runAnthropic(prompt: string, model: string, profile: AiProfile): 
       messages: [{ role: "user", content: prompt }],
     },
     "anthropic",
+    timeoutMs,
   );
   const content = Array.isArray(data.content) ? (data.content as { type?: string; text?: string }[]) : [];
   return content.find((block) => block.type === "text")?.text ?? "";
 }
 
-async function runOpenai(prompt: string, model: string, profile: AiProfile): Promise<string> {
+async function runOpenai(
+  prompt: string,
+  model: string,
+  profile: AiProfile,
+  timeoutMs: number = TIMEOUT_MS,
+): Promise<string> {
   if (!model) {
     throw new AiError("missing-model", "The OpenAI provider needs a model - set one in Settings → AI Providers");
   }
@@ -407,6 +451,7 @@ async function runOpenai(prompt: string, model: string, profile: AiProfile): Pro
     key ? { authorization: `Bearer ${key}` } : {},
     { model, messages: [{ role: "user", content: prompt }] },
     "openai",
+    timeoutMs,
   );
   const choices = Array.isArray(data.choices)
     ? (data.choices as { message?: { content?: string } }[])
@@ -620,6 +665,19 @@ export interface AiRunOptions {
   // than inherit wherever the server happens to have been started. Ignored by
   // the API providers, which have no notion of a working directory.
   cwd?: string;
+  // How long to wait for this one call, when the default 60s is the wrong
+  // budget for the job: a CLI agent told to read the repository under `cwd`
+  // before answering routinely runs for minutes. Clamped to [1s, 15min], so
+  // the option can lengthen a wait but never remove the ceiling. Omitted
+  // leaves every caller on the default.
+  timeoutMs?: number;
+}
+
+// The wait one call gets, from the option or the default.
+function effectiveTimeout(opts: AiRunOptions): number {
+  const wanted = opts.timeoutMs;
+  if (typeof wanted !== "number" || !Number.isFinite(wanted)) return TIMEOUT_MS;
+  return Math.min(MAX_TIMEOUT_MS, Math.max(1_000, Math.floor(wanted)));
 }
 
 // Prompt in, text out. Throws AiError; never returns an empty string.
@@ -627,12 +685,13 @@ export async function runAi(prompt: string, opts: AiRunOptions = {}): Promise<st
   if (!prompt.trim()) throw new AiError("provider-failed", "prompt is empty");
   const profile = await resolveProfile(opts.profileId);
   const model = opts.model?.trim() || profile.model;
+  const timeoutMs = effectiveTimeout(opts);
 
   let raw: string;
   if (profile.provider === "anthropic") {
-    raw = await runAnthropic(prompt, model, profile);
+    raw = await runAnthropic(prompt, model, profile, timeoutMs);
   } else if (profile.provider === "openai") {
-    raw = await runOpenai(prompt, model, profile);
+    raw = await runOpenai(prompt, model, profile, timeoutMs);
   } else if (profile.provider === "custom") {
     if (!profile.customCommand) {
       throw new AiError(
@@ -652,8 +711,9 @@ export async function runAi(prompt: string, opts: AiRunOptions = {}): Promise<st
           "custom",
           opts.cwd,
           { PERCH_PROMPT: prompt },
+          timeoutMs,
         )
-      : await runCli("/bin/sh", ["-c", `${profile.customCommand} "$0"`, prompt], "custom", opts.cwd);
+      : await runCli("/bin/sh", ["-c", `${profile.customCommand} "$0"`, prompt], "custom", opts.cwd, undefined, timeoutMs);
   } else {
     // Any provider that is not an API kind names an agent. Its manifest says
     // how to run one prompt; core fills the template in and spawns it.
@@ -669,6 +729,8 @@ export async function runAi(prompt: string, opts: AiRunOptions = {}): Promise<st
       oneShotArgs(agent.oneShot, prompt, model),
       profile.provider,
       opts.cwd,
+      undefined,
+      timeoutMs,
     );
   }
 
