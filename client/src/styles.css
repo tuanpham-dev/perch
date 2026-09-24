@@ -259,6 +259,13 @@ textarea {
   white-space: nowrap;
 }
 
+/* A detached window's title bar: the title alone, centered, not a button. */
+.titlebar-title-static {
+  max-width: var(--cc-max);
+  padding: 0 10px;
+  color: var(--commandcenter-fg);
+}
+
 .titlebar.cc-inline .titlebar-center {
   position: static;
   transform: none;

@@ -39,6 +39,10 @@ interface Props {
   onToggleRightSidebar: () => void;
   onManage: (anchor: DOMRect) => void;
   resolvedBindings: Record<string, Keybinding[]>;
+  // A detached window (plans/detach-tab-to-new-window.md): the title and the
+  // drag region only - no navigation, command center or layout toggles,
+  // since that window has no sidebars or panel to toggle.
+  minimal?: boolean;
 }
 
 export default function TitleBar({
@@ -61,6 +65,7 @@ export default function TitleBar({
   onToggleRightSidebar,
   onManage,
   resolvedBindings,
+  minimal = false,
 }: Props) {
   const startGroupRef = useRef<HTMLDivElement>(null);
   const endGroupRef = useRef<HTMLDivElement>(null);
@@ -79,8 +84,9 @@ export default function TitleBar({
   // may only grow until one of those groups would reach the window controls.
   useLayoutEffect(() => {
     const measure = () => {
-      const start = startGroupRef.current?.offsetWidth;
-      const end = endGroupRef.current?.offsetWidth;
+      // Minimal mode renders no groups: nothing to keep clear of the controls.
+      const start = minimal ? 0 : startGroupRef.current?.offsetWidth;
+      const end = minimal ? 0 : endGroupRef.current?.offsetWidth;
       if (start === undefined || end === undefined) return;
       const width = window.innerWidth;
       const reserve = Math.max(insetStart + start + GROUP_GAP_START, insetEnd + end + GROUP_GAP_END);
@@ -89,7 +95,7 @@ export default function TitleBar({
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [insetStart, insetEnd]);
+  }, [insetStart, insetEnd, minimal]);
 
   const inline = centerMax < MIN_CENTERED_WIDTH;
 
@@ -106,6 +112,13 @@ export default function TitleBar({
       }
     >
       {emulated && <div className="titlebar-emulated-controls" data-side={emulated} />}
+      {minimal ? (
+        <div className="titlebar-center">
+          <span className="titlebar-title-static titlebar-command-center-label" title={title}>
+            {title}
+          </span>
+        </div>
+      ) : (
       <div className="titlebar-center">
         <div className="titlebar-group titlebar-group-start" ref={startGroupRef}>
           <button className="icon-button" title="Go Back" disabled={!canGoBack} onClick={onGoBack}>
@@ -161,6 +174,7 @@ export default function TitleBar({
           </button>
         </div>
       </div>
+      )}
     </header>
   );
 }

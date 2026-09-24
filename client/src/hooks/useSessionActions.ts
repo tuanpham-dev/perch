@@ -83,6 +83,9 @@ export function useSessionActions(
   // keep linked worktrees out of the recent-projects list, and to name a
   // cleanup's target.
   repoIndex: Map<string, RepoInfo>,
+  // "Move into New Window" (plans/detach-tab-to-new-window.md); null on a
+  // phone or tablet, where the item is left out entirely.
+  moveTabToNewWindow: ((tabId: string) => void) | null,
 ) {
   // Opens the project rooted in `cwd`: focuses the live session already
   // rooted there, or creates one — named after the folder, started in
@@ -712,6 +715,9 @@ export function useSessionActions(
           label: "Move into Next Group",
           onClick: () => moveTabToAdjacentGroup(tab.id, "next"),
         },
+        ...(moveTabToNewWindow
+          ? [{ label: "Move into New Window", onClick: () => moveTabToNewWindow(tab.id) }]
+          : []),
       ];
       const closeItems: MenuItem[] = [
         { label: "Close Tab", onClick: () => closeTab(tab.id) },
@@ -760,6 +766,7 @@ export function useSessionActions(
       closeProject,
       splitGroup,
       moveTabToAdjacentGroup,
+      moveTabToNewWindow,
       filesRootDir,
       showError,
     ],

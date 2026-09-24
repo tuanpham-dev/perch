@@ -15,6 +15,7 @@ import { cellFromPoint } from "./mouseReports";
 import { sendWithInkSafeEnters, whenMatches } from "./lib/terminalInput";
 import { joinedSelectionText, unwrapParagraphs } from "./selectionText";
 import { findCandidates, isOpenGesture, MAX_STITCH_LINES, openUrl } from "./terminalLinks";
+import { consumeHandoff, IS_DETACHED, seedDetachedStorage } from "./lib/detachedWindows";
 
 // Bundled preview extensions (image/markdown/json/csv/media/pdf) are built
 // separately (see extensions/build.mjs) and must never bundle their own
@@ -65,6 +66,15 @@ window.__perchModules = {
 };
 
 registerSW({ immediate: true });
+
+// A detached window (plans/detach-tab-to-new-window.md) is opened with its
+// tabs in the URL fragment. Seed this window's own storage from it before
+// React mounts, so useTabs' state initializers restore those tabs; a reload
+// has no fragment and simply restores what is already there.
+if (IS_DETACHED) {
+  const handoff = consumeHandoff();
+  if (handoff) seedDetachedStorage(handoff, sessionStorage);
+}
 
 // Terminal engines are bundled extensions (extensions/xterm-engine,
 // extensions/ghostty-engine) loaded through the extension host — nothing

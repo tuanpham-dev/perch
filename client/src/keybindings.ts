@@ -79,6 +79,8 @@ export const COMMANDS: Command[] = [
   { id: "group.focus8", label: "Focus 8th Editor Group", defaultBindings: [{ key: "ctrl+Digit8" }], scope: "global" },
   { id: "tab.moveToNextGroup", label: "Move Editor into Next Group", defaultBindings: [{ key: "ctrl+alt+ArrowRight" }], scope: "global" },
   { id: "tab.moveToPreviousGroup", label: "Move Editor into Previous Group", defaultBindings: [{ key: "ctrl+alt+ArrowLeft" }], scope: "global" },
+  // Unbound by default; desktop only (plans/detach-tab-to-new-window.md).
+  { id: "tab.moveToNewWindow", label: "Tab: Move into New Window", defaultBindings: [], scope: "global" },
   { id: "panel.toggle", label: "Panel: Toggle Terminal Panel", defaultBindings: [{ key: "ctrl+Backquote" }], scope: "global" },
   { id: "panel.new", label: "Panel: New Terminal", defaultBindings: [{ key: "ctrl+shift+Backquote" }], scope: "global" },
   { id: "panel.split", label: "Panel: Split Terminal Right", defaultBindings: [], scope: "global" },
