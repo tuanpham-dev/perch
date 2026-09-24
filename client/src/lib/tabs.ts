@@ -1,4 +1,5 @@
 import type { Tab, TabGroupState, TerminalSession } from "../types";
+import { tabStorage } from "./detachedWindows";
 
 // A "virtual" tab (image viewer, markdown preview, settings, …) has no
 // session behind it — sessionName/attachName are "". Centralized here so a
@@ -192,7 +193,7 @@ export function reconcileTabs(tabs: Tab[], sessions: TerminalSession[]): Tab[] {
 
 export function loadStoredTabs(fallbackGroupId: string): Tab[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem("tabs") ?? "[]");
+    const parsed = JSON.parse(tabStorage().getItem("tabs") ?? "[]");
     if (!Array.isArray(parsed)) return [];
     // Tabs stored before per-window tabs shipped won't have attachName —
     // every tab back then was a whole-session tab, where it always equals
@@ -262,7 +263,7 @@ export function moveGroupWithin(
 // state is meaningless without the device's own tab list.
 export function loadStoredTabGroupState(): Record<string, TabGroupState> {
   try {
-    const parsed = JSON.parse(localStorage.getItem("tabGroupState") ?? "{}");
+    const parsed = JSON.parse(tabStorage().getItem("tabGroupState") ?? "{}");
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     return parsed;
   } catch {

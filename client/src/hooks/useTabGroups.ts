@@ -7,6 +7,7 @@ type SetActiveTabIdArg = string | null | ((current: string | null) => string | n
 import * as api from "../api";
 import { groupKeyForTab, isRealTab, loadStoredTabGroupState, moveGroupWithin, normalizeWithinGroups, orderedGroupKeys } from "../lib/tabs";
 import type { AppSettings } from "../settings";
+import { tabStorage } from "../lib/detachedWindows";
 import type { MenuItem, Tab, TabGroupState, TerminalSession } from "../types";
 import { GROUP_COLORS, nextAutoColor } from "../utils/groupColor";
 
@@ -40,7 +41,7 @@ export function useTabGroups(
     loadStoredTabGroupState,
   );
   useEffect(() => {
-    localStorage.setItem("tabGroupState", JSON.stringify(tabGroupState));
+    tabStorage().setItem("tabGroupState", JSON.stringify(tabGroupState));
   }, [tabGroupState]);
 
   // Keeps tabGroupState in sync with which projects actually have tabs open:

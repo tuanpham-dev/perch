@@ -26,7 +26,9 @@ import {
 } from "../lib/splits";
 import { projectName } from "../lib/projects";
 import type { AppSettings } from "../settings";
+import { tabStorage } from "../lib/detachedWindows";
 import type { ExtensionInfo, RegistrySourceResult, Tab, TerminalSession } from "../types";
+import type { DetachedApi } from "./useDetachedWindows";
 
 const SPLIT_LAYOUT_KEY = "splitLayout";
 // The id of the app's very first editor group — before any split has ever
@@ -48,7 +50,7 @@ interface SplitLayout {
 function loadSplitLayout(): SplitLayout {
   let parsed: unknown = null;
   try {
-    parsed = JSON.parse(localStorage.getItem(SPLIT_LAYOUT_KEY) ?? "null");
+    parsed = JSON.parse(tabStorage().getItem(SPLIT_LAYOUT_KEY) ?? "null");
   } catch {
     parsed = null;
   }
@@ -76,7 +78,7 @@ function loadSplitLayout(): SplitLayout {
   // Fresh default: a single root leaf, seeded from the pre-splits
   // "activeTabId" key (no longer written once this ships) so upgrading
   // doesn't lose which tab was focused.
-  const legacyActiveTabId = localStorage.getItem("activeTabId");
+  const legacyActiveTabId = tabStorage().getItem("activeTabId");
   return {
     tree: { type: "leaf", groupId: DEFAULT_GROUP_ID },
     groupActive: { [DEFAULT_GROUP_ID]: legacyActiveTabId },
@@ -105,6 +107,10 @@ export function useTabs(
   extFileViewers: RegisteredFileViewer[],
   extensions: ExtensionInfo[],
   registryCatalog: RegistrySourceResult[],
+  // Cross-window dedupe (plans/detach-tab-to-new-window.md): populated by
+  // App from useDetachedWindows, which itself needs this hook's adoptTabs -
+  // a ref bridges the cycle, same pattern as App's refreshClipboardMirrorRef.
+  detachedApiRef: MutableRefObject<DetachedApi | null>,
 ) {
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(loadSplitLayout);
   // Snapshot for closures/effects that must read the current tree/groupActive
@@ -113,7 +119,7 @@ export function useTabs(
   splitLayoutRef.current = splitLayout;
 
   useEffect(() => {
-    localStorage.setItem(SPLIT_LAYOUT_KEY, JSON.stringify(splitLayout));
+    tabStorage().setItem(SPLIT_LAYOUT_KEY, JSON.stringify(splitLayout));
   }, [splitLayout]);
 
   // Restored tabs whose session no longer exists self-heal: attaching to a
@@ -184,7 +190,7 @@ export function useTabs(
   }
 
   useEffect(() => {
-    localStorage.setItem("tabs", JSON.stringify(tabs));
+    tabStorage().setItem("tabs", JSON.stringify(tabs));
   }, [tabs]);
 
   // Activation history, most recent first — closing the active tab returns
@@ -254,8 +260,38 @@ export function useTabs(
     return [...prev.slice(0, index + 1), tab, ...prev.slice(index + 1)];
   }, [settingsRef]);
 
+  // Every open path below, once its own in-group dedupe finds nothing,
+  // asks whether a detached window already shows the same content
+  // (tabsAreDuplicates) and, if so, focuses that window instead of opening
+  // a second copy here. `retry` reruns the open locally when the holder
+  // never answers (closed abnormally, so the registry was stale).
+  const heldElsewhere = useCallback(
+    (candidate: Tab, retry: () => void): boolean => {
+      const detached = detachedApiRef.current;
+      const holder = detached?.holderOf((t) => tabsAreDuplicates(t, candidate));
+      if (!detached || !holder) return false;
+      void detached.focusDetachedTab(holder.windowId, holder.tabId).then((ok) => {
+        if (!ok) retry();
+      });
+      return true;
+    },
+    [detachedApiRef],
+  );
+
   const openSession = useCallback(
-    (name: string) => {
+    (name: string, ignoreDetached = false) => {
+      if (!ignoreDetached) {
+        const activeGroup = splitLayoutRef.current.activeGroupId;
+        const activeIndex = sessions.find((s) => s.name === name)?.windows.find((w) => w.active)?.index;
+        const local = tabsRef.current.some(
+          (t) =>
+            t.sessionName === name &&
+            t.groupId === activeGroup &&
+            (t.windowIndex === undefined || (activeIndex !== undefined && t.windowIndex === activeIndex)),
+        );
+        const candidate: Tab = { id: "", sessionName: name, attachName: name };
+        if (!local && heldElsewhere(candidate, () => openSession(name, true))) return;
+      }
       setTabs((prev) => {
         const activeGroup = splitLayoutRef.current.activeGroupId;
         // Only match a whole-session tab in the focused editor group — a
@@ -290,7 +326,7 @@ export function useTabs(
       // keyboard focus.
       requestTerminalRefocus();
     },
-    [sessions, insertTab],
+    [sessions, insertTab, heldElsewhere],
   );
 
   // Activate-or-create, keyed on (viewerId, path) within the focused editor
@@ -300,7 +336,15 @@ export function useTabs(
   // preview (image/media/pdf/markdown/json/yaml/csv) is itself an
   // extension-registered viewer now, so this is the only virtual-file-tab
   // opener — see findFileViewerFor for how a path resolves to a viewer.
-  const openExtViewerTab = useCallback((viewerId: string, filePath: string, title?: string) => {
+  const openExtViewerTab = useCallback((viewerId: string, filePath: string, title?: string, ignoreDetached = false) => {
+    if (!ignoreDetached) {
+      const activeGroup = splitLayoutRef.current.activeGroupId;
+      const local = tabsRef.current.some(
+        (t) => t.extViewerId === viewerId && t.extViewerPath === filePath && t.groupId === activeGroup,
+      );
+      const candidate: Tab = { id: "", sessionName: "", attachName: "", extViewerId: viewerId, extViewerPath: filePath };
+      if (!local && heldElsewhere(candidate, () => openExtViewerTab(viewerId, filePath, title, true))) return;
+    }
     // Pins the viewer tab to whichever real tab it was opened "from" — same
     // sticky lookup the FILES panel itself uses (lastRealTabIdRef), so a
     // preview opened while another viewer tab is active still attributes to
@@ -344,7 +388,7 @@ export function useTabs(
       setActiveTabId(tab.id, activeGroup);
       return insertTab(prev, tab);
     });
-  }, [insertTab]);
+  }, [insertTab, heldElsewhere]);
 
   // One-time migration for tabs restored from localStorage before this
   // extraction shipped — old imagePath/previewPath tabs become extViewerId/
@@ -381,7 +425,11 @@ export function useTabs(
   // (not per-group, unlike every other opener) since it's a single shared
   // editor, matching VS Code's own Settings tab. Activate-or-create like
   // openExtViewerTab.
-  const openSettingsTab = useCallback(() => {
+  const openSettingsTab = useCallback((ignoreDetached = false) => {
+    if (!ignoreDetached && !tabsRef.current.some((t) => t.settingsView)) {
+      const candidate: Tab = { id: "", sessionName: "", attachName: "", settingsView: true };
+      if (heldElsewhere(candidate, () => openSettingsTab(true))) return;
+    }
     setTabs((prev) => {
       const existing = prev.find((t) => t.settingsView);
       if (existing) {
@@ -397,7 +445,11 @@ export function useTabs(
 
   // Singleton Keyboard Shortcuts editor tab — same dedupe/activate-or-create
   // conventions as openSettingsTab above.
-  const openKeyboardShortcutsTab = useCallback(() => {
+  const openKeyboardShortcutsTab = useCallback((ignoreDetached = false) => {
+    if (!ignoreDetached && !tabsRef.current.some((t) => t.keyboardView)) {
+      const candidate: Tab = { id: "", sessionName: "", attachName: "", keyboardView: true };
+      if (heldElsewhere(candidate, () => openKeyboardShortcutsTab(true))) return;
+    }
     setTabs((prev) => {
       const existing = prev.find((t) => t.keyboardView);
       if (existing) {
@@ -417,7 +469,11 @@ export function useTabs(
   // installed); reopening an already-open page with a different source
   // (e.g. the registry catalog resolved after the tab was first opened from
   // a stale id) updates it in place rather than creating a second tab.
-  const openExtensionPageTab = useCallback((id: string, source?: string) => {
+  const openExtensionPageTab = useCallback((id: string, source?: string, ignoreDetached = false) => {
+    if (!ignoreDetached && !tabsRef.current.some((t) => t.extensionPageId === id)) {
+      const candidate: Tab = { id: "", sessionName: "", attachName: "", extensionPageId: id };
+      if (heldElsewhere(candidate, () => openExtensionPageTab(id, source, true))) return;
+    }
     setTabs((prev) => {
       const existing = prev.find((t) => t.extensionPageId === id);
       if (existing) {
@@ -451,7 +507,12 @@ export function useTabs(
   // Returns the id of the tab that ends up focused (existing/folded/new), or
   // null on failure, so callers can chain it as the next call's anchor.
   const openWindowTab = useCallback(
-    async (session: string, index: number, anchorOverride?: string | null): Promise<string | null> => {
+    async (
+      session: string,
+      index: number,
+      anchorOverride?: string | null,
+      ignoreDetached = false,
+    ): Promise<string | null> => {
       // Snapshotted up front, same rationale as anchorId below: if the user
       // switches focus to a different split pane while this request is in
       // flight, the new tab still lands in the group they initiated it
@@ -495,6 +556,10 @@ export function useTabs(
       // whichever tab they initiated it from, not whatever became active
       // meanwhile.
       const anchorId = anchorOverride !== undefined ? anchorOverride : activeTabIdRef.current;
+      if (!ignoreDetached) {
+        const candidate: Tab = { id: "", sessionName: session, attachName: "", windowIndex: index };
+        if (heldElsewhere(candidate, () => void openWindowTab(session, index, anchorOverride, true))) return null;
+      }
       try {
         const { attachName } = await api.openWindowTab(session, index);
         const tab: Tab = {
@@ -517,7 +582,7 @@ export function useTabs(
         return null;
       }
     },
-    [showError, insertTab],
+    [showError, insertTab, heldElsewhere],
   );
 
   // Opens every one of a session's windows as its own window-tab (the
@@ -582,14 +647,17 @@ export function useTabs(
   // The actual removal — MRU/window cleanup, group collapse, active-tab
   // reassignment — split out from closeTab so an unconditional close (no
   // dirty-changes confirm) can reuse it. See closeExtViewerTab below.
-  const closeTabImmediate = useCallback(
-    (id: string) => {
+  // `record` false is a move, not a close (removeTabForMove below): the tab
+  // lives on in another window, so it must neither join the reopen-closed
+  // history nor release its attach.
+  const dropTab = useCallback(
+    (id: string, record: boolean) => {
       dirtyTabsRef.current.delete(id);
       const tab = tabs.find((t) => t.id === id);
-      if (tab?.windowIndex !== undefined) {
+      if (record && tab?.windowIndex !== undefined) {
         api.closeWindowTab(tab.attachName).catch(() => {});
       }
-      if (tab) pushClosedTab(tab);
+      if (record && tab) pushClosedTab(tab);
       mruTabIdsRef.current = mruTabIdsRef.current.filter((tid) => tid !== id);
       setTabs((prev) => prev.filter((t) => t.id !== id));
 
@@ -633,6 +701,30 @@ export function useTabs(
     },
     [tabs, settingsRef],
   );
+  const closeTabImmediate = useCallback((id: string) => dropTab(id, true), [dropTab]);
+  // "Move into New Window" (plans/detach-tab-to-new-window.md): the tab
+  // leaves this window for a detached one, which reattaches by the same
+  // attachName.
+  const removeTabForMove = useCallback((id: string) => dropTab(id, false), [dropTab]);
+
+  // The reverse: a detached window closed and handed its tabs back. They
+  // join the focused editor group, minus any this window already shows
+  // (tabsAreDuplicates), keeping their ids so the detached window's active
+  // tab can be activated here by id.
+  const adoptTabs = useCallback((incoming: Tab[], activeId: string | null) => {
+    const groupId = splitLayoutRef.current.activeGroupId;
+    // Deduped against this window's tabs and against each other: two split
+    // panes showing one terminal over there collapse to one tab here.
+    const fresh: Tab[] = [];
+    for (const t of incoming) {
+      const taken = (p: Tab) => p.id === t.id || tabsAreDuplicates(p, t);
+      if (tabsRef.current.some(taken) || fresh.some(taken)) continue;
+      fresh.push({ ...t, groupId });
+    }
+    if (fresh.length === 0) return;
+    setTabs((prev) => [...prev, ...fresh]);
+    if (activeId && fresh.some((t) => t.id === activeId)) setActiveTabId(activeId, groupId);
+  }, [setActiveTabId]);
 
   const closeTab = useCallback(
     async (id: string) => {
@@ -1253,6 +1345,8 @@ export function useTabs(
     openWindowTab,
     openAllWindows,
     closeTab,
+    removeTabForMove,
+    adoptTabs,
     closeAllTabs,
     cycleTab,
     moveTab,

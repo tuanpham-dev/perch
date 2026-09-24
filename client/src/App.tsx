@@ -75,6 +75,8 @@ import { emitPollTick } from "./lib/pollTick";
 import { rewriteLocalUrl } from "./lib/openUrlRewrite";
 import { outdatedExtensions } from "./lib/extensionUpdates";
 import { isAbsolutePath, parentPath } from "./lib/paths";
+import { IS_DETACHED } from "./lib/detachedWindows";
+import { useDetachedWindows, type DetachedApi } from "./hooks/useDetachedWindows";
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 500;
@@ -160,6 +162,8 @@ export default function App() {
     // document.hasFocus() gate); openProject/openWindowTab are idempotent,
     // so N tabs handling the same event just re-focuses each one.
     es.addEventListener("open-target", (e) => {
+      // A detached window never handles CLI opens; the main window does.
+      if (IS_DETACHED) return;
       const evt = e as MessageEvent<string>;
       try {
         openTargetRef.current(JSON.parse(evt.data) as OpenTargetPayload);
@@ -287,7 +291,12 @@ export default function App() {
     localStorage.setItem("sidebarWidth", String(sidebarWidth));
   }, [sidebarWidth]);
 
+  // A detached window (plans/detach-tab-to-new-window.md) is the editor area
+  // alone: both sidebars, the bottom panel and the status bar stay off, the
+  // toggles are no-ops, and nothing below persists a layout key on its
+  // behalf (it would overwrite the main window's own choice).
   const [sidebarVisible, setSidebarVisible] = useState(() => {
+    if (IS_DETACHED) return false;
     const stored = localStorage.getItem("sidebarVisible");
     if (stored !== null) return stored !== "false";
     // No stored preference means a first visit. On a phone the sidebar is a
@@ -305,7 +314,7 @@ export default function App() {
   // Defaults to CLOSED (unlike the left one): it starts empty, so showing it
   // uninvited would just take space from the editor.
   const [rightSidebarVisible, setRightSidebarVisible] = useState(
-    () => localStorage.getItem("sidebarRightVisible") === "true",
+    () => !IS_DETACHED && localStorage.getItem("sidebarRightVisible") === "true",
   );
 
   // The Open Folder dialog (FolderPickerDialog) — opened by the PROJECTS
@@ -351,6 +360,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (IS_DETACHED) return;
     localStorage.setItem("sidebarVisible", String(sidebarVisible));
   }, [sidebarVisible]);
 
@@ -359,6 +369,7 @@ export default function App() {
   }, [sidebarRightWidth]);
 
   useEffect(() => {
+    if (IS_DETACHED) return;
     localStorage.setItem("sidebarRightVisible", String(rightSidebarVisible));
   }, [rightSidebarVisible]);
 
@@ -532,6 +543,7 @@ export default function App() {
   // its width (styles.css's coarse-pointer block).
   const isMobileDrawer = () => window.matchMedia("(pointer: coarse) and (hover: none)").matches;
   const setSidebarSideVisible = useCallback((side: SidebarSide, visible: boolean) => {
+    if (IS_DETACHED) return;
     if (side === "left") {
       setSidebarVisible(visible);
       // On a phone both sidebars are drawers over the terminal, so two open
@@ -820,6 +832,9 @@ export default function App() {
   // here is always editor-driven.
   const editorSelectionRef = useRef<string | null>(null);
 
+  // See useDetachedWindows below; declared first because useTabs takes it.
+  const detachedApiRef = useRef<DetachedApi | null>(null);
+
   const {
     tabs,
     setTabs,
@@ -840,6 +855,8 @@ export default function App() {
     openWindowTab,
     openAllWindows,
     closeTab,
+    removeTabForMove,
+    adoptTabs,
     closeAllTabs,
     cycleTab,
     moveTab,
@@ -875,11 +892,52 @@ export default function App() {
     extFileViewers,
     extensions,
     registryCatalog,
+    detachedApiRef,
+  );
+
+  // Detached windows (plans/detach-tab-to-new-window.md): the registry of
+  // what each one holds, the action that opens one, and the focus-instead-
+  // of-duplicate check useTabs' open paths consult through detachedApiRef.
+  const { detachTab, holderOf, focusDetachedTab } = useDetachedWindows(
+    tabs,
+    activeTabId,
+    tabsRef,
+    setActiveTabId,
+    adoptTabs,
+    showError,
+  );
+  detachedApiRef.current = { holderOf, focusDetachedTab };
+  const moveTabToNewWindow = useCallback(
+    (tabId: string) => {
+      const tab = tabsRef.current.find((t) => t.id === tabId);
+      if (!tab) return;
+      if (dirtyTabsRef.current.has(tabId)) {
+        showError(new Error("Save or discard this tab's changes before moving it into a new window."));
+        return;
+      }
+      const rect = tab.groupId ? (groupContentRects[tab.groupId] ?? null) : null;
+      if (!detachTab(tab, rect)) return;
+      removeTabForMove(tabId);
+    },
+    [detachTab, removeTabForMove, groupContentRects, showError, tabsRef, dirtyTabsRef],
   );
 
   // Back/forward over the tabs you've been in — the sidebar footer's two
   // arrows. setActiveTabId resolves a tab's editor group from the tab
   // itself, so navigating also brings the right split pane forward.
+  // A detached window exists for its tabs: once the last one closes, so
+  // does the window (spec R9). The ref keeps the very first render (tabs
+  // still restoring) from closing it before it ever showed anything.
+  const hadTabsRef = useRef(false);
+  useEffect(() => {
+    if (!IS_DETACHED) return;
+    if (tabs.length > 0) {
+      hadTabsRef.current = true;
+      return;
+    }
+    if (hadTabsRef.current) window.close();
+  }, [tabs.length]);
+
   const { canGoBack, canGoForward, goBack, goForward } = useNavigationHistory(
     activeTabId,
     setActiveTabId,
@@ -1236,6 +1294,7 @@ export default function App() {
     moveTabToAdjacentGroup,
     resolvedFilesRootDir,
     repoIndex,
+    mobilePointer ? null : moveTabToNewWindow,
   );
 
   // Linked worktrees stopped being recorded as recent projects; this sweeps
@@ -1268,7 +1327,7 @@ export default function App() {
   // reload/share of the URL can't re-fire the open.
   const deepLinkConsumedRef = useRef(false);
   useEffect(() => {
-    if (deepLinkConsumedRef.current || !sessionsLoadedRef.current) return;
+    if (IS_DETACHED || deepLinkConsumedRef.current || !sessionsLoadedRef.current) return;
     const params = new URLSearchParams(location.search);
     const folder = params.get("folder");
     const file = params.get("file");
@@ -1556,13 +1615,15 @@ export default function App() {
   // context and a palette row with no context behave identically: a no-op.
   const globalHandlers = useMemo<Record<string, () => void>>(
     () => ({
+      // Sidebar and panel commands are no-ops in a detached window, which
+      // has neither (setSidebarSideVisible already returns early there).
       "sidebar.toggle": () => setSidebarSideVisible("left", !sidebarVisibleRef.current),
       "sidebar.toggleRight": () => setSidebarSideVisible("right", !rightSidebarVisibleRef.current),
-      "sidebar.focusExplorer": () => focusSidebarTab(EXPLORER_TAB_ID),
-      "sidebar.focusRun": () => focusSidebarTab(RUN_TAB_ID),
-      "sidebar.focusCommands": () => focusSidebarTab(COMMANDS_TAB_ID),
-      "sidebar.focusExtensions": () => focusSidebarTab(EXTENSIONS_TAB_ID),
-      "sidebar.focusProjects": () => focusProjectsPanel(),
+      "sidebar.focusExplorer": () => !IS_DETACHED && focusSidebarTab(EXPLORER_TAB_ID),
+      "sidebar.focusRun": () => !IS_DETACHED && focusSidebarTab(RUN_TAB_ID),
+      "sidebar.focusCommands": () => !IS_DETACHED && focusSidebarTab(COMMANDS_TAB_ID),
+      "sidebar.focusExtensions": () => !IS_DETACHED && focusSidebarTab(EXTENSIONS_TAB_ID),
+      "sidebar.focusProjects": () => !IS_DETACHED && focusProjectsPanel(),
       "quickSwitcher.toggle": () => setSwitcherQuery((q) => (q === null ? "" : null)),
       "commandPalette.toggle": () => setSwitcherQuery((q) => (q === null ? ">" : null)),
       "tab.next": () => cycleTab(1),
@@ -1674,15 +1735,19 @@ export default function App() {
         if (!activeTabId) return;
         moveTabToAdjacentGroup(activeTabId, "previous");
       },
-      "panel.toggle": togglePanel,
+      "tab.moveToNewWindow": () => {
+        if (activeTabId && !mobilePointer) moveTabToNewWindow(activeTabId);
+      },
+      "panel.toggle": () => !IS_DETACHED && togglePanel(),
       "panel.new": () => {
+        if (IS_DETACHED) return;
         // Reveals first, so the picker (when there's no active session) has a
         // panel to anchor against — its own top-left corner, since the +
         // button it would otherwise anchor to may not be on screen yet.
         showPanel();
         requestPanelTerminal({ x: sidebarVisible ? sidebarWidth : 0, y: window.innerHeight - panel.height });
       },
-      "panel.split": splitActivePane,
+      "panel.split": () => !IS_DETACHED && splitActivePane(),
     }),
     [
       activeSessionName,
@@ -1708,6 +1773,8 @@ export default function App() {
       splitGroup,
       focusGroup,
       moveTabToAdjacentGroup,
+      moveTabToNewWindow,
+      mobilePointer,
       togglePanel,
       showPanel,
       splitActivePane,
@@ -1822,7 +1889,13 @@ export default function App() {
       if (key === "activeWindow") return hasWindow;
       return storeGet(key);
     };
-    const builtins = COMMANDS.filter((c) => c.scope === "global" && !NON_PALETTE_IDS.has(c.id)).map((c) => ({
+    const builtins = COMMANDS.filter(
+      (c) =>
+        c.scope === "global" &&
+        !NON_PALETTE_IDS.has(c.id) &&
+        // Desktop only: on a phone a new window is just another browser tab.
+        !(mobilePointer && c.id === "tab.moveToNewWindow"),
+    ).map((c) => ({
       id: c.id,
       label: c.label,
       binding: formatBinding(resolvedBindings[c.id]?.[0]?.key ?? ""),
@@ -1876,6 +1949,7 @@ export default function App() {
     commandUsage,
     settings.paletteSortByUsage,
     recordCommandUsage,
+    mobilePointer,
   ]);
 
   // Branch pill in the FILES panel header: find-or-create the active
@@ -2180,6 +2254,7 @@ export default function App() {
           onToggleRightSidebar={() => setSidebarSideVisible("right", !rightSidebarVisible)}
           onManage={(anchor) => showMenu(anchor.left, anchor.bottom, manageMenuItems())}
           resolvedBindings={resolvedBindings}
+          minimal={IS_DETACHED}
         />
       )}
       <div className="app-body">
@@ -2274,16 +2349,18 @@ export default function App() {
           <div className="resize-handle" onMouseDown={(e) => startSidebarResize(e, "left")} />
         </>
       ) : (
-        <div
-          className="sidebar-reopen"
-          title={`Show sidebar${sidebarToggleBinding ? ` (${sidebarToggleBinding})` : ""}`}
-          onClick={() => setSidebarSideVisible("left", true)}
-        />
+        !IS_DETACHED && (
+          <div
+            className="sidebar-reopen"
+            title={`Show sidebar${sidebarToggleBinding ? ` (${sidebarToggleBinding})` : ""}`}
+            onClick={() => setSidebarSideVisible("left", true)}
+          />
+        )
       )}
       {/* Drop zone standing in for a sidebar that isn't on screen — only
           visible mid-drag (body.sidebar-tab-dragging), so a second sidebar
           is discoverable exactly when it can be used. */}
-      {!sidebarVisible && <div className="sidebar-drop-edge" data-side="left" />}
+      {!sidebarVisible && !IS_DETACHED && <div className="sidebar-drop-edge" data-side="left" />}
       <main className="main">
         <SplitLayout
           tree={splitTree}
@@ -2592,6 +2669,7 @@ export default function App() {
           />
         </>
       ) : (
+        !IS_DETACHED && (
         <>
           <div className="sidebar-drop-edge" data-side="right" />
           {sidebarView.right.tabs.length > 0 && (
@@ -2602,11 +2680,12 @@ export default function App() {
             />
           )}
         </>
+        )
       )}
       </div>
       {/* Outside .app-body deliberately: the bottom panel spans the whole
           window, under both sidebars, rather than only the editor column. */}
-      {panel.visible && (
+      {!IS_DETACHED && panel.visible && (
         <BottomPanel
           panel={panel}
           visibleTabs={panelVisibleTabs}
@@ -2639,7 +2718,7 @@ export default function App() {
           onSessionSwitch={openSwitchedSession}
         />
       )}
-      {settings.showStatusBar && (
+      {!IS_DETACHED && settings.showStatusBar && (
         <StatusBar
           sessions={sessions}
           slots={statusBarSlots}
