@@ -20,7 +20,8 @@ Commands:
              Accepts config flags - see: perch start --help
   stop       Stop the server - asks which instance if more than one is running
              (see: perch stop --help)
-  restart    Restart the server (accepts the same flags as start)
+  restart    Restart the server (accepts the same flags as start); with none,
+             every background instance comes back with its own config
   status     Show whether it's running and responding
   instances  List every running instance (any port, any launch method)
   logs       Follow the server's logs
