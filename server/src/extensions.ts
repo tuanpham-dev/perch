@@ -6,7 +6,7 @@
 // per-extension server hooks. See README's Extensions section for the
 // manifest format.
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -439,11 +439,18 @@ async function readManifest(folderPath: string): Promise<ExtensionManifest | nul
   }
 }
 
+// A symlink to a folder counts as a folder: a dirent never says so itself,
+// so it is followed and asked. That is how an extension checked out elsewhere
+// is developed in place (extensions/<name> -> a clone of its repo).
 async function listFoldersIn(dir: string): Promise<string[]> {
   try {
-    return (await readdir(dir, { withFileTypes: true }))
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+    const entries = await readdir(dir, { withFileTypes: true });
+    const folders: string[] = [];
+    for (const e of entries) {
+      if (e.isDirectory()) folders.push(e.name);
+      else if (e.isSymbolicLink() && (await stat(path.join(dir, e.name)).catch(() => null))?.isDirectory()) folders.push(e.name);
+    }
+    return folders;
   } catch {
     return [];
   }
