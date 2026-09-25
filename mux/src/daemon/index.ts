@@ -66,6 +66,7 @@ const snapshotter = new Snapshotter(
   () => config.snapshotDebounceMs,
   () => server.notifyUrl,
   () => config.persistScrollback,
+  () => config.scrollbackWriteIntervalMs,
 );
 
 // Rebuild the tree BEFORE accepting clients, so the first `sp ls` already sees

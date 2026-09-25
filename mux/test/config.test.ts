@@ -7,7 +7,7 @@ import { loadConfig, setConfigKey, envName } from '../src/util/config.ts';
 import { configPath } from '../src/util/paths.ts';
 
 let dir: string;
-const TOUCHED_ENV = ['PERCH_CONFIG_DIR', 'PERCH_STATE_DIR', 'PERCH_SNAPSHOT_DEBOUNCE_MS', 'PERCH_DETACH_KEY', 'PERCH_SCROLLBACK_LINES', 'PERCH_PERSIST_SCROLLBACK_LINES', 'PERCH_SHELL'];
+const TOUCHED_ENV = ['PERCH_CONFIG_DIR', 'PERCH_STATE_DIR', 'PERCH_SNAPSHOT_DEBOUNCE_MS', 'PERCH_SCROLLBACK_WRITE_INTERVAL_MS', 'PERCH_DETACH_KEY', 'PERCH_SCROLLBACK_LINES', 'PERCH_PERSIST_SCROLLBACK_LINES', 'PERCH_SHELL'];
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -32,6 +32,7 @@ test('env var names derive from config keys', () => {
 test('defaults apply when nothing is configured', () => {
   const cfg = loadConfig({}, () => {});
   assert.equal(cfg.snapshotDebounceMs, 2000);
+  assert.equal(cfg.scrollbackWriteIntervalMs, 30000);
   assert.equal(cfg.scrollbackLines, 5000);
   assert.equal(cfg.persistScrollbackLines, 2000);
   assert.equal(cfg.detachKey, 'C-\\');
@@ -103,4 +104,24 @@ test('boolean keys accept true/false and reject anything else', () => {
   assert.equal(loadConfig({}, quiet).persistScrollback, false);
   assert.throws(() => setConfigKey('restore', 'maybe'));
   assert.equal(loadConfig({}, quiet).restore, true);
+});
+
+test('scrollbackWriteIntervalMs accepts 0..600000 and falls back to its default otherwise', () => {
+  const warnings: string[] = [];
+  writeFileSync(configPath(), JSON.stringify({ scrollbackWriteIntervalMs: 600001 }));
+  assert.equal(loadConfig({}, (m) => warnings.push(m)).scrollbackWriteIntervalMs, 30000);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /scrollbackWriteIntervalMs=600001 .* out of range 0-600000/);
+
+  writeFileSync(configPath(), JSON.stringify({ scrollbackWriteIntervalMs: 'abc' }));
+  assert.equal(loadConfig({}, (m) => warnings.push(m)).scrollbackWriteIntervalMs, 30000);
+  assert.equal(warnings.length, 2);
+
+  writeFileSync(configPath(), JSON.stringify({ scrollbackWriteIntervalMs: 0 }));
+  assert.equal(loadConfig({}, (m) => warnings.push(m)).scrollbackWriteIntervalMs, 0);
+  assert.equal(warnings.length, 2);
+
+  process.env.PERCH_SCROLLBACK_WRITE_INTERVAL_MS = '5000';
+  assert.equal(loadConfig({}, (m) => warnings.push(m)).scrollbackWriteIntervalMs, 5000, 'env beats the file');
+  assert.equal(setConfigKey('scrollbackWriteIntervalMs', '45000'), 45000);
 });
