@@ -84,7 +84,23 @@ interface Props {
   // strip — creates a new window in this bar's last-active session and
   // opens it as a tab. Null hides the button (e.g. no sessions exist yet).
   onNewWindow: (() => void) | null;
+  // Native drag and drop for the mouse (plans/cross-window-tab-drag.md):
+  // when on, tabs and chips are draggable elements whose drags the
+  // coordinator (SplitLayout) owns end to end, in this window or into
+  // another one; the pointer gesture below then only serves touch/pen.
+  // When off (a coarse pointer), nothing here changes.
+  nativeDrag: boolean;
+  onDragSourceStart: (e: React.DragEvent, source: DragSource) => void;
+  onDragSourceEnd: (e: React.DragEvent, source: DragSource) => void;
+  // Chip drag/drop state computed by the coordinator for the native path;
+  // null falls back to this bar's own (touch) chip-drag state.
+  chipDropIndicator: { id: string; edge: "left" | "right" } | null;
+  nativeDragGroupKey: string | null;
 }
+
+// What a native drag started on: one tab, or a project chip (all of its
+// tabs in this bar).
+export type DragSource = { kind: "tab"; tabId: string } | { kind: "chip"; groupKey: string };
 
 // Long-press delay (touch/pen) before a hold starts a chip drag instead of
 // letting the gesture fall through to the tab bar's native horizontal
@@ -126,6 +142,11 @@ export default function TabBar({
   onTabPointerDown,
   tabJustDraggedRef,
   onNewWindow,
+  nativeDrag,
+  onDragSourceStart,
+  onDragSourceEnd,
+  chipDropIndicator,
+  nativeDragGroupKey,
 }: Props) {
   // Re-renders the strip when the active icon theme changes — getFileIconResult
   // reads module-level state directly, same subscribe-to-force-render shape
@@ -340,6 +361,8 @@ export default function TabBar({
 
   const handleChipPointerDown = (e: React.PointerEvent, sessionName: string) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    // The native drag owns the mouse; this gesture serves touch/pen only.
+    if (nativeDrag && e.pointerType === "mouse") return;
 
     sessionRef.current = {
       pointerId: e.pointerId,
@@ -443,7 +466,13 @@ export default function TabBar({
         data-tab-id={tab.id}
         className={`tab${tab.id === activeTabId ? " active" : ""}${indicatorClass}${draggingClass}${groupedClass}`}
         style={groupLineColor ? ({ "--group-color": groupLineColor } as React.CSSProperties) : undefined}
-        onPointerDown={(e) => onTabPointerDown(e, tab.id)}
+        draggable={nativeDrag}
+        onDragStart={nativeDrag ? (e) => onDragSourceStart(e, { kind: "tab", tabId: tab.id }) : undefined}
+        onDragEnd={nativeDrag ? (e) => onDragSourceEnd(e, { kind: "tab", tabId: tab.id }) : undefined}
+        onPointerDown={(e) => {
+          if (nativeDrag && e.pointerType === "mouse") return;
+          onTabPointerDown(e, tab.id);
+        }}
         onClick={() => handleTabClick(tab.id)}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest(".tab-close")) return;
@@ -487,14 +516,16 @@ export default function TabBar({
     const collapsed = collapsedFor(sessionName);
     const isActiveGroup = sessionName === activeGroupKey;
     const rawColor = groupColorHex(state?.color ?? GROUP_COLORS[0].key);
+    const chipIndicator = chipDropIndicator ?? groupDropIndicator;
     const indicatorClass =
-      groupDropIndicator?.id === sessionName ? ` drop-indicator-${groupDropIndicator.edge}` : "";
-    const draggingClass = dragGroupKey === sessionName ? " dragging" : "";
+      chipIndicator?.id === sessionName ? ` drop-indicator-${chipIndicator.edge}` : "";
+    const draggingClass = (nativeDragGroupKey ?? dragGroupKey) === sessionName ? " dragging" : "";
     const activeClass = isActiveGroup ? " active" : "";
     const label = groupLabel(sessionName);
     return (
       <div
         key={`group:${sessionName}`}
+        data-group-key={sessionName}
         ref={(el) => {
           if (el) chipRefs.current.set(sessionName, el);
           else chipRefs.current.delete(sessionName);
@@ -509,6 +540,18 @@ export default function TabBar({
           isActiveGroup
             ? `${label} tab group, ${collapsed ? "collapsed" : "expanded"}`
             : `Switch to ${label}`
+        }
+        draggable={nativeDrag}
+        onDragStart={nativeDrag ? (e) => onDragSourceStart(e, { kind: "chip", groupKey: sessionName }) : undefined}
+        onDragEnd={
+          nativeDrag
+            ? (e) => {
+                // Same as the pointer path: the trailing click after a drag
+                // must not toggle the chip.
+                justDraggedRef.current = true;
+                onDragSourceEnd(e, { kind: "chip", groupKey: sessionName });
+              }
+            : undefined
         }
         onPointerDown={(e) => handleChipPointerDown(e, sessionName)}
         onClick={() => handleChipClick(sessionName)}

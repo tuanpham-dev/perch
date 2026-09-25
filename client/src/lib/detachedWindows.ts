@@ -27,6 +27,12 @@ function readDetachedWindowId(): string | null {
 export const DETACHED_WINDOW_ID: string | null = readDetachedWindowId();
 export const IS_DETACHED = DETACHED_WINDOW_ID !== null;
 
+// Identifies this window within one drag (plans/cross-window-tab-drag.md):
+// a drop whose payload carries this id is an in-window drop. A main window
+// gets a fresh id per load, which is all a drag needs.
+export const WINDOW_INSTANCE_ID: string =
+  DETACHED_WINDOW_ID ?? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : "main");
+
 // Where this window's tab state lives. sessionStorage is copied from the
 // opener when a window is opened by script, so a detached window that spawns
 // another one hands its copy along - harmless, since the hand-off below
@@ -117,6 +123,70 @@ export function seedDetachedStorage(handoff: Handoff, storage: Storage): void {
   storage.setItem("tabGroupState", JSON.stringify({}));
 }
 
+// ---- Dragging tabs between windows -----------------------------------------
+
+// The drag's own payload type. Two more, data-less types let a window branch
+// during dragover, where only the type list is readable: the dirty marker
+// (an unsaved tab must not leave its window) and the chip marker (chips
+// only land on a strip, never on a pane zone).
+export const TAB_DRAG_TYPE = "application/x-perch-tabs";
+export const TAB_DRAG_DIRTY_TYPE = "application/x-perch-dirty";
+export const TAB_DRAG_CHIP_TYPE = "application/x-perch-chip";
+
+export interface TabDragPayload {
+  dragId: string;
+  windowId: string;
+  kind: "tab" | "chip";
+  tabs: Tab[];
+  // The chip's group key (a chip drag only), so the target can position the
+  // chip once the tabs are in.
+  groupKey?: string;
+  // The source pane's content size, for a tear-off window.
+  paneRect: { width: number; height: number };
+}
+
+export function encodeDragPayload(payload: TabDragPayload): string {
+  return JSON.stringify(payload);
+}
+
+export function decodeDragPayload(text: string): TabDragPayload | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const p = parsed as Partial<TabDragPayload>;
+  if (typeof p.dragId !== "string" || typeof p.windowId !== "string") return null;
+  if (p.kind !== "tab" && p.kind !== "chip") return null;
+  if (!Array.isArray(p.tabs) || !p.tabs.every((t) => typeof t === "object" && t !== null && typeof t.id === "string")) {
+    return null;
+  }
+  const rect = p.paneRect;
+  const paneRect =
+    rect && typeof rect.width === "number" && typeof rect.height === "number"
+      ? { width: rect.width, height: rect.height }
+      : { width: 0, height: 0 };
+  return {
+    dragId: p.dragId,
+    windowId: p.windowId,
+    kind: p.kind,
+    tabs: p.tabs,
+    groupKey: typeof p.groupKey === "string" ? p.groupKey : undefined,
+    paneRect,
+  };
+}
+
+// Whether a screen point lies within a window's outer frame.
+export function pointInWindow(
+  screenX: number,
+  screenY: number,
+  w: { screenX: number; screenY: number; outerWidth: number; outerHeight: number },
+): boolean {
+  return screenX >= w.screenX && screenX < w.screenX + w.outerWidth && screenY >= w.screenY && screenY < w.screenY + w.outerHeight;
+}
+
 // ---- Cross-window messages --------------------------------------------------
 
 export const CHANNEL_NAME = "perch-windows";
@@ -131,7 +201,15 @@ export type DetachedMessage =
   | { type: "window-closing"; windowId: string }
   // main -> one detached window: activate and raise.
   | { type: "focus-tab"; windowId: string; tabId: string }
-  | { type: "focus-result"; windowId: string; tabId: string; ok: boolean };
+  | { type: "focus-result"; windowId: string; tabId: string; ok: boolean }
+  // Drag protocol (plans/cross-window-tab-drag.md). target -> all: it
+  // adopted these tabs from the drag; the source removes exactly those.
+  | { type: "tab-taken"; dragId: string; tabIds: string[] }
+  // source -> all, from dragend: where the drag was released.
+  | { type: "drag-ended"; dragId: string; screenX: number; screenY: number }
+  // any window -> all: the release point lies within my frame (so the
+  // source treats an unaccepted release there as a cancel, not a tear-off).
+  | { type: "drag-ended-here"; dragId: string };
 
 export function openChannel(): BroadcastChannel | null {
   return typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(CHANNEL_NAME);
@@ -232,6 +310,20 @@ export function detachedWindowGeometry(
     height: Math.max(MIN_HEIGHT, Math.round(rect?.height ?? 0)),
     left: Math.round(screen.x + (rect?.left ?? 0) + OFFSET),
     top: Math.round(screen.y + (rect?.top ?? 0) + OFFSET),
+  };
+}
+
+// A tear-off window at a release point: sized like the source pane, placed
+// so the dropped tab sits roughly under the pointer.
+export function detachedWindowGeometryAt(
+  point: { screenX: number; screenY: number },
+  size: { width: number; height: number },
+): WindowGeometry {
+  return {
+    width: Math.max(MIN_WIDTH, Math.round(size.width)),
+    height: Math.max(MIN_HEIGHT, Math.round(size.height)),
+    left: Math.max(0, Math.round(point.screenX - OFFSET)),
+    top: Math.max(0, Math.round(point.screenY - OFFSET)),
   };
 }
 

@@ -29,6 +29,7 @@ import type { AppSettings } from "../settings";
 import { tabStorage } from "../lib/detachedWindows";
 import type { ExtensionInfo, RegistrySourceResult, Tab, TerminalSession } from "../types";
 import type { DetachedApi } from "./useDetachedWindows";
+import type { DropTarget } from "../components/SplitLayout";
 
 const SPLIT_LAYOUT_KEY = "splitLayout";
 // The id of the app's very first editor group — before any split has ever
@@ -37,6 +38,14 @@ const SPLIT_LAYOUT_KEY = "splitLayout";
 // not globally — every group created afterward (splitLeaf) gets a real
 // crypto.randomUUID() instead.
 const DEFAULT_GROUP_ID = "root";
+
+// A pane edge zone (SplitLayout's DropTarget) to the split direction it means.
+const ZONE_DIRECTIONS: Record<"left" | "right" | "top" | "bottom", SplitDirection> = {
+  left: "left",
+  right: "right",
+  top: "up",
+  bottom: "down",
+};
 
 interface SplitLayout {
   tree: SplitNode;
@@ -650,62 +659,80 @@ export function useTabs(
   // `record` false is a move, not a close (removeTabForMove below): the tab
   // lives on in another window, so it must neither join the reopen-closed
   // history nor release its attach.
-  const dropTab = useCallback(
-    (id: string, record: boolean) => {
-      dirtyTabsRef.current.delete(id);
-      const tab = tabs.find((t) => t.id === id);
-      if (record && tab?.windowIndex !== undefined) {
-        api.closeWindowTab(tab.attachName).catch(() => {});
+  const dropTabs = useCallback(
+    (ids: string[], record: boolean) => {
+      const idSet = new Set(ids);
+      const dropped = tabs.filter((t) => idSet.has(t.id));
+      if (dropped.length === 0) return;
+      for (const tab of dropped) {
+        dirtyTabsRef.current.delete(tab.id);
+        if (record && tab.windowIndex !== undefined) {
+          api.closeWindowTab(tab.attachName).catch(() => {});
+        }
+        if (record) pushClosedTab(tab);
       }
-      if (record && tab) pushClosedTab(tab);
-      mruTabIdsRef.current = mruTabIdsRef.current.filter((tid) => tid !== id);
-      setTabs((prev) => prev.filter((t) => t.id !== id));
+      mruTabIdsRef.current = mruTabIdsRef.current.filter((tid) => !idSet.has(tid));
+      setTabs((prev) => prev.filter((t) => !idSet.has(t.id)));
 
-      if (!tab || tab.groupId === undefined) return;
-      const closingGroupId = tab.groupId;
-      const groupTabsAfter = tabs.filter((t) => t.id !== id && t.groupId === closingGroupId);
-      const otherGroupsExist = leaves(splitLayoutRef.current.tree).length > 1;
+      // Every group that lost tabs: collapse the ones left empty (all at
+      // once, in one tree update), and re-point the active tab of the rest.
+      const remaining = tabs.filter((t) => !idSet.has(t.id));
+      const touchedGroups = Array.from(new Set(dropped.map((t) => t.groupId).filter((g): g is string => g !== undefined)));
+      const emptied = touchedGroups.filter((g) => !remaining.some((t) => t.groupId === g));
+      const otherGroupsExist = leaves(splitLayoutRef.current.tree).length > emptied.length;
 
-      if (groupTabsAfter.length === 0 && otherGroupsExist) {
-        // The closing group is now empty and isn't the app's only group —
-        // collapse it (removeLeaf) and hand app focus to wherever the
-        // most-recently-used surviving tab lives, in whatever group that is.
+      if (emptied.length > 0 && otherGroupsExist) {
         setSplitLayout((prev) => {
-          const tree = removeLeaf(prev.tree, closingGroupId);
+          let tree = prev.tree;
           const groupActive = { ...prev.groupActive };
-          delete groupActive[closingGroupId];
+          for (const g of emptied) {
+            if (leaves(tree).length <= 1) break;
+            tree = removeLeaf(tree, g);
+            delete groupActive[g];
+          }
           const fallbackTab = mruTabIdsRef.current
-            .map((tid) => tabs.find((t) => t.id === tid && t.id !== id))
+            .map((tid) => remaining.find((t) => t.id === tid))
             .find((t): t is Tab => t !== undefined);
-          const activeGroupId = fallbackTab?.groupId ?? leaves(tree)[0];
+          const activeGroupId =
+            !emptied.includes(prev.activeGroupId) && leaves(tree).includes(prev.activeGroupId)
+              ? prev.activeGroupId
+              : (fallbackTab?.groupId ?? leaves(tree)[0]);
           return { tree, groupActive, activeGroupId };
         });
-        return;
       }
 
-      // Targeted: only updates closingGroupId's own pointer, never steals
-      // app focus for a background group whose tab closed via e.g.
-      // middle-click while another split pane is focused.
-      setActiveTabId((current) => {
-        if (current !== id) return current;
-        if (settingsRef.current.tabCloseActivation === "recent") {
-          const previous = mruTabIdsRef.current.find(
-            (tid) => tid !== id && groupTabsAfter.some((t) => t.id === tid),
-          );
-          if (previous) return previous;
-        }
-        const idx = tabs.filter((t) => t.groupId === closingGroupId).findIndex((t) => t.id === id);
-        const neighbor = groupTabsAfter[Math.min(idx, groupTabsAfter.length - 1)];
-        return neighbor ? neighbor.id : null;
-      }, closingGroupId);
+      for (const closingGroupId of touchedGroups) {
+        if (emptied.includes(closingGroupId) && otherGroupsExist) continue;
+        const groupTabsAfter = remaining.filter((t) => t.groupId === closingGroupId);
+        // Targeted: only updates this group's own pointer, never steals app
+        // focus for a background group whose tab closed via e.g.
+        // middle-click while another split pane is focused.
+        setActiveTabId((current) => {
+          if (!current || !idSet.has(current)) return current;
+          if (settingsRef.current.tabCloseActivation === "recent") {
+            const previous = mruTabIdsRef.current.find(
+              (tid) => !idSet.has(tid) && groupTabsAfter.some((t) => t.id === tid),
+            );
+            if (previous) return previous;
+          }
+          const groupBefore = tabs.filter((t) => t.groupId === closingGroupId);
+          const idx = groupBefore.findIndex((t) => t.id === current);
+          const neighbor = groupTabsAfter[Math.min(Math.max(idx, 0), groupTabsAfter.length - 1)];
+          return neighbor ? neighbor.id : null;
+        }, closingGroupId);
+      }
     },
     [tabs, settingsRef],
   );
+  const dropTab = useCallback((id: string, record: boolean) => dropTabs([id], record), [dropTabs]);
   const closeTabImmediate = useCallback((id: string) => dropTab(id, true), [dropTab]);
   // "Move into New Window" (plans/detach-tab-to-new-window.md): the tab
   // leaves this window for a detached one, which reattaches by the same
   // attachName.
   const removeTabForMove = useCallback((id: string) => dropTab(id, false), [dropTab]);
+  // Several tabs leaving at once (a chip drag, or a tear-off of many),
+  // resolved in one pass so group collapse and activation happen once.
+  const removeTabsForMove = useCallback((ids: string[]) => dropTabs(ids, false), [dropTabs]);
 
   // The reverse: a detached window closed and handed its tabs back. They
   // join the focused editor group, minus any this window already shows
@@ -1262,6 +1289,69 @@ export function useTabs(
     [moveTabToGroup],
   );
 
+  // A drop from another window (plans/cross-window-tab-drag.md): the
+  // dragged tabs land exactly where the coordinator's hit test says - a
+  // strip position, a pane (center) or a fresh split off a pane's edge. A
+  // chip target appends to the pane; the caller then positions the chip
+  // (chip order lives in useTabGroups). Same per-group dedupe as
+  // adoptTabs; a skipped duplicate is activated instead. Returns every id
+  // this window now accounts for (fresh or deduped), so the source removes
+  // exactly those.
+  const adoptTabsAt = useCallback(
+    (incoming: Tab[], target: DropTarget): string[] => {
+      const groupId = target.groupId;
+      const taken: string[] = [];
+      const fresh: Tab[] = [];
+      for (const t of incoming) {
+        const dupe = tabsRef.current.find((p) => p.groupId === groupId && (p.id === t.id || tabsAreDuplicates(p, t)));
+        if (dupe) {
+          taken.push(t.id);
+          setActiveTabId(dupe.id, groupId);
+          continue;
+        }
+        if (fresh.some((p) => p.id === t.id || tabsAreDuplicates(p, t))) {
+          taken.push(t.id);
+          continue;
+        }
+        fresh.push({ ...t, groupId });
+        taken.push(t.id);
+      }
+      if (fresh.length === 0) return taken;
+      const lastId = fresh[fresh.length - 1].id;
+
+      if (target.kind === "zone" && target.zone !== "center") {
+        const newGroupId = crypto.randomUUID();
+        const direction = ZONE_DIRECTIONS[target.zone];
+        const currentTree = splitLayoutRef.current.tree;
+        const nextTree = splitLeaf(currentTree, groupId, direction, newGroupId);
+        if (nextTree !== currentTree) {
+          const moved = fresh.map((t) => ({ ...t, groupId: newGroupId }));
+          setTabs((prev) => [...prev, ...moved]);
+          setSplitLayout((prev) => ({
+            tree: nextTree,
+            groupActive: { ...prev.groupActive, [newGroupId]: lastId },
+            activeGroupId: newGroupId,
+          }));
+          return taken;
+        }
+      }
+
+      setTabs((prev) => {
+        if (target.kind !== "bar") return [...prev, ...fresh];
+        const slots: number[] = [];
+        prev.forEach((t, i) => {
+          if (t.groupId === groupId) slots.push(i);
+        });
+        const insertAt =
+          target.index >= slots.length ? (slots.length > 0 ? slots[slots.length - 1] + 1 : prev.length) : slots[Math.max(0, target.index)];
+        return [...prev.slice(0, insertAt), ...fresh, ...prev.slice(insertAt)];
+      });
+      setActiveTabId(lastId, groupId);
+      return taken;
+    },
+    [setActiveTabId],
+  );
+
   // "Move Editor into Next/Previous Group" when there's no next/previous
   // group to move into — splits the tab's own current group.
   const moveTabToNewGroup = useCallback(
@@ -1346,7 +1436,9 @@ export function useTabs(
     openAllWindows,
     closeTab,
     removeTabForMove,
+    removeTabsForMove,
     adoptTabs,
+    adoptTabsAt,
     closeAllTabs,
     cycleTab,
     moveTab,

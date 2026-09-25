@@ -5,6 +5,7 @@ import {
   detachedWindowFeatures,
   detachedWindowGeometry,
   detachedWindowUrl,
+  type WindowGeometry,
   findMainWindow,
   holderOf as registryHolderOf,
   IS_DETACHED,
@@ -55,7 +56,10 @@ export function useDetachedWindows(
   setActiveTabId: (id: string) => void,
   adoptTabs: (incoming: Tab[], activeId: string | null) => void,
   showError: (err: unknown) => void,
-): DetachedApi & { detachTab(tab: Tab, rect: DOMRect | null): boolean } {
+): DetachedApi & {
+  detachTab(tab: Tab, rect: DOMRect | null): boolean;
+  detachTabs(tabs: Tab[], geometry: WindowGeometry): boolean;
+} {
   const channelRef = useRef<BroadcastChannel | null>(null);
   const registryRef = useRef<DetachedRegistry>({});
   const handlesRef = useRef<Record<string, Window | null>>({});
@@ -207,11 +211,13 @@ export function useDetachedWindows(
   }, [tabs, activeTabId, post]);
 
   // ---- Shared surface ---------------------------------------------------------
-  const detachTab = useCallback(
-    (tab: Tab, rect: DOMRect | null): boolean => {
+  // Opens a detached window holding `tabs` (a tear-off may carry several -
+  // plans/cross-window-tab-drag.md), placed and sized by `geometry`.
+  const detachTabs = useCallback(
+    (tabs: Tab[], geometry: WindowGeometry): boolean => {
+      if (tabs.length === 0) return false;
       const windowId = crypto.randomUUID();
-      const url = detachedWindowUrl(windowId, { tabs: [tab], activeTabId: tab.id });
-      const geometry = detachedWindowGeometry(rect, { x: window.screenX, y: window.screenY });
+      const url = detachedWindowUrl(windowId, { tabs, activeTabId: tabs[0].id });
       const handle = window.open(url, `perch-detached-${windowId}`, detachedWindowFeatures(geometry));
       if (!handle) {
         showError(new Error("The browser blocked the new window. Allow popups for this site and try again."));
@@ -221,12 +227,17 @@ export function useDetachedWindows(
       // main window does, once the child announces itself), so only the
       // main role tracks the handle.
       if (!IS_DETACHED) {
-        registryRef.current = applyWindowTabs(registryRef.current, { windowId, tabs: [tab], activeTabId: tab.id });
+        registryRef.current = applyWindowTabs(registryRef.current, { windowId, tabs, activeTabId: tabs[0].id });
         handlesRef.current[windowId] = handle;
       }
       return true;
     },
     [showError],
+  );
+  const detachTab = useCallback(
+    (tab: Tab, rect: DOMRect | null): boolean =>
+      detachTabs([tab], detachedWindowGeometry(rect, { x: window.screenX, y: window.screenY })),
+    [detachTabs],
   );
 
   const holderOf = useCallback(
@@ -259,5 +270,5 @@ export function useDetachedWindows(
     [forget, post],
   );
 
-  return { detachTab, holderOf, focusDetachedTab };
+  return { detachTab, detachTabs, holderOf, focusDetachedTab };
 }

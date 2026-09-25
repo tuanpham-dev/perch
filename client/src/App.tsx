@@ -75,8 +75,12 @@ import { emitPollTick } from "./lib/pollTick";
 import { rewriteLocalUrl } from "./lib/openUrlRewrite";
 import { outdatedExtensions } from "./lib/extensionUpdates";
 import { isAbsolutePath, parentPath } from "./lib/paths";
-import { IS_DETACHED } from "./lib/detachedWindows";
+import { detachedWindowGeometryAt, IS_DETACHED, WINDOW_INSTANCE_ID } from "./lib/detachedWindows";
 import { useDetachedWindows, type DetachedApi } from "./hooks/useDetachedWindows";
+import { useTabDragTransfer } from "./hooks/useTabDragTransfer";
+import type { TabDragPayload } from "./lib/detachedWindows";
+import type { DragSource } from "./components/TabBar";
+import type { DropTarget, NativeDragEndInfo } from "./components/SplitLayout";
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 500;
@@ -856,7 +860,9 @@ export default function App() {
     openAllWindows,
     closeTab,
     removeTabForMove,
+    removeTabsForMove,
     adoptTabs,
+    adoptTabsAt,
     closeAllTabs,
     cycleTab,
     moveTab,
@@ -898,7 +904,7 @@ export default function App() {
   // Detached windows (plans/detach-tab-to-new-window.md): the registry of
   // what each one holds, the action that opens one, and the focus-instead-
   // of-duplicate check useTabs' open paths consult through detachedApiRef.
-  const { detachTab, holderOf, focusDetachedTab } = useDetachedWindows(
+  const { detachTab, detachTabs, holderOf, focusDetachedTab } = useDetachedWindows(
     tabs,
     activeTabId,
     tabsRef,
@@ -920,6 +926,79 @@ export default function App() {
       removeTabForMove(tabId);
     },
     [detachTab, removeTabForMove, groupContentRects, showError, tabsRef, dirtyTabsRef],
+  );
+
+  // Native tab drags (plans/cross-window-tab-drag.md). The payload carries
+  // the dragged tabs themselves, so any window it lands in can adopt them
+  // without asking; dirtiness travels as a separate drag type so the target
+  // can refuse during dragover.
+  const dragPayloadFor = useCallback(
+    (source: DragSource, editorGroupId: string): { payload: TabDragPayload; dirty: boolean } => {
+      const groupTabs = tabsRef.current.filter((t) => t.groupId === editorGroupId);
+      const tabs =
+        source.kind === "tab"
+          ? groupTabs.filter((t) => t.id === source.tabId)
+          : groupTabs.filter((t) => groupKeyForTab(t, projectKeyForSession) === source.groupKey);
+      const rect = groupContentRects[editorGroupId];
+      return {
+        payload: {
+          dragId: crypto.randomUUID(),
+          windowId: WINDOW_INSTANCE_ID,
+          kind: source.kind,
+          tabs,
+          groupKey: source.kind === "chip" ? source.groupKey : undefined,
+          paneRect: { width: rect?.width ?? 0, height: rect?.height ?? 0 },
+        },
+        dirty: tabs.some((t) => dirtyTabsRef.current.has(t.id)),
+      };
+    },
+    [tabsRef, projectKeyForSession, groupContentRects, dirtyTabsRef],
+  );
+  const { announceTaken, resolveDragEnd } = useTabDragTransfer();
+  // useTabGroups (and its moveGroup) is called further down; a ref bridges
+  // the ordering gap, same pattern as refreshClipboardMirrorRef.
+  const moveGroupRef = useRef<(editorGroupId: string, groupKey: string, toIndex: number) => void>(() => {});
+  // A drop from another window landed in one of this window's panes.
+  const handleForeignDrop = useCallback(
+    (payload: TabDragPayload, target: DropTarget) => {
+      const taken = adoptTabsAt(payload.tabs, target);
+      if (target.kind === "chipBar" && payload.groupKey !== undefined) {
+        // Chip order lives in useTabGroups; its functional updater runs after
+        // the adoption's, so it sees the appended block.
+        moveGroupRef.current(target.groupId, payload.groupKey, target.index);
+      }
+      announceTaken(payload.dragId, taken);
+    },
+    [adoptTabsAt, announceTaken],
+  );
+  // This window's own native drag ended: taken by another window, released
+  // inside one (a cancel), released outside every window (a tear-off), or
+  // simply cancelled.
+  const finishForeignDrag = useCallback(
+    async (payload: TabDragPayload, info: NativeDragEndInfo) => {
+      if (info.handledLocally) return;
+      const dirty = payload.tabs.some((t) => dirtyTabsRef.current.has(t.id));
+      const result = await resolveDragEnd(payload.dragId, info.screenX, info.screenY);
+      if (result.taken && result.taken.length > 0) {
+        removeTabsForMove(result.taken);
+        return;
+      }
+      const outsideThisWindow =
+        info.clientX < 0 || info.clientY < 0 || info.clientX > window.innerWidth || info.clientY > window.innerHeight;
+      if (result.endedInOtherWindow || !outsideThisWindow) {
+        if (dirty && (result.endedInOtherWindow || outsideThisWindow)) {
+          showError(new Error("Save or discard this tab's changes before moving it into a new window."));
+        }
+        return;
+      }
+      if (dirty) {
+        showError(new Error("Save or discard this tab's changes before moving it into a new window."));
+        return;
+      }
+      const geometry = detachedWindowGeometryAt({ screenX: info.screenX, screenY: info.screenY }, payload.paneRect);
+      if (detachTabs(payload.tabs, geometry)) removeTabsForMove(payload.tabs.map((t) => t.id));
+    },
+    [resolveDragEnd, removeTabsForMove, dirtyTabsRef, showError, detachTabs],
   );
 
   // Back/forward over the tabs you've been in — the sidebar footer's two
@@ -1094,6 +1173,7 @@ export default function App() {
     confirmDialog,
     projectKeyForSession,
   );
+  moveGroupRef.current = moveGroup;
 
   // The project the bottom panel is currently scoped to — same identity the
   // editor's own tab groups use (useTabs' projectKeyForSession), so a
@@ -2379,6 +2459,10 @@ export default function App() {
           onReorder={moveTab}
           onMoveTabToGroup={moveTabToGroup}
           onSplitAndMoveTab={splitGroupAndMoveTab}
+          nativeDrag={!mobilePointer}
+          dragPayloadFor={dragPayloadFor}
+          onForeignDrop={handleForeignDrop}
+          onNativeDragEnd={finishForeignDrag}
           onToggleSidebar={() => setSidebarSideVisible("left", !sidebarVisible)}
           groupingEnabled={settings.tabGroupsBySession}
           groupKey={tabGroupKey}
