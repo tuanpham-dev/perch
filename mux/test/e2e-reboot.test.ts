@@ -47,6 +47,8 @@ test('sessions, layout, cwd and scrollback survive a hard daemon kill', async ()
   const { env, dir } = makeEnv();
   try {
     sp(env, 'config', 'set', 'snapshotDebounceMs', '300');
+    // Killed hard and read back within seconds: a window may not wait 30 s for its second save.
+    sp(env, 'config', 'set', 'scrollbackWriteIntervalMs', '0');
     sp(env, 'new', 'work', '-c', 'echo DECLARED-MARK');
     // The declared command's own output is the signal that the shell is up and
     // running commands; typing before that goes nowhere.
@@ -120,6 +122,8 @@ test('--no-cmd restores layout without re-running declared commands', async () =
   const { env, dir } = makeEnv();
   try {
     sp(env, 'config', 'set', 'snapshotDebounceMs', '300');
+    // Killed hard and read back within seconds: a window may not wait 30 s for its second save.
+    sp(env, 'config', 'set', 'scrollbackWriteIntervalMs', '0');
     sp(env, 'new', 'nc', '-c', 'echo SHOULD-NOT-RERUN');
     await waitForMatch('the declared command to run once', () => sp(env, 'capture', 'nc:0', '-S', '80'), /SHOULD-NOT-RERUN/);
     process.kill(daemonPid(env), 'SIGKILL');
@@ -139,6 +143,8 @@ test('a restored window reports what was running in it until a client clears it'
   const { env, dir } = makeEnv();
   try {
     sp(env, 'config', 'set', 'snapshotDebounceMs', '300');
+    // Killed hard and read back within seconds: a window may not wait 30 s for its second save.
+    sp(env, 'config', 'set', 'scrollbackWriteIntervalMs', '0');
     sp(env, 'new', 'agent');
     sp(env, 'send', 'agent:0', 'sleep 300', '--enter');
     await waitFor('sleep to be recorded in the snapshot', () => {
@@ -186,6 +192,8 @@ test('with scrollback saving off, the snapshot keeps the layout and deletes save
   const { env, dir } = makeEnv();
   try {
     sp(env, 'config', 'set', 'snapshotDebounceMs', '300');
+    // Killed hard and read back within seconds: a window may not wait 30 s for its second save.
+    sp(env, 'config', 'set', 'scrollbackWriteIntervalMs', '0');
     sp(env, 'new', 'plain');
     sp(env, 'send', 'plain:0', 'echo SECRET-MARK', '--enter');
     const scrollback = join(env.PERCH_STATE_DIR, 'scrollback');

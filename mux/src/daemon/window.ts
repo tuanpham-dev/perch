@@ -95,6 +95,10 @@ export class Window {
   rows: number;
   onExit: ((w: Window) => void) | undefined;
   onActivity: (() => void) | undefined;
+  /** True until the snapshotter has written this window's scrollback files;
+   *  set again by every PTY chunk and by a resize. Starts true so a new or
+   *  restored window is saved by the first snapshot. */
+  scrollbackDirty = true;
 
   #pty: IPty;
   #term: InstanceType<typeof Terminal>;
@@ -227,6 +231,7 @@ export class Window {
       const bytes = Buffer.from(data, 'utf8');
       this.#raw.push(bytes);
       this.#lastOutputAt = Date.now();
+      this.scrollbackDirty = true;
       if (this.#subs.size > 0) this.#lastSeenAt = this.#lastOutputAt;
       // A bell is how a program — a coding agent, most usefully — asks for
       // attention. Counted here rather than in the browser, because the browser
@@ -282,6 +287,7 @@ export class Window {
       try { this.#pty.resize(cols, rows); } catch { /* races with pty exit */ }
     }
     this.#term.resize(cols, rows);
+    this.scrollbackDirty = true;
   }
 
   /** Escape-sequence replay that reconstructs this window's screen and scrollback. */

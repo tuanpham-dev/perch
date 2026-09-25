@@ -46,7 +46,15 @@ export class Snapshotter {
   #debounceMs: () => number;
   #serverUrl: () => string | null;
   #persistScrollback: () => boolean;
+  #writeIntervalMs: () => number;
   #timer: NodeJS.Timeout | null = null;
+  /** Armed when a debounced write skipped a window that was dirty but saved
+   *  too recently: fires when the earliest such window is due, so its output
+   *  reaches disk without waiting for more activity. */
+  #dueTimer: NodeJS.Timeout | null = null;
+  /** When each window's scrollback files were last written, by window id.
+   *  Empty on daemon start, so the first snapshot writes every window. */
+  #savedAt = new Map<string, number>();
 
   constructor(
     store: SessionStore<Window>,
@@ -54,12 +62,14 @@ export class Snapshotter {
     debounceMs: () => number,
     serverUrl: () => string | null = () => null,
     persistScrollback: () => boolean = () => true,
+    writeIntervalMs: () => number = () => 30000,
   ) {
     this.#store = store;
     this.#persistLines = persistLines;
     this.#debounceMs = debounceMs;
     this.#serverUrl = serverUrl;
     this.#persistScrollback = persistScrollback;
+    this.#writeIntervalMs = writeIntervalMs;
   }
 
   /** Coalesces bursty PTY output into at most one write per debounce window. */
@@ -67,20 +77,29 @@ export class Snapshotter {
     if (this.#timer) return;
     this.#timer = setTimeout(() => {
       this.#timer = null;
-      this.now();
+      this.#write(false);
     }, this.#debounceMs());
     this.#timer.unref();
   }
 
-  /** Immediate write, for structural changes and shutdown. */
+  /** Immediate write, for structural changes and shutdown. Every changed
+   *  window is saved now, however recently it was saved last. */
   now(): void {
     if (this.#timer) { clearTimeout(this.#timer); this.#timer = null; }
+    this.#write(true);
+  }
+
+  #write(force: boolean): void {
+    if (this.#dueTimer) { clearTimeout(this.#dueTimer); this.#dueTimer = null; }
+    const now = Date.now();
     const lines = this.#persistLines();
     const withScrollback = this.#persistScrollback();
+    const interval = this.#writeIntervalMs();
     // Ids whose scrollback files stay; everything else in the directory is
     // swept — which is also how turning scrollback off removes what was saved.
     const live = new Set<string>();
-    const snapshot: Snapshot = { version: SNAPSHOT_VERSION, savedAt: Date.now(), serverUrl: this.#serverUrl(), sessions: [] };
+    let earliestDue = Infinity;
+    const snapshot: Snapshot = { version: SNAPSHOT_VERSION, savedAt: now, serverUrl: this.#serverUrl(), sessions: [] };
     for (const session of this.#store.sessions.values()) {
       const windows: WindowSnapshot[] = [];
       for (const w of session.windows) {
@@ -91,9 +110,24 @@ export class Snapshotter {
         const running = w.restoredCommands ?? w.descendantCommands().slice(1);
         windows.push({ windowId: w.id, name: w.name, autoName: w.autoName, running, cwd: w.liveCwd(), command: w.command, cols: w.cols, rows: w.rows });
         if (!withScrollback) continue;
-        // Serialize snapshot (fallback) + raw sidecar (byte-exact replay, T1.6).
-        try { atomicWrite(scrollbackFile(w.id), w.serializeState(lines)); } catch { /* skip a window we can't serialize */ }
-        try { atomicWrite(rawScrollbackFile(w.id), w.rawBytes()); } catch { /* raw sidecar is best-effort; serialize covers restore */ }
+        // A window that printed nothing since its last save is current on disk.
+        if (!w.scrollbackDirty) continue;
+        const last = this.#savedAt.get(w.id) ?? 0;
+        if (!force && now - last < interval) {
+          earliestDue = Math.min(earliestDue, last + interval);
+          continue;
+        }
+        // Serialized replay (fallback) + raw sidecar (byte-exact, T1.6), written
+        // together or not at all: a window whose write fails stays dirty and
+        // is retried by the next snapshot.
+        try {
+          const replay = w.serializeState(lines);
+          const raw = w.rawBytes();
+          atomicWrite(scrollbackFile(w.id), replay);
+          atomicWrite(rawScrollbackFile(w.id), raw);
+          w.scrollbackDirty = false;
+          this.#savedAt.set(w.id, now);
+        } catch { /* still dirty; the next snapshot tries again */ }
       }
       if (windows.length > 0) {
         snapshot.sessions.push({ id: session.id, name: session.name, createdAt: session.createdAt, rootCwd: session.rootCwd, currentIndex: Math.min(session.currentIndex, windows.length - 1), windows });
@@ -101,6 +135,14 @@ export class Snapshotter {
     }
     try { atomicWrite(statePath(), JSON.stringify(snapshot, null, 2)); } catch { /* best effort */ }
     this.#sweepOrphans(live);
+    for (const id of this.#savedAt.keys()) if (!live.has(id)) this.#savedAt.delete(id);
+    if (earliestDue !== Infinity) {
+      this.#dueTimer = setTimeout(() => {
+        this.#dueTimer = null;
+        this.#write(false);
+      }, Math.max(0, earliestDue - now));
+      this.#dueTimer.unref();
+    }
   }
 
   /** Drop scrollback files whose window no longer exists. */

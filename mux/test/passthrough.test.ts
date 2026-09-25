@@ -125,6 +125,8 @@ test('OSC 8 and OSC 133 survive a reboot (raw sidecar restore)', async () => {
   const { env, dir } = makeEnv();
   try {
     sp(env, 'config', 'set', 'snapshotDebounceMs', '300');
+    // Killed hard and read back within seconds: a window may not wait 30 s for its second save.
+    sp(env, 'config', 'set', 'scrollbackWriteIntervalMs', '0');
     sp(env, 'new', 'reboot-esc');
     await sleep(500);
     emitEscapes(env, 'reboot-esc:0');

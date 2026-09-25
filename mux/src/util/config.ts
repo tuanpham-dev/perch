@@ -5,6 +5,9 @@ import { platform } from '../platform/index.ts';
 
 export type Config = {
   snapshotDebounceMs: number;
+  /** Minimum ms between two saves of one window's scrollback. 0 saves a
+   *  window in every snapshot it changed in. */
+  scrollbackWriteIntervalMs: number;
   scrollbackLines: number;
   persistScrollbackLines: number;
   rawScrollbackBytes: number;
@@ -21,6 +24,7 @@ export type ConfigKey = keyof Config;
 
 export const CONFIG_KEYS: readonly ConfigKey[] = [
   'snapshotDebounceMs',
+  'scrollbackWriteIntervalMs',
   'scrollbackLines',
   'persistScrollbackLines',
   'rawScrollbackBytes',
@@ -33,6 +37,9 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
 export function defaults(): Config {
   return {
     snapshotDebounceMs: 2000,
+    // A busy window is rewritten at most this often (a debounced snapshot
+    // skips it until then); structural snapshots and daemon stop ignore it.
+    scrollbackWriteIntervalMs: 30000,
     scrollbackLines: 5000,
     persistScrollbackLines: 2000,
     // Byte cap for the raw-scrollback sidecar (T1.6). ~256 KiB per window holds
@@ -48,8 +55,9 @@ export function defaults(): Config {
 
 type Warn = (msg: string) => void;
 
-const RANGES: Record<'snapshotDebounceMs' | 'scrollbackLines' | 'persistScrollbackLines' | 'rawScrollbackBytes', [number, number]> = {
+const RANGES: Record<'snapshotDebounceMs' | 'scrollbackWriteIntervalMs' | 'scrollbackLines' | 'persistScrollbackLines' | 'rawScrollbackBytes', [number, number]> = {
   snapshotDebounceMs: [100, 60000],
+  scrollbackWriteIntervalMs: [0, 600000],
   scrollbackLines: [100, 100000],
   persistScrollbackLines: [0, 100000],
   rawScrollbackBytes: [1024, 16777216],
