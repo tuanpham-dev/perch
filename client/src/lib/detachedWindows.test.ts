@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { Tab } from "../types";
 import {
   applyWindowTabs,
+  decodeDragPayload,
   decodeHandoff,
   detachedWindowGeometry,
+  detachedWindowGeometryAt,
+  encodeDragPayload,
   encodeHandoff,
   holderOf,
+  pointInWindow,
   removeWindow,
   seedDetachedStorage,
 } from "./detachedWindows";
@@ -109,5 +113,57 @@ describe("detachedWindowGeometry", () => {
       top: 40,
     });
     expect(detachedWindowGeometry(null)).toEqual({ width: 640, height: 400, left: 40, top: 40 });
+  });
+});
+
+describe("drag payload", () => {
+  it("round-trips and rejects wrong shapes", () => {
+    const payload = {
+      dragId: "d1",
+      windowId: "w1",
+      kind: "chip" as const,
+      tabs: [terminal, viewer],
+      groupKey: "/works/perch",
+      paneRect: { width: 800, height: 500 },
+    };
+    expect(decodeDragPayload(encodeDragPayload(payload))).toEqual(payload);
+    expect(decodeDragPayload("nope")).toBeNull();
+    expect(decodeDragPayload(JSON.stringify({ dragId: "d", windowId: "w", kind: "tab", tabs: "x" }))).toBeNull();
+    expect(decodeDragPayload(JSON.stringify({ dragId: "d", windowId: "w", kind: "pane", tabs: [] }))).toBeNull();
+    expect(decodeDragPayload(JSON.stringify({ dragId: "d", windowId: "w", kind: "tab", tabs: [terminal] }))).toEqual({
+      dragId: "d",
+      windowId: "w",
+      kind: "tab",
+      tabs: [terminal],
+      groupKey: undefined,
+      paneRect: { width: 0, height: 0 },
+    });
+  });
+});
+
+describe("pointInWindow", () => {
+  it("is inclusive at the origin and exclusive at the far edges", () => {
+    const w = { screenX: 100, screenY: 50, outerWidth: 600, outerHeight: 400 };
+    expect(pointInWindow(100, 50, w)).toBe(true);
+    expect(pointInWindow(699, 449, w)).toBe(true);
+    expect(pointInWindow(700, 449, w)).toBe(false);
+    expect(pointInWindow(99, 100, w)).toBe(false);
+  });
+});
+
+describe("detachedWindowGeometryAt", () => {
+  it("clamps the size and offsets the point, never off-screen", () => {
+    expect(detachedWindowGeometryAt({ screenX: 1000, screenY: 300 }, { width: 300, height: 200 })).toEqual({
+      width: 640,
+      height: 400,
+      left: 960,
+      top: 260,
+    });
+    expect(detachedWindowGeometryAt({ screenX: 10, screenY: 10 }, { width: 900, height: 600 })).toEqual({
+      width: 900,
+      height: 600,
+      left: 0,
+      top: 0,
+    });
   });
 });

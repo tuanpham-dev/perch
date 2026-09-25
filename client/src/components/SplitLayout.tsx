@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import type { BranchNode, SplitDirection, SplitNode } from "../lib/splits";
 import type { AppSettings } from "../settings";
 import type { MenuItem, Tab, TabGroupState } from "../types";
-import TabBar from "./TabBar";
+import {
+  decodeDragPayload,
+  encodeDragPayload,
+  TAB_DRAG_CHIP_TYPE,
+  TAB_DRAG_DIRTY_TYPE,
+  TAB_DRAG_TYPE,
+  WINDOW_INSTANCE_ID,
+  type TabDragPayload,
+} from "../lib/detachedWindows";
+import TabBar, { type DragSource } from "./TabBar";
 
 // Where a tab-drag would land if dropped right now — computed by the
 // coordinator's hit-test and consumed both to apply the drop and to render
@@ -12,9 +21,23 @@ import TabBar from "./TabBar";
 // (null indicatorId only for a bar with no other tabs). "zone": one of a
 // group's content-area 5 zones (VS Code's drop overlay) — center moves the
 // tab into that group, an edge splits it.
-type DropTarget =
+// "chipBar": a chip drag over some bar's strip, at position `index` among
+// that bar's chips (excluding the dragged one) - the only target a chip
+// can land on (plans/cross-window-tab-drag.md).
+export type DropTarget =
   | { kind: "bar"; groupId: string; index: number; indicatorId: string | null; indicatorEdge: "left" | "right" }
-  | { kind: "zone"; groupId: string; zone: "center" | "left" | "right" | "top" | "bottom" };
+  | { kind: "zone"; groupId: string; zone: "center" | "left" | "right" | "top" | "bottom" }
+  | { kind: "chipBar"; groupId: string; index: number; indicatorKey: string | null; indicatorEdge: "left" | "right" };
+
+// What the source window learns when its native drag ends, before deciding
+// between "taken by another window", "cancelled" and "torn off".
+export interface NativeDragEndInfo {
+  handledLocally: boolean;
+  clientX: number;
+  clientY: number;
+  screenX: number;
+  screenY: number;
+}
 
 interface SharedProps {
   tabs: Tab[];
@@ -93,15 +116,39 @@ interface SharedProps {
   dropTarget: DropTarget | null;
   onTabPointerDown: (e: React.PointerEvent, tabId: string, sourceGroupId: string) => void;
   tabJustDraggedRef: React.MutableRefObject<boolean>;
+  // Native drag and drop for the mouse (plans/cross-window-tab-drag.md) -
+  // the coordinator's, threaded to every bar like the pointer state above.
+  nativeDrag: boolean;
+  nativeDragGroupKey: string | null;
+  onDragSourceStart: (e: React.DragEvent, source: DragSource, sourceGroupId: string) => void;
+  onDragSourceEnd: (e: React.DragEvent, source: DragSource, sourceGroupId: string) => void;
 }
 
 interface CoordinatorProps {
   onReorder: (draggedId: string, toIndex: number) => void;
   onMoveTabToGroup: (tabId: string, targetGroupId: string, index?: number) => void;
   onSplitAndMoveTab: (targetGroupId: string, direction: SplitDirection, tabId: string) => void;
+  // Builds the payload a native drag carries (App knows the tabs, the pane
+  // size and which tabs have unsaved changes).
+  dragPayloadFor: (source: DragSource, editorGroupId: string) => { payload: TabDragPayload; dirty: boolean };
+  // A drop from another window landed here.
+  onForeignDrop: (payload: TabDragPayload, target: DropTarget) => void;
+  // This window's own native drag ended somewhere (maybe in another window).
+  onNativeDragEnd: (payload: TabDragPayload, info: NativeDragEndInfo) => void;
 }
 
-interface Props extends Omit<SharedProps, "dragTabId" | "dropTarget" | "onTabPointerDown" | "tabJustDraggedRef">, CoordinatorProps {
+interface Props
+  extends Omit<
+      SharedProps,
+      | "dragTabId"
+      | "dropTarget"
+      | "onTabPointerDown"
+      | "tabJustDraggedRef"
+      | "nativeDragGroupKey"
+      | "onDragSourceStart"
+      | "onDragSourceEnd"
+    >,
+    CoordinatorProps {
   tree: SplitNode;
 }
 
@@ -154,6 +201,10 @@ function Leaf({
   dropTarget,
   onTabPointerDown,
   tabJustDraggedRef,
+  nativeDrag,
+  nativeDragGroupKey,
+  onDragSourceStart,
+  onDragSourceEnd,
 }: SharedProps & { groupId: string; flexStyle: CSSProperties; innerRef: (el: HTMLDivElement | null) => void }) {
   // Memoized so a re-render that leaves `tabs` referentially unchanged (e.g.
   // the 3s session poll, which always swaps in a fresh `sessions` array even
@@ -164,6 +215,10 @@ function Leaf({
   const dropIndicator =
     dropTarget?.kind === "bar" && dropTarget.groupId === groupId && dropTarget.indicatorId
       ? { id: dropTarget.indicatorId, edge: dropTarget.indicatorEdge }
+      : null;
+  const chipDropIndicator =
+    dropTarget?.kind === "chipBar" && dropTarget.groupId === groupId && dropTarget.indicatorKey
+      ? { id: dropTarget.indicatorKey, edge: dropTarget.indicatorEdge }
       : null;
   return (
     <div
@@ -204,6 +259,11 @@ function Leaf({
         dropIndicator={dropIndicator}
         onTabPointerDown={(e, tabId) => onTabPointerDown(e, tabId, groupId)}
         tabJustDraggedRef={tabJustDraggedRef}
+        nativeDrag={nativeDrag}
+        chipDropIndicator={chipDropIndicator}
+        nativeDragGroupKey={nativeDragGroupKey}
+        onDragSourceStart={(e, source) => onDragSourceStart(e, source, groupId)}
+        onDragSourceEnd={(e, source) => onDragSourceEnd(e, source, groupId)}
       />
       <div className="split-leaf-content" ref={contentSlotRefFor(groupId)} />
     </div>
@@ -366,6 +426,44 @@ function hitTest(clientX: number, clientY: number, draggedTabId: string): DropTa
   return { kind: "zone", groupId, zone: "center" };
 }
 
+// The chip counterpart of hitTest: a position among the chips of the strip
+// under the point (excluding the dragged chip's own key), null anywhere
+// else - a chip never lands on a pane zone.
+function hitTestChip(clientX: number, clientY: number, draggedKey: string | null): DropTarget | null {
+  const el = document.elementFromPoint(clientX, clientY);
+  const stripEl = el?.closest<HTMLElement>(".tab-strip");
+  if (!stripEl) return null;
+  const groupId = stripEl.closest<HTMLElement>(".split-leaf")?.dataset.groupId;
+  if (!groupId) return null;
+  const chipEls = Array.from(stripEl.querySelectorAll<HTMLElement>(".tab-group-chip")).filter(
+    (c) => c.dataset.groupKey !== draggedKey,
+  );
+  if (chipEls.length === 0) return { kind: "chipBar", groupId, index: 0, indicatorKey: null, indicatorEdge: "left" };
+  for (let i = 0; i < chipEls.length; i++) {
+    const rect = chipEls[i].getBoundingClientRect();
+    const key = chipEls[i].dataset.groupKey!;
+    if (clientX < rect.left + rect.width / 2) {
+      return { kind: "chipBar", groupId, index: i, indicatorKey: key, indicatorEdge: "left" };
+    }
+    if (clientX < rect.right) {
+      return { kind: "chipBar", groupId, index: i + 1, indicatorKey: key, indicatorEdge: "right" };
+    }
+  }
+  const last = chipEls[chipEls.length - 1];
+  return { kind: "chipBar", groupId, index: chipEls.length, indicatorKey: last.dataset.groupKey!, indicatorEdge: "right" };
+}
+
+function sameTarget(a: DropTarget | null, b: DropTarget | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// A hovering drag keeps firing dragover on the window under it - about
+// every 350 ms while the pointer is still (the spec's cadence), faster while
+// it moves. Silence this long means the drag left or ended elsewhere, since
+// no event tells a window that; QA showed 250 ms clears a still pointer's
+// indicator.
+const DRAGOVER_SILENCE_MS = 700;
+
 const ZONE_DIRECTION: Record<"left" | "right" | "top" | "bottom", SplitDirection> = {
   left: "left",
   right: "right",
@@ -373,7 +471,16 @@ const ZONE_DIRECTION: Record<"left" | "right" | "top" | "bottom", SplitDirection
   bottom: "down",
 };
 
-export default function SplitLayout({ tree, onReorder, onMoveTabToGroup, onSplitAndMoveTab, ...shared }: Props) {
+export default function SplitLayout({
+  tree,
+  onReorder,
+  onMoveTabToGroup,
+  onSplitAndMoveTab,
+  dragPayloadFor,
+  onForeignDrop,
+  onNativeDragEnd,
+  ...shared
+}: Props) {
   const dragSessionRef = useRef<{
     tabId: string;
     sourceGroupId: string;
@@ -394,6 +501,8 @@ export default function SplitLayout({ tree, onReorder, onMoveTabToGroup, onSplit
       else onMoveTabToGroup(tabId, target.groupId, target.index);
       return;
     }
+    // A chip target never applies to a single tab (see hitTestChip).
+    if (target.kind === "chipBar") return;
     if (target.zone === "center") {
       if (target.groupId === sourceGroupId) return;
       onMoveTabToGroup(tabId, target.groupId);
@@ -509,6 +618,129 @@ export default function SplitLayout({ tree, onReorder, onMoveTabToGroup, onSplit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---- Native drag and drop (mouse) ----------------------------------------
+  // The source side: what this window's own drag carries, its pane, and
+  // whether the drop was already applied here (an in-window drop).
+  const nativeRef = useRef<{ payload: TabDragPayload; sourceGroupId: string; handledLocally: boolean } | null>(null);
+  const [nativeDragGroupKey, setNativeDragGroupKey] = useState<string | null>(null);
+  // Latest callbacks for the document listeners below, which subscribe once.
+  const latestRef = useRef({ applyDrop, onForeignDrop, onReorderGroup: shared.onReorderGroup });
+  latestRef.current = { applyDrop, onForeignDrop, onReorderGroup: shared.onReorderGroup };
+
+  const handleDragSourceStart = (e: React.DragEvent, source: DragSource, sourceGroupId: string) => {
+    const { payload, dirty } = dragPayloadFor(source, sourceGroupId);
+    e.dataTransfer.setData(TAB_DRAG_TYPE, encodeDragPayload(payload));
+    if (dirty) e.dataTransfer.setData(TAB_DRAG_DIRTY_TYPE, "1");
+    if (payload.kind === "chip") e.dataTransfer.setData(TAB_DRAG_CHIP_TYPE, "1");
+    e.dataTransfer.effectAllowed = "move";
+    nativeRef.current = { payload, sourceGroupId, handledLocally: false };
+    if (source.kind === "tab") setDragTabId(source.tabId);
+    else setNativeDragGroupKey(source.groupKey);
+    document.body.classList.add("tab-dragging");
+  };
+
+  const handleDragSourceEnd = (e: React.DragEvent, source: DragSource) => {
+    const local = nativeRef.current;
+    nativeRef.current = null;
+    setDragTabId(null);
+    setNativeDragGroupKey(null);
+    setDropTarget(null);
+    document.body.classList.remove("tab-dragging");
+    if (!local) return;
+    if (source.kind === "tab") tabJustDraggedRef.current = true;
+    onNativeDragEnd(local.payload, {
+      handledLocally: local.handledLocally,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      screenX: e.screenX,
+      screenY: e.screenY,
+    });
+  };
+
+  useEffect(() => {
+    if (!shared.nativeDrag) return;
+    let silence: number | null = null;
+    const clearTarget = () => {
+      setDropTarget(null);
+      // The body class belongs to the source while its drag lasts.
+      if (!nativeRef.current) document.body.classList.remove("tab-dragging");
+    };
+    const armSilence = () => {
+      if (silence !== null) window.clearTimeout(silence);
+      silence = window.setTimeout(clearTarget, DRAGOVER_SILENCE_MS);
+    };
+    const targetFor = (e: DragEvent, chip: boolean): DropTarget | null => {
+      const local = nativeRef.current;
+      if (chip) {
+        const key = local?.payload.kind === "chip" ? (local.payload.groupKey ?? null) : null;
+        const t = hitTestChip(e.clientX, e.clientY, key);
+        // In-window chip drags stay within their own bar, as the touch path does.
+        if (local && t && t.groupId !== local.sourceGroupId) return null;
+        return t;
+      }
+      return hitTest(e.clientX, e.clientY, local?.payload.tabs[0]?.id ?? "");
+    };
+    const onDragOver = (e: DragEvent) => {
+      const types = e.dataTransfer?.types;
+      if (!types || !types.includes(TAB_DRAG_TYPE)) return;
+      const local = nativeRef.current;
+      // An unsaved tab from another window may not land here (spec R9).
+      if (!local && types.includes(TAB_DRAG_DIRTY_TYPE)) {
+        setDropTarget(null);
+        return;
+      }
+      const chip = local ? local.payload.kind === "chip" : types.includes(TAB_DRAG_CHIP_TYPE);
+      // Before hit-testing: the class lifts the content hosts out of
+      // elementFromPoint's way (see startDragTab), and a foreign drag has no
+      // dragstart here to have set it. The silence timer takes it back.
+      document.body.classList.add("tab-dragging");
+      const target = targetFor(e, chip);
+      if (target) {
+        e.preventDefault();
+        e.dataTransfer!.dropEffect = "move";
+      }
+      setDropTarget((prev) => (sameTarget(prev, target) ? prev : target));
+      armSilence();
+    };
+    const onDrop = (e: DragEvent) => {
+      const raw = e.dataTransfer?.getData(TAB_DRAG_TYPE);
+      if (!raw) return;
+      e.preventDefault();
+      if (silence !== null) window.clearTimeout(silence);
+      const payload = decodeDragPayload(raw);
+      const local = nativeRef.current;
+      const target = payload ? targetFor(e, payload.kind === "chip") : null;
+      if (payload && target) {
+        if (payload.windowId === WINDOW_INSTANCE_ID && local) {
+          if (payload.kind === "chip") {
+            if (target.kind === "chipBar" && payload.groupKey !== undefined) {
+              latestRef.current.onReorderGroup(target.groupId, payload.groupKey, target.index);
+            }
+          } else if (target.kind !== "chipBar") {
+            latestRef.current.applyDrop(payload.tabs[0].id, local.sourceGroupId, target);
+          }
+          local.handledLocally = true;
+        } else if (payload.windowId !== WINDOW_INSTANCE_ID) {
+          latestRef.current.onForeignDrop(payload, target);
+        }
+      }
+      clearTarget();
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (e.relatedTarget === null) clearTarget();
+    };
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    document.addEventListener("dragleave", onDragLeave);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+      document.removeEventListener("dragleave", onDragLeave);
+      if (silence !== null) window.clearTimeout(silence);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shared.nativeDrag]);
+
   // The zone overlay's pixel rect is measured (not computed from the
   // fractional tree) since it must line up with the actually-rendered DOM,
   // including any in-progress sash resize.
@@ -557,6 +789,9 @@ export default function SplitLayout({ tree, onReorder, onMoveTabToGroup, onSplit
         dropTarget={dropTarget}
         onTabPointerDown={handleTabPointerDown}
         tabJustDraggedRef={tabJustDraggedRef}
+        nativeDragGroupKey={nativeDragGroupKey}
+        onDragSourceStart={handleDragSourceStart}
+        onDragSourceEnd={handleDragSourceEnd}
       />
       {zoneOverlayRect && <div className="split-drop-overlay" style={{ ...zoneOverlayRect, position: "fixed" }} />}
     </>
