@@ -76,6 +76,9 @@ Both \`--flag value\` and \`--flag=value\` are accepted.
 
 With no flags: uses the system service (systemd or launchd) if available,
 else runs one instance in the background using server/.env or its defaults.
+\`perch restart\` with no flags and no system service restarts every
+background instance it started, each with the port and config it was
+started with (or starts one if none is running).
 
 With flags and a system service: the flags are written into server/.env and
 the service is restarted, so they persist across future restarts.
@@ -130,8 +133,37 @@ export async function cmdRestart(args: string[]): Promise<void> {
     if (existing) await stopInstance(existing);
     return startAdhoc(flags.values);
   }
+  // The same restart `perch update` does: every background instance comes
+  // back with the pid file, log file and config it was started with, so an
+  // instance started as `perch start --port 8044` is not replaced by one on
+  // the default port with server/.env's settings.
+  if (await restartBackgroundInstances()) return;
   await backgroundStop(PID_FILE);
   if (!(await backgroundStart(readPort()))) throw new Exit(1);
+  info(DAEMON_HINT);
+}
+
+const DAEMON_HINT = 'Terminals keep running on the previous terminal daemon until it restarts: perch daemon stop (sessions come back).';
+
+/** Restarts every background instance this CLI manages, each with the pid
+ *  file, log file and config it was started with. False when none was running. */
+async function restartBackgroundInstances(): Promise<boolean> {
+  let restarted = false;
+  for (const instance of listInstances()) {
+    if (instance.managedBy !== 'fallback') continue;
+    const pidFile = pidFileOf(instance) ?? pidFileForPort(instance.port);
+    const logFile = pidFile === PID_FILE ? LOG_FILE : logFileForPort(instance.port);
+    const env: Record<string, string> = { PORT: instance.port };
+    for (const name of ['APP_NAME', 'ALLOWED_HOSTS', 'AUTH_TOKEN', 'NEW_SESSION_CWD', 'PROXY_DOMAIN', 'PERCH_CONFIG_DIR', 'PERCH_STATE_DIR']) {
+      const value = envOf(instance.pid, name);
+      if (value) env[name] = value;
+    }
+    await stopInstance(instance);
+    await backgroundStart(instance.port, pidFile, logFile, env);
+    restarted = true;
+  }
+  if (restarted) info(DAEMON_HINT);
+  return restarted;
 }
 
 // ---- stop -------------------------------------------------------------------
@@ -302,24 +334,7 @@ export async function cmdUpdate(): Promise<void> {
     ok('restarted');
     return;
   }
-  // Restart every background instance this CLI manages, each with the pid
-  // file, log file and config it was started with.
-  let restarted = false;
-  for (const instance of listInstances()) {
-    if (instance.managedBy !== 'fallback') continue;
-    const pidFile = pidFileOf(instance) ?? pidFileForPort(instance.port);
-    const logFile = pidFile === PID_FILE ? LOG_FILE : logFileForPort(instance.port);
-    const env: Record<string, string> = { PORT: instance.port };
-    for (const name of ['APP_NAME', 'ALLOWED_HOSTS', 'AUTH_TOKEN', 'NEW_SESSION_CWD', 'PROXY_DOMAIN', 'PERCH_CONFIG_DIR', 'PERCH_STATE_DIR']) {
-      const value = envOf(instance.pid, name);
-      if (value) env[name] = value;
-    }
-    await stopInstance(instance);
-    await backgroundStart(instance.port, pidFile, logFile, env);
-    restarted = true;
-  }
-  if (!restarted) info('no running background instance found - nothing to restart');
-  info('Terminals keep running on the previous terminal daemon until it restarts: perch daemon stop (sessions come back).');
+  if (!(await restartBackgroundInstances())) info('no running background instance found - nothing to restart');
 }
 
 export const cmdPath = () => info(REPO_DIR);
