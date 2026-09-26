@@ -1,5 +1,5 @@
 import type { TerminalTheme } from "./engines/types";
-import { extensionFileUrl } from "./api";
+import { extensionFileUrl, putThemePaint } from "./api";
 import type { ExtensionInfo } from "./types";
 
 // Plastic Legacy (hadialqattan.plastic-legacy-1.0.0), extracted from the
@@ -381,9 +381,30 @@ export function syncThemeColorMeta(): void {
 export function applyColorThemeCssVars(cssVars: Record<string, string> | null): void {
   const root = document.documentElement.style;
   for (const name of ALL_THEME_VAR_NAMES) root.removeProperty(name);
+  const json = cssVars ? JSON.stringify(cssVars) : null;
+  try {
+    if (json) localStorage.setItem(CACHED_THEME_VARS_KEY, json);
+    else localStorage.removeItem(CACHED_THEME_VARS_KEY);
+  } catch {
+    // Storage full or blocked - the next load just paints the built-in theme first.
+  }
+  // The server paints the same vars into the page shell for a browser with
+  // nothing cached yet, and into the manifest for the installed app's splash
+  // screen. Once per load, then on each change.
+  if (json !== reportedThemeVars) {
+    reportedThemeVars = json;
+    putThemePaint(cssVars).catch(() => {});
+  }
   if (!cssVars) return;
   for (const [name, value] of Object.entries(cssVars)) root.setProperty(name, value);
 }
+
+// The last applied theme's vars, read back by the inline script in
+// index.html before the first paint - an extension theme otherwise only
+// lands after the extension list and the theme JSON are both fetched, so
+// every load flashed Plastic Legacy first. Keep the key in sync there.
+const CACHED_THEME_VARS_KEY = "colorThemeCssVars";
+let reportedThemeVars: string | null | undefined;
 
 export interface ColorThemeOption {
   value: string; // `${extensionId}:${themeLabel}` — no built-in "" entry

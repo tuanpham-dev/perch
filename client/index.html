@@ -15,6 +15,22 @@
     <link rel="icon" href="/icon.svg" sizes="any" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
     <title>Perch</title>
+    <!-- Paints the last applied color theme before the app loads, so an
+      extension theme doesn't flash the built-in one first. theme.ts's
+      applyColorThemeCssVars writes this key and replaces these vars once
+      the real theme resolves. -->
+    <script>
+      try {
+        var vars = JSON.parse(localStorage.getItem("colorThemeCssVars") || "null");
+        if (vars) {
+          var root = document.documentElement.style;
+          for (var name in vars) root.setProperty(name, vars[name]);
+          if (vars["--titlebar-bg"]) {
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", vars["--titlebar-bg"]);
+          }
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
