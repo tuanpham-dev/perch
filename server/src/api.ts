@@ -109,6 +109,7 @@ import {
   sendTextToSession,
   WindowGoneError,
 } from "./terminals.js";
+import { writeThemePaint } from "./themePaint.js";
 import { writeZip } from "./zip.js";
 
 export const api = Router();
@@ -342,6 +343,18 @@ api.put("/settings", async (req, res) => {
   try {
     await writeSettingsDoc(req.body);
     void applyTerminalSettings().catch((err) => console.error("failed to apply terminal settings:", err));
+    res.status(204).end();
+  } catch (err) {
+    res.status(400).json({ error: errMessage(err) });
+  }
+});
+
+// The active color theme's CSS vars, reported by the client whenever it
+// applies a theme (null for the built-in one) so the shell and manifest can
+// carry them - see themePaint.ts.
+api.put("/theme-paint", async (req, res) => {
+  try {
+    await writeThemePaint(req.body?.cssVars ?? null);
     res.status(204).end();
   } catch (err) {
     res.status(400).json({ error: errMessage(err) });

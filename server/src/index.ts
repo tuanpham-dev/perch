@@ -10,6 +10,7 @@ import { agentHookBodyParser, ensureAgentHookShim } from "./agentHooks.js";
 import { resumeRestoredAgents } from "./agentResume.js";
 import { applyTerminalSettings } from "./terminalSettings.js";
 import { api } from "./api.js";
+import { paintIndexHtml, paintManifest, readThemePaint } from "./themePaint.js";
 import { clientPathsMiddleware } from "./clientPaths.js";
 import { writeInstanceRecord } from "./instanceRecord.js";
 import { subscribeCommandEvents } from "./commandEvents.js";
@@ -209,13 +210,18 @@ if (existsSync(clientDist)) {
   // low-traffic personal tool, not worth caching.
   app.get("/manifest.webmanifest", (_req, res, next) => {
     const appName = process.env.APP_NAME;
-    if (!appName || !existsSync(manifestPath)) {
+    const paint = readThemePaint();
+    if ((!appName && !paint) || !existsSync(manifestPath)) {
       next();
       return;
     }
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    manifest.name = appName;
-    manifest.short_name = appName;
+    if (appName) {
+      manifest.name = appName;
+      manifest.short_name = appName;
+    }
+    // The installed app's splash screen and title bar, before any page runs.
+    paintManifest(manifest, paint);
     res.type("application/manifest+json").send(JSON.stringify(manifest));
   });
 
@@ -256,15 +262,15 @@ if (existsSync(clientDist)) {
   });
   app.get(/^\/(?!api|ws).*/, (_req, res) => {
     const appName = process.env.APP_NAME;
-    if (!appName) {
+    const paint = readThemePaint();
+    if (!appName && !paint) {
       res.sendFile(indexHtmlPath);
       return;
     }
-    const html = readFileSync(indexHtmlPath, "utf8").replace(
-      /<title>.*?<\/title>/,
-      `<title>${escapeHtml(appName)}</title>`,
-    );
-    res.type("html").send(html);
+    let html = readFileSync(indexHtmlPath, "utf8");
+    if (appName) html = html.replace(/<title>.*?<\/title>/, `<title>${escapeHtml(appName)}</title>`);
+    // The active theme's colors, for a browser that has none cached yet.
+    res.type("html").send(paintIndexHtml(html, paint));
   });
 }
 

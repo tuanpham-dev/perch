@@ -80,6 +80,16 @@ export function putSettingsDoc(doc: SettingsDoc): Promise<void> {
   });
 }
 
+// The active color theme's CSS vars (null for the built-in theme), which
+// the server paints into the page shell and the web app manifest.
+export function putThemePaint(cssVars: Record<string, string> | null): Promise<void> {
+  return request("/api/theme-paint", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cssVars }),
+  });
+}
+
 // The agent registry as the server resolves it: enabled entries only, in the
 // user's own order, seeded with the defaults for a profile that has never
 // stored the list (server/src/agents.ts). The same list extensions read
