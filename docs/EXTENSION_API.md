@@ -561,6 +561,24 @@ Joins the command palette (`Ctrl+Shift+P`) and the Keyboard Shortcuts
 settings, where users can rebind it. Combos use the keybindings.ts syntax:
 modifiers + `KeyX`/`Digit1`/named keys, e.g. `"ctrl+shift+KeyG"`.
 
+### Taking over the keyboard — `data-keyboard-capture`
+
+Perch's app shortcuts (Ctrl+P, Ctrl+Tab, Ctrl+W, the sidebar keys...) are
+dispatched at the window's capture phase, before any extension element sees
+the key. An element that must receive every key (a remote desktop, a game)
+opts out by carrying `data-keyboard-capture` on itself or an ancestor of the
+focused element:
+
+- `"always"`: app shortcuts never fire while focus is inside it.
+- `"fullscreen"`: only while it is inside `document.fullscreenElement`, so
+  the app's shortcuts still work in the normal layout.
+
+This only stops Perch's own dispatcher; the browser's reserved shortcuts need
+[Keyboard Lock](https://developer.mozilla.org/en-US/docs/Web/API/Keyboard/lock)
+(`navigator.keyboard.lock()`, Chromium, fullscreen only), and even then the
+browser keeps tab-closing combos such as Ctrl+W. Reference: `remote-desktop`
+in perch-extensions.
+
 ### File viewers — `registerFileViewer`
 
 ```ts
