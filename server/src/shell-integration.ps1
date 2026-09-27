@@ -18,6 +18,16 @@ $global:__PerchCmd = ''
 $global:__PerchHttp = [System.Net.Http.HttpClient]::new()
 $global:__PerchHttp.Timeout = [TimeSpan]::FromSeconds(1)
 
+# cdp: back to the folder this terminal's session was started in (its project
+# root), or to a path under it: `cdp client\src`. Left alone when your own
+# profile already defines a cdp.
+if (-not (Get-Command cdp -ErrorAction SilentlyContinue)) {
+  function global:cdp([string]$Path) {
+    if (-not $env:PERCH_ROOT) { Write-Error 'cdp: this terminal has no project root'; return }
+    if ($Path) { Set-Location -LiteralPath (Join-Path $env:PERCH_ROOT $Path) } else { Set-Location -LiteralPath $env:PERCH_ROOT }
+  }
+}
+
 # shell + seq pair each end report with its start (see the bash/zsh script).
 # The custom header is the CSRF guard the report route requires.
 function global:__PerchReport([string]$Event, [string]$Command, [string]$Exit) {

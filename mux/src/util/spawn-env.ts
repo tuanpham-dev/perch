@@ -37,6 +37,7 @@ const LAUNCHER_CONTEXT_VARS = new Set([
   'TMUX_PANE',
   'PERCH_SESSION',
   'PERCH_WINDOW',
+  'PERCH_ROOT',
   'PERCH_SERVER_URL',
   'CLAUDECODE',
   'CLAUDE_PID',
@@ -70,6 +71,8 @@ export type SpawnIdentity = {
   sessionName: string;
   /** The window's stable uuid — the durable identity, analog of $TMUX_PANE. */
   windowId: string;
+  /** The session's rootCwd: the project folder `cdp` returns to. */
+  rootCwd: string;
   /**
    * The app server this shell should report commands to, when one has
    * announced itself.
@@ -95,6 +98,7 @@ export function spawnEnv(identity: SpawnIdentity): Record<string, string> {
   }
   env.PERCH_SESSION = identity.sessionName;
   env.PERCH_WINDOW = identity.windowId;
+  env.PERCH_ROOT = identity.rootCwd;
   if (identity.serverUrl) env.PERCH_SERVER_URL = identity.serverUrl;
   return env;
 }

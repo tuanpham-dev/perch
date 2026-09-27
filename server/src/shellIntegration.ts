@@ -70,6 +70,22 @@ case $- in *i*) ;; *) return 0 2>/dev/null || exit 0 ;; esac
 [ -n "\${_PERCH_INTEGRATION-}" ] && return 0
 _PERCH_INTEGRATION=1
 
+# cdp: back to the folder this terminal's session was started in (its project
+# root), or to a path under it: \`cdp client/src\`. A tmux pane has no
+# PERCH_ROOT; its session's start directory is the same thing. Left alone
+# when your own setup already defines a cdp.
+if ! command -v cdp >/dev/null 2>&1; then
+  cdp() {
+    local root="\${PERCH_ROOT-}"
+    [ -z "$root" ] && [ -n "\${TMUX-}" ] && root=$(tmux display-message -p '#{session_path}' 2>/dev/null)
+    if [ -z "$root" ]; then
+      echo "cdp: this terminal has no project root" >&2
+      return 1
+    fi
+    cd -- "$root\${1:+/$1}"
+  }
+fi
+
 # The subshell keeps the backgrounded curl out of the interactive shell's job
 # table (no "[1] 1234" noise, nothing for the shell to reap). The custom
 # header is the CSRF guard (same idea as the open-url shim): a cross-origin
