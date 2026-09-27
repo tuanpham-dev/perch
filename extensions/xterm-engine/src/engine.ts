@@ -110,13 +110,33 @@ export async function createXtermEngine(
   // loss later (GPU reset, driver crash) is handled the same way: dispose
   // the addon and let xterm fall back to DOM rather than rendering a blank
   // terminal.
+  let webgl: WebglAddon | null = null;
   try {
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => webgl.dispose());
+    webgl = new WebglAddon();
+    webgl.onContextLoss(() => {
+      webgl?.dispose();
+      webgl = null;
+    });
     term.loadAddon(webgl);
   } catch {
     // No WebGL2 support — DOM renderer remains active.
+    webgl = null;
   }
+
+  // A tab left in the background for a while (mobile Chrome especially)
+  // comes back with letters missing: the GPU quietly evicted pages of the
+  // glyph texture atlas, and since no webglcontextlost event fired, the
+  // addon still believes those glyphs are cached and draws them as blank
+  // cells. Selection still highlights the right text because the buffer
+  // is intact — only the pixels are gone. clearTextureAtlas() is the
+  // addon's own recovery path: it throws the atlas away, re-rasterizes
+  // every visible glyph on the next frame and redraws the viewport. Cheap
+  // enough to do unconditionally on every return to the foreground.
+  const onDocumentVisible = () => {
+    if (document.hidden || disposed) return;
+    webgl?.clearTextureAtlas();
+  };
+  document.addEventListener("visibilitychange", onDocumentVisible);
 
   const rowsEl = term.element?.querySelector(".xterm-rows") as HTMLElement | null;
   const applyTextThickness = (thickness: number) => {
@@ -661,6 +681,7 @@ export async function createXtermEngine(
       endLocalSelectionDrag?.();
       screen.removeEventListener("copy", onCopyEvent, true);
       screen.removeEventListener("mousemove", onTooltipMouseMove);
+      document.removeEventListener("visibilitychange", onDocumentVisible);
       term.textarea?.removeEventListener("compositionupdate", onCompositionUpdate);
       term.textarea?.removeEventListener("compositionend", onCompositionEndForPreview);
       term.textarea?.removeEventListener("compositionend", onCompositionEndCleanup);
