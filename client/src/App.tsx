@@ -2401,6 +2401,7 @@ export default function App() {
           <Sidebar
             width={sidebarWidth}
             side="left"
+            onHide={() => setSidebarSideVisible("left", false)}
             layout={sidebarLayout}
             tabs={sidebarView.left.tabs}
             activeTabId={sidebarView.left.activeTabId}
@@ -2726,6 +2727,7 @@ export default function App() {
           <Sidebar
             width={sidebarRightWidth}
             side="right"
+            onHide={() => setSidebarSideVisible("right", false)}
             layout={sidebarLayout}
             tabs={sidebarView.right.tabs}
             activeTabId={sidebarView.right.activeTabId}
