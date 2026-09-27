@@ -41,6 +41,15 @@ const PROJECTS_COMMAND_IDS = COMMANDS.filter((c) => c.scope === "projects").map(
 // keeping the construction there avoids this hook's parameter list growing
 // with every new command, and lets App.tsx reuse the exact same record for
 // the command palette's entries.
+function capturesKeyboard(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const owner = target.closest<HTMLElement>("[data-keyboard-capture]");
+  if (!owner) return false;
+  const mode = owner.dataset.keyboardCapture;
+  if (mode === "always") return true;
+  return mode === "fullscreen" && !!document.fullscreenElement?.contains(owner);
+}
+
 export function useGlobalKeybindings(
   bindingsRef: MutableRefObject<Record<string, Keybinding[]>>,
   overridesRef: MutableRefObject<KeybindingOverrides>,
@@ -58,6 +67,12 @@ export function useGlobalKeybindings(
       // The Keyboard Shortcuts recorder owns the keyboard while capturing a
       // chord — recording Ctrl+W must not also close the tab.
       if (recorderState.recording) return;
+      // An element that takes the whole keyboard (an extension's remote
+      // desktop, say) opts out of app shortcuts with data-keyboard-capture:
+      // "always", or "fullscreen" for only while it sits inside the
+      // fullscreen element. Its own handler then sees every combo, Ctrl+P
+      // and Ctrl+Tab included; Keyboard Lock takes care of the browser's.
+      if (capturesKeyboard(e.target)) return;
       const combo = serializeEvent(e);
       if (!combo) return;
       const bindings = bindingsRef.current;
