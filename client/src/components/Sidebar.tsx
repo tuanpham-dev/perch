@@ -168,6 +168,10 @@ interface Props {
   // Flip a section's user-hidden state — the same toggle the gear menu's
   // Panes list drives, wired here for the header's own "Hide Pane" row.
   onHidePanel: (panelId: string) => void;
+  // The top bar's own hide button, the bottom panel's chevron for a
+  // sidebar: the same toggle the footer's layout buttons and the sidebar
+  // shortcut run.
+  onHide: () => void;
   // The in-flight tab drag, shared by both strips so the one under the
   // pointer can draw the drop indicator.
   tabDrag: TabDragState | null;
@@ -259,6 +263,7 @@ export default function Sidebar({
   onMoveTab,
   onMovePanel,
   onHidePanel,
+  onHide,
   tabDrag,
   onTabDragChange,
   registryCatalog,
@@ -909,6 +914,15 @@ export default function Sidebar({
           drag={tabDrag}
           onDragChange={onTabDragChange}
         />
+        <button
+          type="button"
+          className="sidebar-hide-button"
+          title={side === "left" ? "Hide Left Sidebar" : "Hide Right Sidebar"}
+          aria-label={side === "left" ? "Hide left sidebar" : "Hide right sidebar"}
+          onClick={onHide}
+        >
+          <Icon name={side === "left" ? "chevron-left" : "chevron-right"} />
+        </button>
       </div>
       {activeTabId === null ? (
         <div className="sidebar-empty">

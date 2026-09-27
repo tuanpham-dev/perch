@@ -673,6 +673,34 @@ body.sidebar-tab-dragging .sidebar-drop-edge:hover {
   display: none;
 }
 
+/* Hides this sidebar - the bottom panel's own chevron, for a sidebar. Sits
+   at the top bar's end, after the tab strip, the way the panel's sits after
+   its actions. */
+.sidebar-hide-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin: 0 4px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg-inactive);
+  cursor: pointer;
+}
+
+.sidebar-hide-button:hover {
+  background: var(--list-hover-bg);
+  color: var(--fg);
+}
+
+.sidebar-hide-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .sidebar-tab {
   position: relative;
   display: flex;
