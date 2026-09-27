@@ -1502,17 +1502,19 @@ export default function App() {
     [panelAllViews, panel.hiddenViews],
   );
   const panelActiveView = resolveActiveView(panel.activeView, panelViews);
-  const panelViewContext = useMemo<PanelViewContext>(
+  const panelViewContextBase = useMemo(
     () => ({ mobilePointer, showMenu, confirmDialog }),
     [mobilePointer, showMenu, confirmDialog],
   );
   const renderPanelView = useCallback(
-    (viewId: string): React.ReactNode => {
+    (viewId: string, actionsTarget: HTMLElement | null): React.ReactNode => {
       if (viewId === OUTPUT_VIEW_ID) return <OutputView />;
       const view = extensionPanelViews.find((v) => v.id === viewId);
-      return view ? <view.component context={panelViewContext} /> : null;
+      if (!view) return null;
+      const context: PanelViewContext = { ...panelViewContextBase, actionsTarget };
+      return <view.component context={context} />;
     },
-    [panelViewContext],
+    [panelViewContextBase],
   );
 
   // ctx.app.openSessionWindow / ctx.app.killSession (extensions.ts) — the

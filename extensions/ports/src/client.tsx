@@ -1148,6 +1148,9 @@ interface PanelViewProps {
     mobilePointer: boolean;
     showMenu(x: number, y: number, items: MenuItem[]): void;
     confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
+    // The panel header's slot for this view's buttons (portal), null until
+    // mounted.
+    actionsTarget: HTMLElement | null;
   };
 }
 
@@ -1227,10 +1230,86 @@ function PortsTableView({ context }: PanelViewProps) {
     if (!p.orphan && p.session) openSessionWindow?.(p.session);
   };
 
+  // Every listed process whose terminal is gone, killed in one go: the
+  // leftovers of closed sessions are what this view mostly shows, and one
+  // confirm beats one per row. Same route as the row's Kill, port by port,
+  // and the list is asked again once at the end.
+  const exited = ports.filter((p) => p.orphan && p.pid !== undefined);
+  const onKillExited = () => {
+    if (exited.length === 0) return;
+    const what =
+      exited.length === 1
+        ? `Kill ${exited[0].process ?? "process"} (pid ${exited[0].pid}) on port ${exited[0].port}, whose terminal has exited?`
+        : `Kill ${exited.length} processes whose terminals have exited (ports ${exited.map((p) => p.port).join(", ")})?`;
+    context
+      .confirmDialog(what, "Kill")
+      .then(async (ok) => {
+        if (!ok) return;
+        setKilling((prev) => {
+          const next = new Set(prev);
+          for (const p of exited) next.add(p.port);
+          return next;
+        });
+        setError(null);
+        const failed: string[] = [];
+        for (const p of exited) {
+          try {
+            await killPort(p.port);
+          } catch (err) {
+            failed.push(`${p.port}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        if (failed.length > 0) setError(`Couldn't kill ${failed.join("; ")}`);
+        reload();
+        setKilling((prev) => {
+          const next = new Set(prev);
+          for (const p of exited) next.delete(p.port);
+          return next;
+        });
+      })
+      .catch(() => {});
+  };
+
   const shownError = error ?? feedError;
+
+  const tunnelHint = tunnel.allForwarded
+    ? "All ports forwarded to this machine."
+    : tunnel.connected
+      ? "Tunnel connected - run the command again to pick up new ports."
+      : "Run the forward command locally to reach every port at localhost.";
 
   return (
     <div className="ports-table-view">
+      {/* The view's buttons live in the panel header, where TERMINAL keeps
+          its own: Kill exited (only while there is something to kill), the
+          forward command, Refresh. */}
+      {context.actionsTarget &&
+        createPortal(
+          <>
+            {exited.length > 0 && (
+              <button
+                className="icon-button ports-header-kill-exited"
+                title={`Kill every process whose terminal has exited (${exited.length})`}
+                disabled={exited.some((p) => killing.has(p.port))}
+                onClick={onKillExited}
+              >
+                <Icon name="trash" />
+                <span className="ports-header-count">{exited.length}</span>
+              </button>
+            )}
+            <button
+              className="icon-button"
+              title={copied ? "Copied" : `Copy the command that forwards every port. ${tunnelHint}`}
+              onClick={onCopyCommand}
+            >
+              <Icon name={copied ? "check" : "copy"} />
+            </button>
+            <button className="icon-button" title="Refresh" onClick={() => reload()}>
+              <Icon name="refresh" />
+            </button>
+          </>,
+          context.actionsTarget,
+        )}
       {shownError && (
         <div className="ports-error ports-table-error">
           <span>Couldn't load Ports: {shownError}</span>
@@ -1329,25 +1408,6 @@ function PortsTableView({ context }: PanelViewProps) {
           </tbody>
         </table>
       )}
-      <div className="ports-table-footer">
-        <span className="ports-status-hint">
-          {tunnel.allForwarded
-            ? "All ports forwarded to this machine."
-            : tunnel.connected
-              ? "Tunnel connected - run the command again to pick up new ports."
-              : "Run the forward command locally to reach every port at localhost."}
-        </span>
-        <button
-          className="icon-button"
-          title={copied ? "Copied" : "Copy the command that forwards every port"}
-          onClick={onCopyCommand}
-        >
-          <Icon name={copied ? "check" : "copy"} />
-        </button>
-        <button className="icon-button" title="Refresh" onClick={() => reload()}>
-          <Icon name="refresh" />
-        </button>
-      </div>
     </div>
   );
 }

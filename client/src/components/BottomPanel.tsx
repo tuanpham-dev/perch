@@ -42,8 +42,10 @@ interface Props {
   activeView: string;
   onSelectView: (viewId: string) => void;
   // The mounted body for a non-terminal view, by id — App supplies core's
-  // OUTPUT and each extension view's component with its context.
-  renderView: (viewId: string) => ReactNode;
+  // OUTPUT and each extension view's component with its context, which
+  // carries `actionsTarget`: the header slot rendered below for the view's
+  // own buttons.
+  renderView: (viewId: string, actionsTarget: HTMLElement | null) => ReactNode;
   maximized: boolean;
   onToggleMaximized: () => void;
   // Terminal tabs with output the user hasn't seen (useBottomPanel).
@@ -133,6 +135,9 @@ export default function BottomPanel({
   const paneRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const terminalActive = activeView === TERMINAL_VIEW_ID;
+  // The header slot a non-terminal view portals its actions into. State
+  // rather than a ref so the view re-renders once the slot exists.
+  const [viewActionsEl, setViewActionsEl] = useState<HTMLDivElement | null>(null);
 
   // Whether the strip's tabs fit. Measured off the strip itself, which stays
   // in the row even while collapsed (styles.css's .tab-strip.collapsed keeps
@@ -348,6 +353,7 @@ export default function BottomPanel({
           <div className="bottom-panel-header-spacer" onContextMenu={openViewsMenu} />
         )}
         <div className="tab-bar-actions">
+          {!terminalActive && <div className="bottom-panel-view-actions" ref={setViewActionsEl} />}
           {terminalActive && (
             <>
               <button
@@ -397,7 +403,7 @@ export default function BottomPanel({
         {terminalActive && visibleTabs.length === 0 && (
           <div className="placeholder">No terminals in this project. Use + to open one.</div>
         )}
-        {!terminalActive && <div className="bottom-panel-view">{renderView(activeView)}</div>}
+        {!terminalActive && <div className="bottom-panel-view">{renderView(activeView, viewActionsEl)}</div>}
         {panel.tabs.map((tab) => {
           // Every project's tabs stay mounted here (see the module comment);
           // tabVisible naturally covers only the current project's active

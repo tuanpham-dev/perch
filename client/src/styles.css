@@ -4635,6 +4635,23 @@ body.scrollbar-dragging {
   border-left-color: var(--tab-border);
 }
 
+/* Where a non-terminal view puts its own header buttons (PanelViewContext's
+   actionsTarget), in the row TERMINAL's New/Attach/Split occupy. */
+.bottom-panel-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bottom-panel-view-actions:empty {
+  display: none;
+}
+
+.bottom-panel-view-actions .icon-button {
+  width: 24px;
+  height: 24px;
+}
+
 /* Fills the header between the view tabs and the actions while a
    non-terminal view is showing (the strip does that job on TERMINAL). */
 .bottom-panel-header-spacer {
