@@ -1,4 +1,5 @@
 import { listEngines } from "./multiplexer.js";
+import { clearLog, listChannels, readLog } from "./logChannels.js";
 import { createWriteStream } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -149,6 +150,24 @@ function sendFsError(res: Response, err: unknown): void {
     res.status(400).json({ error: errMessage(err) });
   }
 }
+
+// ---- Log channels (the bottom panel's OUTPUT view, logChannels.ts) ----
+
+api.get("/logs/channels", (_req, res) => {
+  res.json({ channels: listChannels() });
+});
+
+// `since` is the seq of the last line the caller has; only later lines come
+// back, with the seq to ask from next time.
+api.get("/logs/:channel", (req, res) => {
+  const since = Number(req.query.since);
+  res.json(readLog(req.params.channel, Number.isFinite(since) && since > 0 ? since : 0));
+});
+
+api.post("/logs/:channel/clear", (req, res) => {
+  clearLog(req.params.channel);
+  res.status(204).end();
+});
 
 api.get("/sessions", async (_req, res) => {
   try {

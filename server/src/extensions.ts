@@ -7,6 +7,8 @@
 // manifest format.
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { format } from "node:util";
+import { appendLog } from "./logChannels.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1114,7 +1116,12 @@ export async function mountServerHookIfNeeded(
     const host = makeHostApi(id);
     activate({
       router,
-      log: (...args: unknown[]) => console.log(`[ext:${id}]`, ...args),
+      // Printed with the extension's id, and kept for the OUTPUT view under
+      // the extension's display name (logChannels.ts).
+      log: (...args: unknown[]) => {
+        console.log(`[ext:${id}]`, ...args);
+        appendLog(manifest.displayName || manifest.name || id, format(...args));
+      },
       getSettings: () => getExtensionSettings(id, manifest),
       // Also on `host`, but lifted to the top level because it is the one
       // capability most extensions reach for by name — activate({ ai }).

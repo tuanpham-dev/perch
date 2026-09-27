@@ -1195,6 +1195,55 @@ References: `ports` (popover with a confirmed kill), `git-scm` (`visibilitySetti
 [perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
 registry (`full-only` in a compact bar).
 
+### Panel views — `registerPanelView`
+
+```ts
+ctx.registerPanelView({
+  id: string,
+  title: string,                    // the header tab's label (shown uppercase)
+  icon?: string,                    // a codicon name; default "layout-panel"
+  order?: number,                   // ascending after TERMINAL and OUTPUT, default 0; ties break on id
+  component: React.ComponentType<{ context: PanelViewContext }>,
+});
+
+interface PanelViewContext {
+  mobilePointer: boolean;           // phone/tablet
+  showMenu(x: number, y: number, items: MenuItem[]): void;
+  confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
+}
+```
+
+A view in the bottom panel, beside TERMINAL and OUTPUT, for something wide
+and long-lived that a sidebar section or a status bar popover would cramp: a
+table of ports, a log, an activity feed. The header shows one tab per view;
+the terminal strip and its actions appear only on TERMINAL, and Maximize and
+Hide on every view.
+
+- **Mounting.** Your component mounts when its tab is selected and unmounts
+  when the user switches away or hides the panel, so start and stop polling in
+  your own effects. Terminals are the exception: they stay mounted behind the
+  view you're showing.
+- **Reaching it.** Every view gets a palette command, **Panel: Show
+  <title>**, registered for it. From code, `ctx.app.showPanelView(id)` opens
+  the panel on your view and `ctx.app.togglePanelView(id)` hides the panel when
+  your view is already the one showing — what a status bar item wants from its
+  click. Both take the full namespaced id, `ext.<your id>.<view id>`.
+- **Switched off.** Users can switch any view off from the header's
+  right-click menu. Your tab is then gone until they switch it back on or run
+  its command; `togglePanelView` returns `false` in that state, so an item that
+  also has a popover can show that instead.
+- **Going away.** Disabling or uninstalling your extension removes the tab; if
+  it was showing, the panel falls back to TERMINAL.
+- **Layout.** The view's box is `position: absolute; inset: 0; overflow:
+  auto`, so it scrolls itself. Keep the width in mind on phones: the panel is
+  as wide as the window there.
+
+References: `ports` (a table view opened from its status bar item) and
+`agent-monitor` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions) registry
+(a status table with a feed under it; registers the view only when the host
+has `registerPanelView`).
+
 ### Quick-switcher providers — `registerQuickSwitcherProvider`
 
 ```ts
@@ -1344,6 +1393,19 @@ create-then-open path the sidebar's pinned-session restore uses — and without
 `createCwd`, a missing session surfaces an error to the user. A name that
 collides with an existing session surfaces the backend's own "duplicate session"
 error, so let the user pick or edit the name.
+
+```ts
+ctx.app.showPanelView(viewId: string): void
+ctx.app.togglePanelView(viewId: string): boolean
+```
+Opens the bottom panel (if hidden) on a view you registered with
+[`registerPanelView`](#panel-views--registerpanelview), by its full namespaced
+id (`ext.<your id>.<view id>`); a view the user switched off from the header's
+right-click menu comes back. `togglePanelView` hides the panel instead when
+that view is already showing, so a status bar item's click toggles it, and
+returns `false` without doing anything when the user has switched the view
+off, so the item can fall back to its own popover (the ports item does).
+Both are no-ops in a detached window, which has no bottom panel.
 
 ```ts
 ctx.app.killSession(sessionName: string): void

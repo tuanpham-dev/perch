@@ -419,3 +419,108 @@
 .port-forwarded-icon {
   color: var(--status-active-bg);
 }
+
+/* ---- The PORTS bottom-panel view (plans/bottom-panel-views.md) ---- */
+
+.ports-table-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  font-size: 12px;
+}
+
+.ports-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ports-table th,
+.ports-table td {
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.ports-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  color: var(--fg-inactive);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ports-table-row:hover td {
+  background: var(--list-hover-bg);
+}
+
+.ports-table-port {
+  font-variant-numeric: tabular-nums;
+}
+
+.ports-table-port .port-forwarded-dot {
+  margin-right: 4px;
+}
+
+.ports-table-address {
+  color: var(--fg-inactive);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ports-table-link {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--link, var(--accent));
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ports-table-exited {
+  color: var(--fg-inactive);
+}
+
+.ports-table-actions {
+  width: 1%;
+}
+
+.ports-table-action-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Unlike the list rows, whose buttons appear on hover, a table has an
+   actions column: its buttons are always there to see. */
+.ports-table .port-action-button {
+  visibility: visible;
+}
+
+.ports-table-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-inactive);
+}
+
+.ports-table-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ports-table-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+}

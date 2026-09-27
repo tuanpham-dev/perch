@@ -40,6 +40,14 @@ let removeStylesheet: (() => void) | null = null;
 let extSettings: SettingsApi | null = null;
 let openViewerTab: ((viewerId: string, path: string, opts?: { title?: string }) => void) | null = null;
 let getActiveContext: (() => ActiveContext) | null = null;
+// Both optional on the host: an older app has no bottom-panel views and no
+// session opener for extensions, and the status item then keeps its popover.
+let openSessionWindow: ((sessionName: string, opts?: { windowIndex?: number }) => void) | null = null;
+let togglePanelView: ((viewId: string) => boolean) | null = null;
+
+// This extension's PORTS view, by the id the host assigns it
+// (ext.<publisher>.<name>.<view id>) - what the status item toggles.
+const PORTS_VIEW_ID = "ext.perch.ports.ports";
 
 interface SettingsApi {
   get(key: string): unknown;
@@ -1133,6 +1141,217 @@ function PortsPanel({ actionsTarget, showMenu, confirmDialog }: PanelProps) {
   );
 }
 
+// ---- The PORTS bottom-panel view ----
+
+interface PanelViewProps {
+  context: {
+    mobilePointer: boolean;
+    showMenu(x: number, y: number, items: MenuItem[]): void;
+    confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
+  };
+}
+
+// The same list as the popover, laid out as a table for the panel's width:
+// one column per fact, the Session cell a link to that session's window,
+// and the popover's own three row actions in a column of their own, doing
+// exactly what they do there (Open in the browser, at localhost when the
+// tunnel forwards the port; Copy URL copies the proxy URL; Kill). Subscribes
+// to the shared feed like the popover does, so it only polls while it is
+// the view showing (the host unmounts it otherwise) and a killed row leaves
+// the table on the next server answer rather than on local optimism.
+function PortsTableView({ context }: PanelViewProps) {
+  const { ports, tunnel, error: feedError, reload } = usePortsFeed();
+  const [auth, setAuth] = useState<TunnelAuth>(NO_AUTH);
+  const [proxyConfig, setProxyConfig] = useState<ProxyConfig>(NO_PROXY_CONFIG);
+  const [copiedPort, setCopiedPort] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [killing, setKilling] = useState<Set<number>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  // Neither changes while the app runs (see the popover).
+  useEffect(() => {
+    fetchTunnelAuth()
+      .then(setAuth)
+      .catch(() => setAuth(NO_AUTH));
+    fetchProxyConfig()
+      .then(setProxyConfig)
+      .catch(() => setProxyConfig(NO_PROXY_CONFIG));
+  }, []);
+
+  const forwarded = new Set(tunnel.ports);
+  const urlFor = (port: number): string =>
+    forwarded.has(port) ? `http://localhost:${port}/` : proxyUrl(port, proxyConfig);
+  // A forwarded port is reachable directly, which beats the proxy (see the
+  // popover's openPort).
+  const openPort = (port: number) => {
+    window.open(urlFor(port), "_blank", "noopener");
+  };
+  const onCopyPortUrl = (port: number) => {
+    copyText(proxyUrl(port, proxyConfig))
+      .then(() => {
+        setCopiedPort(port);
+        window.setTimeout(() => setCopiedPort((prev) => (prev === port ? null : prev)), 1500);
+      })
+      .catch(() => {});
+  };
+  const onCopyCommand = () => {
+    copyText(buildCommand(window.location.origin, auth, false))
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+  // Same prompt and SIGTERM-then-SIGKILL route as the popover's Kill.
+  const onKillPort = (p: ListeningPort) => {
+    context
+      .confirmDialog(`Kill ${p.process ?? "process"} (pid ${p.pid}) listening on port ${p.port}?`, "Kill")
+      .then((ok) => {
+        if (!ok) return;
+        setKilling((prev) => new Set(prev).add(p.port));
+        setError(null);
+        return killPort(p.port)
+          .then(() => reload())
+          .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+          .finally(() => {
+            setKilling((prev) => {
+              const next = new Set(prev);
+              next.delete(p.port);
+              return next;
+            });
+          });
+      })
+      .catch(() => {});
+  };
+  const openSession = (p: ListeningPort) => {
+    if (!p.orphan && p.session) openSessionWindow?.(p.session);
+  };
+
+  const shownError = error ?? feedError;
+
+  return (
+    <div className="ports-table-view">
+      {shownError && (
+        <div className="ports-error ports-table-error">
+          <span>Couldn't load Ports: {shownError}</span>
+          <button className="ports-btn-ghost" onClick={() => reload()}>
+            Retry
+          </button>
+        </div>
+      )}
+      {ports.length === 0 && !shownError ? (
+        <div className="ports-table-empty">No ports are listening in your terminals.</div>
+      ) : (
+        <table className="ports-table">
+          <thead>
+            <tr>
+              <th>Port</th>
+              <th>Process</th>
+              <th>Session</th>
+              <th>Address</th>
+              <th aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {ports.map((p) => (
+              <tr key={p.port} className="ports-table-row">
+                <td className="ports-table-port">
+                  {/* The port opens on click, as the popover's row does. */}
+                  <button
+                    className="ports-table-link"
+                    title={
+                      forwarded.has(p.port)
+                        ? `Forwarded - open http://localhost:${p.port}/`
+                        : `Open port ${p.port}`
+                    }
+                    onClick={() => openPort(p.port)}
+                  >
+                    {forwarded.has(p.port) && <Icon name="plug" className="port-forwarded-dot" />}
+                    {p.port}
+                  </button>
+                </td>
+                <td className="ports-table-process">{p.process ?? ""}</td>
+                <td>
+                  {!p.orphan && p.session ? (
+                    <button
+                      className="ports-table-link"
+                      title={`Open the ${p.session} session`}
+                      onClick={() => openSession(p)}
+                    >
+                      {p.session}
+                    </button>
+                  ) : (
+                    <span
+                      className="ports-table-exited"
+                      title={
+                        p.session
+                          ? `Started in ${p.session}, which has since exited`
+                          : "Not started from a terminal of this app"
+                      }
+                    >
+                      (exited)
+                    </span>
+                  )}
+                </td>
+                <td className="ports-table-address" title={`Bound to ${p.address}`}>
+                  {urlFor(p.port)}
+                </td>
+                <td className="ports-table-actions">
+                  <div className="ports-table-action-row">
+                  <button
+                    className="icon-button port-action-button"
+                    title={forwarded.has(p.port) ? "Open at localhost" : "Open"}
+                    onClick={() => openPort(p.port)}
+                  >
+                    <Icon name="link-external" />
+                  </button>
+                  <button
+                    className="icon-button port-action-button"
+                    title={copiedPort === p.port ? "Copied" : "Copy URL"}
+                    onClick={() => onCopyPortUrl(p.port)}
+                  >
+                    <Icon name={copiedPort === p.port ? "check" : "copy"} />
+                  </button>
+                  {p.pid !== undefined && (
+                    <button
+                      className="icon-button port-action-button"
+                      title="Kill process"
+                      disabled={killing.has(p.port)}
+                      onClick={() => onKillPort(p)}
+                    >
+                      <Icon name="trash" />
+                    </button>
+                  )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="ports-table-footer">
+        <span className="ports-status-hint">
+          {tunnel.allForwarded
+            ? "All ports forwarded to this machine."
+            : tunnel.connected
+              ? "Tunnel connected - run the command again to pick up new ports."
+              : "Run the forward command locally to reach every port at localhost."}
+        </span>
+        <button
+          className="icon-button"
+          title={copied ? "Copied" : "Copy the command that forwards every port"}
+          onClick={onCopyCommand}
+        >
+          <Icon name={copied ? "check" : "copy"} />
+        </button>
+        <button className="icon-button" title="Refresh" onClick={() => reload()}>
+          <Icon name="refresh" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---- Activation ----
 
 interface ExtensionContext {
@@ -1162,12 +1381,22 @@ interface ExtensionContext {
     visibilitySetting?: string;
     component: (props: StatusItemProps) => ReturnType<typeof PortsStatusItem>;
   }): void;
+  // Optional: an older host has no bottom-panel views.
+  registerPanelView?(view: {
+    id: string;
+    title: string;
+    icon?: string;
+    order?: number;
+    component: (props: PanelViewProps) => ReturnType<typeof PortsTableView>;
+  }): void;
   serverFetch(path: string, init?: RequestInit): Promise<Response>;
   assetUrl(relPath: string): string;
   settings: SettingsApi;
   app: {
     getActiveContext(): ActiveContext;
     openViewerTab(viewerId: string, path: string, opts?: { title?: string }): void;
+    openSessionWindow?(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void;
+    togglePanelView?(viewId: string): boolean;
   };
 }
 
@@ -1178,6 +1407,7 @@ interface ExtensionContext {
 // data, settings and proxy config.
 interface StatusItemProps {
   context: {
+    mobilePointer: boolean;
     openPopover(anchor: DOMRect, content: ReactNode): void;
     closePopover(): void;
     confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
@@ -1357,13 +1587,16 @@ function PortsStatusItem({ context }: StatusItemProps) {
           ? `${ports.length} listening port${ports.length === 1 ? "" : "s"}, all forwarded to this machine`
           : `${ports.length} listening port${ports.length === 1 ? "" : "s"} in your terminals`
       }
-      // openPopover toggles: the host keys it on this item's id.
-      onClick={(e) =>
-        context.openPopover(
-          e.currentTarget.getBoundingClientRect(),
-          <PortsStatusPopover context={context} />,
-        )
-      }
+      // Desktop: the PORTS view in the bottom panel, toggled (the host hides
+      // the panel when that view is already showing). Phones keep the
+      // popover, since the panel is as wide as the screen there, and so does
+      // a desktop where the user switched the view off (the toggle then
+      // answers false). openPopover toggles too: the host keys it on this
+      // item's id.
+      onClick={(e) => {
+        if (!context.mobilePointer && togglePanelView?.(PORTS_VIEW_ID)) return;
+        context.openPopover(e.currentTarget.getBoundingClientRect(), <PortsStatusPopover context={context} />);
+      }}
     >
       <Icon name="plug" className={tunnel.allForwarded ? "port-forwarded-icon" : undefined} />
       <span>{ports.length}</span>
@@ -1377,7 +1610,17 @@ export function activate(ctx: ExtensionContext): void {
   extSettings = ctx.settings;
   getActiveContext = ctx.app.getActiveContext;
   openViewerTab = ctx.app.openViewerTab;
+  openSessionWindow = ctx.app.openSessionWindow ?? null;
+  togglePanelView = ctx.app.togglePanelView ?? null;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
+  // The wide table, for hosts that have a bottom panel to put it in.
+  ctx.registerPanelView?.({
+    id: "ports",
+    title: "Ports",
+    icon: "plug",
+    order: 10,
+    component: PortsTableView,
+  });
   // No sidebar panel any more: the status-bar item and its popover are the
   // whole surface (the panel component is still what that popover renders).
   ctx.registerStatusBarItem({
@@ -1398,6 +1641,8 @@ export function activate(ctx: ExtensionContext): void {
 export function deactivate(): void {
   removeStylesheet?.();
   removeStylesheet = null;
+  openSessionWindow = null;
+  togglePanelView = null;
   serverFetch = null;
   extSettings = null;
   getActiveContext = null;

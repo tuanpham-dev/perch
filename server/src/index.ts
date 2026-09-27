@@ -15,6 +15,7 @@ import { clientPathsMiddleware } from "./clientPaths.js";
 import { writeInstanceRecord } from "./instanceRecord.js";
 import { subscribeCommandEvents } from "./commandEvents.js";
 import { loadEnabledServerHooks } from "./extensions.js";
+import { captureConsole } from "./logChannels.js";
 import { activeEngineId, DAEMON_ENGINE_ID, enginesSettled, getMultiplexer, selectEngine, whenEngineReady } from "./multiplexer.js";
 import { startDaemonLink, terminalEnv } from "./mux.js";
 import { ensureOpenShim } from "./openUrl.js";
@@ -45,6 +46,10 @@ import {
 } from "./security.js";
 import { handleAttach } from "./wsAttach.js";
 import { handleTunnel } from "./wsTunnel.js";
+
+// Before anything below prints: the OUTPUT view's "Perch" channel
+// (logChannels.ts) is fed from console, so the wrap has to be in place first.
+captureConsole();
 
 
 // Backstop for a rejected promise nobody awaited - an extension's socket

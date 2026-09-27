@@ -84,6 +84,10 @@ export const COMMANDS: Command[] = [
   { id: "panel.toggle", label: "Panel: Toggle Terminal Panel", defaultBindings: [{ key: "ctrl+Backquote" }], scope: "global" },
   { id: "panel.new", label: "Panel: New Terminal", defaultBindings: [{ key: "ctrl+shift+Backquote" }], scope: "global" },
   { id: "panel.split", label: "Panel: Split Terminal Right", defaultBindings: [], scope: "global" },
+  // Unbound by default (plans/bottom-panel-views.md). Extension views get
+  // their own "Panel: Show <title>" command on registration (extensions.ts).
+  { id: "panel.toggleMaximized", label: "Panel: Toggle Maximized Panel", defaultBindings: [], scope: "global" },
+  { id: "panel.showOutput", label: "Panel: Show Output", defaultBindings: [], scope: "global" },
   { id: "settings.open", label: "Open Settings", defaultBindings: [{ key: "ctrl+Comma" }], scope: "global" },
   { id: "settings.openKeyboardShortcuts", label: "Preferences: Open Keyboard Shortcuts", defaultBindings: [], scope: "global" },
   { id: "session.new", label: "Project: New…", defaultBindings: [], scope: "global" },

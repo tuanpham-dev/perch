@@ -158,6 +158,11 @@ interface Props {
   bindings: Record<string, Keybinding[]>;
   onExit: () => void;
   onError: (err: unknown) => void;
+  // Output arrived while this terminal was hidden — the bottom panel's
+  // unseen-output dot (plans/bottom-panel-views.md). Throttled to once a
+  // second per terminal and never fired while visible, so a chatty
+  // background pane can't cost a render per frame.
+  onOutput?: () => void;
   // The session this attach follows moved to another window (a session tab
   // follows its session's current window), reported by the server.
   onWindowSwitch?: (windowIndex: number) => void;
@@ -193,6 +198,7 @@ export default function TerminalView({
   bindings,
   onExit,
   onError,
+  onOutput,
   onWindowSwitch,
   onSessionSwitch,
   onOpenFile,
@@ -234,6 +240,10 @@ export default function TerminalView({
   onExitRef.current = onExit;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const onOutputRef = useRef(onOutput);
+  onOutputRef.current = onOutput;
+  // Epoch ms of the last onOutput call — the throttle above.
+  const lastOutputNotifyAtRef = useRef(0);
   const onWindowSwitchRef = useRef(onWindowSwitch);
   onWindowSwitchRef.current = onWindowSwitch;
   const onSessionSwitchRef = useRef(onSessionSwitch);
@@ -999,6 +1009,13 @@ export default function TerminalView({
             pongTimer = undefined;
           }
           if (ev.data instanceof ArrayBuffer) {
+            if (!visibleRef.current && onOutputRef.current) {
+              const now = Date.now();
+              if (now - lastOutputNotifyAtRef.current >= 1000) {
+                lastOutputNotifyAtRef.current = now;
+                onOutputRef.current();
+              }
+            }
             engine.write(new Uint8Array(ev.data));
             return;
           }

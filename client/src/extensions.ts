@@ -468,6 +468,23 @@ export interface ExtensionContext {
     visibilitySetting?: string;
     component: ReactNS.ComponentType<StatusBarItemHostProps>;
   }): void;
+  // Contributes a view to the bottom panel, beside TERMINAL and OUTPUT
+  // (plans/bottom-panel-views.md). The component mounts only while its tab
+  // is the one showing and unmounts when the user switches away, so a view
+  // that polls starts and stops with its own effects. Every view also gets a
+  // palette command, "Panel: Show <title>", registered for it. The id is
+  // namespaced ext.<extensionId>.<id>; pass that full id to
+  // ctx.app.showPanelView / togglePanelView.
+  registerPanelView(view: {
+    id: string;
+    title: string;
+    // A codicon name; defaults to "layout-panel".
+    icon?: string;
+    // Sort key after TERMINAL and OUTPUT (ascending, default 0); ties break
+    // on id.
+    order?: number;
+    component: ReactNS.ComponentType<PanelViewHostProps>;
+  }): void;
   // Renders a custom component inside this extension's Settings section:
   // directly after the declared property `after` names (a full dotted key),
   // or below every scalar control when it names none.
@@ -536,6 +553,14 @@ export interface ExtensionContext {
     // Session-name collisions surface the backend's own "duplicate session" error —
     // pick the name accordingly.
     openSessionWindow(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void;
+    // Opens the bottom panel (if hidden) on a view registered with
+    // registerPanelView, by its full namespaced id, bringing back a view the
+    // user switched off. togglePanelView hides the panel instead when that
+    // view is already the one showing — what a status bar item wants from a
+    // click — and returns false, doing nothing, when the user has switched
+    // that view off, so the item can fall back to its own popover.
+    showPanelView(viewId: string): void;
+    togglePanelView(viewId: string): boolean;
     // Kills a session and closes its tabs, including the synthetic
     // per-window attachments that killing the session behind the app's back would leave behind.
     // Deliberately runs no confirmation of its own (unlike the sidebar's own
@@ -894,6 +919,30 @@ export interface RegisteredStatusBarItem {
   component: ReactNS.ComponentType<StatusBarItemHostProps>;
 }
 
+// The context handed to a bottom-panel view (registerPanelView): the same
+// shared menu and confirm dialog a status bar item gets, since a view's rows
+// offer the same actions (the ports view's Kill process), and the pointer
+// kind so a view can pick a touch-friendly layout.
+export interface PanelViewContext {
+  mobilePointer: boolean;
+  showMenu(x: number, y: number, items: MenuItem[]): void;
+  confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
+}
+
+export interface PanelViewHostProps {
+  context: PanelViewContext;
+}
+
+export interface RegisteredPanelView {
+  // Namespaced ext.<extensionId>.<id>.
+  id: string;
+  extensionId: string;
+  title: string;
+  icon: string;
+  order: number;
+  component: ReactNS.ComponentType<PanelViewHostProps>;
+}
+
 // A custom component rendered inside the extension's own Settings section,
 // below its scalar configuration controls — for config that outgrows the
 // scalar property renderer (the touch-keys drag-and-drop layout editor).
@@ -1012,6 +1061,7 @@ export const extensionQuickSwitcherProviders: RegisteredQuickSwitcherProvider[] 
 export const extensionTerminalAccessories: RegisteredTerminalAccessory[] = [];
 export const extensionAppOverlays: RegisteredAppOverlay[] = [];
 export const extensionStatusBarItems: RegisteredStatusBarItem[] = [];
+export const extensionPanelViews: RegisteredPanelView[] = [];
 export const extensionSettingsComponents: RegisteredSettingsComponent[] = [];
 
 type Listener = () => void;
@@ -1285,6 +1335,20 @@ export function setOpenSessionWindowHandler(
   handler: (sessionName: string, createCwd?: string, windowIndex?: number) => void,
 ): void {
   openSessionWindowHandler = handler;
+}
+
+let showPanelViewHandler: ((viewId: string) => void) | null = null;
+let togglePanelViewHandler: ((viewId: string) => boolean) | null = null;
+
+// Wired once from App.tsx to useBottomPanel's showView/toggleView — see
+// ExtensionContext.app.showPanelView. Also what a view's auto-registered
+// "Panel: Show <title>" command runs.
+export function setPanelViewHandlers(handlers: {
+  show: (viewId: string) => void;
+  toggle: (viewId: string) => boolean;
+}): void {
+  showPanelViewHandler = handlers.show;
+  togglePanelViewHandler = handlers.toggle;
 }
 
 let killSessionHandler: ((sessionName: string) => void) | null = null;
@@ -1845,6 +1909,26 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       });
       notify();
     },
+    registerPanelView(view) {
+      const id = `ext.${ext.id}.${view.id}`;
+      extensionPanelViews.push({
+        id,
+        extensionId: ext.id,
+        title: view.title,
+        icon: typeof view.icon === "string" && view.icon ? view.icon : "layout-panel",
+        order: typeof view.order === "number" ? view.order : 0,
+        component: view.component,
+      });
+      // The show command carries the view's own namespace, so the prefix
+      // splice in deactivateExtension drops it with the extension's other
+      // commands.
+      extensionCommands.push({
+        id: `ext.${ext.id}.panel.show.${view.id}`,
+        label: `Panel: Show ${view.title}`,
+        run: () => showPanelViewHandler?.(id),
+      });
+      notify();
+    },
     registerSettingsComponent(component) {
       extensionSettingsComponents.push({
         id: `ext.${ext.id}.${component.id}`,
@@ -1926,6 +2010,12 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       },
       openSessionWindow(sessionName, opts) {
         openSessionWindowHandler?.(sessionName, opts?.createCwd, opts?.windowIndex);
+      },
+      showPanelView(viewId) {
+        showPanelViewHandler?.(viewId);
+      },
+      togglePanelView(viewId) {
+        return togglePanelViewHandler?.(viewId) ?? false;
       },
       killSession(sessionName) {
         killSessionHandler?.(sessionName);
@@ -2164,6 +2254,9 @@ function deactivateClientExtension(extId: string): void {
   }
   for (let i = extensionStatusBarItems.length - 1; i >= 0; i--) {
     if (extensionStatusBarItems[i].extensionId === extId) extensionStatusBarItems.splice(i, 1);
+  }
+  for (let i = extensionPanelViews.length - 1; i >= 0; i--) {
+    if (extensionPanelViews[i].extensionId === extId) extensionPanelViews.splice(i, 1);
   }
   for (let i = extensionSettingsComponents.length - 1; i >= 0; i--) {
     if (extensionSettingsComponents[i].extensionId === extId) extensionSettingsComponents.splice(i, 1);
