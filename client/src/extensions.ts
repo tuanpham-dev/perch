@@ -927,6 +927,11 @@ export interface PanelViewContext {
   mobilePointer: boolean;
   showMenu(x: number, y: number, items: MenuItem[]): void;
   confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
+  // A slot in the panel header, before Maximize and Hide, where TERMINAL
+  // keeps its own New/Attach/Split buttons: render this view's actions into
+  // it with createPortal (the sidebar panels' actionsTarget pattern). Null
+  // until the header has mounted it, so render nothing then.
+  actionsTarget: HTMLElement | null;
 }
 
 export interface PanelViewHostProps {

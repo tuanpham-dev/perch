@@ -1210,6 +1210,7 @@ interface PanelViewContext {
   mobilePointer: boolean;           // phone/tablet
   showMenu(x: number, y: number, items: MenuItem[]): void;
   confirmDialog(message: string, confirmLabel?: string): Promise<boolean>;
+  actionsTarget: HTMLElement | null; // header slot for your buttons (portal into it)
 }
 ```
 
@@ -1237,6 +1238,11 @@ Hide on every view.
 - **Layout.** The view's box is `position: absolute; inset: 0; overflow:
   auto`, so it scrolls itself. Keep the width in mind on phones: the panel is
   as wide as the window there.
+- **Header buttons.** `actionsTarget` is a slot in the panel header, before
+  Maximize and Hide, where TERMINAL keeps its own New/Attach/Split: render
+  your view's actions into it with `createPortal` (icon buttons, `className=
+  "icon-button"`), the way a sidebar panel uses its `actionsTarget`. It is
+  `null` until the header has mounted it, so render nothing then.
 
 References: `ports` (a table view opened from its status bar item) and
 `agent-monitor` in the

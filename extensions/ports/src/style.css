@@ -516,11 +516,19 @@
   gap: 12px;
 }
 
-.ports-table-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: auto;
-  padding: 6px 10px;
-  border-top: 1px solid var(--border);
+
+/* The header's Kill exited: a trash icon with the count beside it. */
+.ports-header-kill-exited {
+  width: auto !important;
+  gap: 3px;
+  padding: 0 4px;
+}
+
+.ports-header-kill-exited:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ports-header-count {
+  font-size: 11px;
 }
