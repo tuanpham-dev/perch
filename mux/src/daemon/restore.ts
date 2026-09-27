@@ -38,6 +38,7 @@ export function restoreSessions(server: DaemonServer, config: Config, runCommand
         autoName: w.autoName,
         serverUrl: server.notifyUrl,
         sessionName: s.name,
+        rootCwd: s.rootCwd,
         cwd,
         command: w.command,
         cols: w.cols,

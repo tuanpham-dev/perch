@@ -70,6 +70,7 @@ test('spawned shells carry PERCH_SESSION/PERCH_WINDOW and are scrubbed of daemon
 
     assert.equal(get('PERCH_SESSION'), 'envtest', 'session name at spawn time');
     assert.match(get('PERCH_WINDOW') ?? '', /^[0-9a-f-]{36}$/, 'window uuid present');
+    assert.ok(get('PERCH_ROOT'), 'project root present, for cdp');
     // Identity is consistent with what window.list reports for this window.
     assert.equal(get('PERCH_STATE_DIR'), env.PERCH_STATE_DIR, 'state dir kept so nested CLI targets the same daemon');
 
@@ -112,6 +113,7 @@ test('a restored window also gets identity vars (restore path uses the same spaw
     const environ = readFileSync(`/proc/${after[0]!.pid}/environ`, 'utf8').split('\0');
     assert.ok(environ.some((e) => e === 'PERCH_SESSION=reborn'), 'restored shell has PERCH_SESSION');
     assert.ok(environ.some((e) => e.startsWith('PERCH_WINDOW=')), 'restored shell has PERCH_WINDOW');
+    assert.ok(environ.some((e) => e.startsWith('PERCH_ROOT=')), 'restored shell has PERCH_ROOT');
   } finally {
     killDaemons(env);
     rmSync(dir, { recursive: true, force: true });

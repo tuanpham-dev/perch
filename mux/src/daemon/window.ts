@@ -36,6 +36,8 @@ export type WindowOpts = {
   autoName?: boolean;
   /** Owning session's name at spawn time — lands in PERCH_SESSION. */
   sessionName: string;
+  /** Owning session's rootCwd — lands in PERCH_ROOT. */
+  rootCwd: string;
   /** The app server that announced itself, for the shell to report commands to. */
   serverUrl?: string | null;
   cwd: string;
@@ -155,7 +157,7 @@ export class Window {
       cols: opts.cols,
       rows: opts.rows,
       cwd: opts.cwd,
-      env: spawnEnv({ sessionName: opts.sessionName, windowId: this.id, serverUrl: opts.serverUrl }),
+      env: spawnEnv({ sessionName: opts.sessionName, windowId: this.id, rootCwd: opts.rootCwd, serverUrl: opts.serverUrl }),
     });
     // This terminal answers the shell's capability queries — DA, cursor
     // position — instead of the browser doing it.

@@ -187,6 +187,7 @@ export class DaemonServer {
         const window = this.#makeWindow({
           name: defaultWindowName(req.command),
           sessionName,
+          rootCwd: cwd,
           command: req.command,
           cwd,
           cols: DEFAULT_COLS,
@@ -297,6 +298,7 @@ export class DaemonServer {
           name: req.name ?? defaultWindowName(req.command),
           autoName: req.name === undefined,
           sessionName: session.name,
+          rootCwd: session.rootCwd,
           command: req.command,
           cwd: req.cwd ?? homedir(),
           cols: size.cols,
@@ -454,7 +456,7 @@ export class DaemonServer {
     this.store.sessions.set(name, { id, name, windows, currentIndex, createdAt, rootCwd });
   }
 
-  #makeWindow(opts: { name: string; autoName?: boolean; sessionName: string; command?: string; cwd: string; cols: number; rows: number }): Window {
+  #makeWindow(opts: { name: string; autoName?: boolean; sessionName: string; rootCwd: string; command?: string; cwd: string; cols: number; rows: number }): Window {
     const window = new Window({
       ...opts,
       // Whichever server last announced itself here, so a shell reports its
