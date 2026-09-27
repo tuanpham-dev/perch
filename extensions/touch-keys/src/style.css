@@ -83,6 +83,11 @@
   z-index: 45;
 }
 
+/* .codicon fixes its own 16px; match the toggle's old glyph size. */
+.touch-key-fab .codicon {
+  font-size: 20px;
+}
+
 .touch-key-fab.active {
   background: var(--accent);
   border-color: var(--accent);

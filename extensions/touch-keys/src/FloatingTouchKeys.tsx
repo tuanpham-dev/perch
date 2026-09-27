@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import Icon from "../../_shared/Icon";
 import type { TouchKey } from "./touchKeys";
 import { TouchKeyButton, TouchKeyLayoutError, visibleKeys } from "./TouchKeyBar";
 
@@ -243,6 +244,8 @@ export default function FloatingTouchKeys({
       )}
       <button
         className={`touch-key-fab${expanded ? " active" : ""}`}
+        aria-label="Touch keys"
+        aria-expanded={expanded}
         // Dragging the toggle is a free horizontal motion the host's
         // flick-to-toggle-sidebar gesture would otherwise also read as a
         // sidebar swipe (it only skips horizontal *scrollers*).
@@ -253,7 +256,7 @@ export default function FloatingTouchKeys({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        ⌨
+        <Icon name="keyboard" />
       </button>
     </>,
     document.body,

@@ -2913,7 +2913,7 @@ export default function App() {
             aria-label="Dismiss"
             onClick={() => setOpenUrlBanner(null)}
           >
-            ✕
+            <Icon name="close" />
           </button>
         </div>
       )}

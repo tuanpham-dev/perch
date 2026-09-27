@@ -7,6 +7,7 @@
 // toggle) for the two ways these render.
 
 export interface TouchKey {
+  // Plain text, or "$(name)" for a codicon (e.g. "$(mic)") - see keyLabelIcon.
   label: string;
   // Brace-token notation a phone user can type without an escape-code
   // reference — see parseSend below. A `send` of exactly "{ctrl}" is the
@@ -29,14 +30,22 @@ export const DEFAULT_TOUCH_KEYS: TouchKey[] = [
   { label: "^C", send: "{^c}", when: "" },
   // Self-hides on browsers without SpeechRecognition (TouchKeyBar.tsx's
   // visibleKeys) — safe to always include by default.
-  { label: "🎤", send: "{mic}", when: "" },
+  { label: "$(mic)", send: "{mic}", when: "" },
   // Opens the native file picker (photo library/camera included on
   // iOS/Android) and uploads through the same settings.pasteDropUploadDir
   // pipeline paste/drop use — any file type, despite the historical
   // `{image}` token name. Gated to claude by default, matching that
   // feature's localEchoWhen gating.
-  { label: "📷", send: "{image}", when: "claude" },
+  { label: "$(device-camera)", send: "{image}", when: "claude" },
 ];
+
+// The codicon a key label names: "$(name)", or one of the emoji labels the
+// defaults used before icons (still in saved layouts). null = plain text.
+const LEGACY_EMOJI_ICONS: Record<string, string> = { "🎤": "mic", "📷": "device-camera" };
+export function keyLabelIcon(label: string): string | null {
+  const m = /^\$\(([a-z0-9-]+)\)$/.exec(label.trim());
+  return m ? m[1] : (LEGACY_EMOJI_ICONS[label.trim()] ?? null);
+}
 
 // A "{snippet:<id>}" send runs a saved snippet from the bundled snippets
 // extension instead of sending bytes: the tap dispatches a

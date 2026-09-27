@@ -442,7 +442,7 @@ export default function TerminalView({
   // upload pipeline desktop paste/drop already use.
   const uploadImageRef = useRef<(file: File) => void>(() => {});
   // Multi-file counterpart (pasting several images, dropping several files of
-  // any type, and the 📷 key's multi-select) — uploads all and inserts their
+  // any type, and the touch keys' image key's multi-select) — uploads all and inserts their
   // paths as one no-submit block. Set alongside uploadImageRef in the mount
   // effect.
   const uploadImagesRef = useRef<(files: File[]) => void>(() => {});
