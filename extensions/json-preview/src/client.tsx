@@ -252,7 +252,13 @@ function JsonView({ filePath, active, toolbarTarget, openInEditor, fontSize = 14
                     <span className="json-search-result-path">{entry.path}</span>
                     <span className="json-search-result-value">{valuePreview(entry.value)}</span>
                     <span className="json-search-result-action">
-                      {copiedPath === entry.path ? "✓ copied" : "copy path"}
+                      {copiedPath === entry.path ? (
+                        <>
+                          <Icon name="check" /> copied
+                        </>
+                      ) : (
+                        "copy path"
+                      )}
                     </span>
                   </button>
                 ))}

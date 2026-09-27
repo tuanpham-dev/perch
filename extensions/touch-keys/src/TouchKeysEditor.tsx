@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Icon from "../../_shared/Icon";
 import { DEFAULT_TOUCH_KEYS, parseSend, snippetIdOf, type TouchKey } from "./touchKeys";
 import { TouchKeyButton, visibleKeys } from "./TouchKeyBar";
 import { readLayout, useTouchKeySettingsTick, writeKeys } from "./client";
@@ -228,6 +229,7 @@ export default function TouchKeysEditor() {
     <div className="settings-row">
       <span className="settings-label">Touch keys</span>
       <div className="touch-key-editor-legend">
+        label: text, or {"$(name)"} for a codicon icon (e.g. {"$(mic)"}, {"$(arrow-up)"}).{" "}
         send: literal text, or tokens {"{esc} {tab} {enter} {up} {down} {left} {right} {home} {end} {pgup} {pgdn} {space} {^x}"}{" "}
         (Ctrl+x, e.g. {"{^c}"}), {"{{"} for a literal {"{"}, {"{ctrl}"} for sticky-Ctrl, {"{mic}"} for voice input (hidden if
         unsupported), {"{image}"} for an image picker (uploads to the Behavior settings' upload
@@ -299,11 +301,11 @@ export default function TouchKeysEditor() {
                 onPointerDown={(e) => handleGripPointerDown(e, i)}
                 aria-label="Drag to reorder"
               >
-                ⋮⋮
+                <Icon name="gripper" />
               </div>
               <input
                 className="dialog-input touch-key-editor-label"
-                placeholder="Label"
+                placeholder="Label or $(icon)"
                 value={key.label}
                 onChange={(e) => updateKey(i, { ...key, label: e.target.value })}
               />
@@ -321,7 +323,7 @@ export default function TouchKeysEditor() {
               />
               <div className="touch-key-editor-actions">
                 <button type="button" className="icon-button" onClick={() => removeKey(i)} aria-label="Remove key">
-                  ✕
+                  <Icon name="close" />
                 </button>
               </div>
               {error && <div className="touch-key-editor-error">{error}</div>}

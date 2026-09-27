@@ -230,7 +230,7 @@ function CommandHistoryPanel({ showMenu }: PanelProps) {
               className={`cmdhist-exit ${entry.exitCode === 0 ? "ok" : "fail"}`}
               title={`exit ${entry.exitCode}`}
             >
-              {entry.exitCode === 0 ? "✓" : entry.exitCode}
+              {entry.exitCode === 0 ? <Icon name="check" /> : entry.exitCode}
             </span>
             <button
               type="button"
@@ -337,7 +337,7 @@ export function activate(ctx: ExtensionContext): void {
         seen.add(entry.command);
         items.push({
           label: entry.command,
-          tag: entry.exitCode === 0 ? "✓" : `✗ ${entry.exitCode}`,
+          tag: entry.exitCode === 0 ? "ok" : `exit ${entry.exitCode}`,
           run: (secondary) => typeIntoActivePane(entry.command, !secondary),
         });
       }

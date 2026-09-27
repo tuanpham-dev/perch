@@ -158,6 +158,11 @@
   font-size: 10.5px;
 }
 
+.json-search-result-action .codicon {
+  font-size: 11px;
+  vertical-align: -1px;
+}
+
 .json-tree-wrap {
   font-family: "IBM Plex Mono", monospace;
   font-size: 12.5px;
@@ -274,12 +279,19 @@
   flex-shrink: 0;
 }
 
+/* Codicon glyphs (the host loads the font): chevron-right / chevron-down. */
+.json-tree-expand-icon::after,
+.json-tree-collapse-icon::after {
+  font-family: codicon;
+  font-size: 14px;
+}
+
 .json-tree-expand-icon::after {
-  content: "+";
+  content: "\eab6";
 }
 
 .json-tree-collapse-icon::after {
-  content: "\2212";
+  content: "\eab4";
 }
 
 .json-tree-expand-icon:hover,

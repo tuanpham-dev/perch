@@ -1165,7 +1165,8 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
         `/branches?cwd=${encodeURIComponent(activeCwd)}`,
       );
       const items: MenuItem[] = data.branches.map((b) => ({
-        label: b === data.current ? `✓ ${b}` : b,
+        label: b,
+        checked: b === data.current,
         onClick: () => {
           if (b !== data.current) checkout(b);
         },
@@ -1835,7 +1836,8 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
             { label: "Sync", onClick: () => runNetwork("sync") },
             { label: "Fetch", onClick: manualFetch },
             {
-              label: amend ? "✓ Amend Next Commit" : "Amend Next Commit",
+              label: "Amend Next Commit",
+              checked: amend,
               onClick: toggleAmend,
             },
             ...(canUndo ? [{ label: "Undo Last Commit", onClick: undoLastCommit }] : []),
