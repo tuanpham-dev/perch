@@ -44,6 +44,32 @@ export function fetchSessions(): Promise<TerminalSession[]> {
   return request("/api/sessions");
 }
 
+// ---- Log channels (OutputView) ----
+
+export interface LogLine {
+  seq: number;
+  at: number;
+  channel: string;
+  text: string;
+}
+
+// The channel id that reads (and clears) every channel at once.
+export const ALL_LOG_CHANNELS = "*";
+
+export function listLogChannels(): Promise<{ channels: string[] }> {
+  return request("/api/logs/channels");
+}
+
+// `cursor` is the last seq the server had handed out; send it back as
+// `since` for only the lines appended after this answer.
+export function readLog(channel: string, since = 0): Promise<{ lines: LogLine[]; cursor: number }> {
+  return request(`/api/logs/${encodeURIComponent(channel)}?since=${since}`);
+}
+
+export function clearLog(channel: string): Promise<void> {
+  return request(`/api/logs/${encodeURIComponent(channel)}/clear`, { method: "POST" });
+}
+
 export function createSession(name?: string, cwd?: string, exactCwd?: boolean): Promise<TerminalSession> {
   return request("/api/sessions", {
     method: "POST",

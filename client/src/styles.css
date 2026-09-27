@@ -4559,6 +4559,232 @@ body.scrollbar-dragging {
   min-height: 0;
 }
 
+/* ---- Panel views (plans/bottom-panel-views.md) ---- */
+
+/* The view tabs at the header's left end — TERMINAL, OUTPUT and whatever
+   extensions contribute — set like the old TERMINAL title, with the active
+   one underlined the way VS Code marks its panel views. */
+.bottom-panel-views {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  padding: 0 4px;
+  gap: 2px;
+}
+
+.bottom-panel-view-tab {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+
+.bottom-panel-view-tab:hover {
+  color: var(--fg);
+}
+
+.bottom-panel-view-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.bottom-panel-view-tab:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The strip's first tab sits right after the view tabs, so it gets the
+   left edge the others get from their neighbour's right border. */
+.bottom-panel-header .tab-strip .tab:first-child {
+  border-left-color: var(--tab-border);
+}
+
+/* Fills the header between the view tabs and the actions while a
+   non-terminal view is showing (the strip does that job on TERMINAL). */
+.bottom-panel-header-spacer {
+  flex: 1;
+}
+
+/* The terminal strip, collapsed: it stays in the row (at zero height and
+   invisible) so its scrollWidth/clientWidth still say whether the tabs
+   would fit — that measurement is what un-collapses it. */
+.bottom-panel-header .tab-strip.collapsed {
+  visibility: hidden;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* What stands in for the strip while it is collapsed: one button naming the
+   active tab, opening the tab list as a menu. */
+.bottom-panel-tab-dropdown {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  align-self: center;
+  margin: 0 4px;
+  padding: 2px 8px;
+  max-width: 320px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bottom-panel-tab-dropdown:hover {
+  background: var(--list-hover-bg);
+}
+
+.bottom-panel-tab-dropdown > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bottom-panel-tab-count {
+  color: var(--fg-inactive);
+}
+
+/* Unseen output on a hidden terminal tab (TerminalView's onOutput). */
+.bottom-panel-tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+/* A mounted non-terminal view fills the body; the view scrolls itself. */
+.bottom-panel-view {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+/* ---- OUTPUT view (OutputView.tsx) ---- */
+
+.output-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.output-view-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.output-view-toolbar select,
+.output-view-toolbar input {
+  height: 22px;
+  padding: 0 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.output-view-toolbar input {
+  flex: 1;
+  min-width: 80px;
+  max-width: 320px;
+}
+
+.output-view-toolbar input:focus,
+.output-view-toolbar select:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.output-view-spacer {
+  flex: 1;
+}
+
+.output-view-lines {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 4px 8px;
+  overflow: auto;
+  font-family: var(--mono-font, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.output-view-line {
+  display: flex;
+  gap: 10px;
+}
+
+.output-view-time {
+  flex-shrink: 0;
+  color: var(--fg-inactive);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The channel a line came from, in the All view only. */
+.output-view-channel {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.output-view-line.level-error .output-view-text {
+  color: var(--error);
+}
+
+.output-view-line.level-warn .output-view-text {
+  color: var(--warning, var(--fg));
+}
+
+.output-view-empty,
+.output-view-error {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-inactive);
+}
+
+.output-view-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* Maximized: the panel takes the whole window between the title bar and
+   the status bar. The sidebars and editor go with .app-body — the panel
+   spans the full width under both, so there is no column to keep. Nothing
+   unmounts: the editor's fixed-position terminal hosts follow their
+   measured leaf rects, which collapse to nothing along with the body. */
+.app.panel-maximized .app-body {
+  display: none;
+}
+
+.app.panel-maximized .bottom-panel {
+  flex: 1;
+  height: auto !important;
+}
+
 /* One per tab; only the active one is displayed (the rest keep their
    terminals mounted behind display:none, so a tab switch is instant and
    scrollback survives — same trade-off App.tsx makes for editor tabs). */

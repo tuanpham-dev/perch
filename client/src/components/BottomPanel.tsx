@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { TerminalTheme } from "../engines/types";
 import type { Keybinding } from "../keybindings";
 import type { AppSettings } from "../settings";
-import type { TerminalSession } from "../types";
+import type { MenuItem, TerminalSession } from "../types";
 import type { PanelPane, PanelState, PanelTab } from "../hooks/useBottomPanel";
+import { TERMINAL_VIEW_ID, type PanelViewDescriptor } from "../lib/panelViews";
 import Icon from "./Icon";
 import TerminalView from "./TerminalView";
 
@@ -18,6 +19,12 @@ import TerminalView from "./TerminalView";
 // Every tab's panes stay mounted (hidden tabs are display:none rather than
 // unrendered), matching how App keeps every editor tab's terminal alive:
 // switching panel tabs is instant and scrollback survives.
+//
+// The header's left end is a row of view tabs (plans/bottom-panel-views.md):
+// TERMINAL, core's OUTPUT, and whatever extensions register. The terminal
+// strip and its actions show only on TERMINAL; a non-terminal view is the
+// ONE mounted `renderView` node, unmounted the moment the user switches away
+// — unlike the terminals, which have scrollback worth keeping.
 
 // Matches SplitLayout's own MIN_LEAF_PX — a sash can't shrink either pane
 // below this.
@@ -25,6 +32,25 @@ const MIN_PANE_PX = 120;
 
 interface Props {
   panel: PanelState;
+  // Already ordered (lib/panelViews.ts's orderPanelViews): TERMINAL first,
+  // switched-off views left out. `allViews` is the same list with them in,
+  // for the header's right-click show/hide menu.
+  views: PanelViewDescriptor[];
+  allViews: PanelViewDescriptor[];
+  hiddenViews: string[];
+  onToggleViewHidden: (viewId: string) => void;
+  activeView: string;
+  onSelectView: (viewId: string) => void;
+  // The mounted body for a non-terminal view, by id — App supplies core's
+  // OUTPUT and each extension view's component with its context.
+  renderView: (viewId: string) => ReactNode;
+  maximized: boolean;
+  onToggleMaximized: () => void;
+  // Terminal tabs with output the user hasn't seen (useBottomPanel).
+  unseenOutput: Set<string>;
+  onPaneOutput: (tabId: string) => void;
+  // The app's shared context menu, for the collapsed strip's tab list.
+  showMenu: (x: number, y: number, items: MenuItem[]) => void;
   // The current project's tabs only — drives the tab strip and the empty
   // state. The body below still renders every tab across every project (see
   // the module comment); visibleTabs never needs to reach it directly.
@@ -68,6 +94,18 @@ interface Props {
 
 export default function BottomPanel({
   panel,
+  views,
+  allViews,
+  hiddenViews,
+  onToggleViewHidden,
+  activeView,
+  onSelectView,
+  renderView,
+  maximized,
+  onToggleMaximized,
+  unseenOutput,
+  onPaneOutput,
+  showMenu,
   visibleTabs,
   activeTabId,
   panelFocused,
@@ -94,6 +132,29 @@ export default function BottomPanel({
 }: Props) {
   const paneRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const tabStripRef = useRef<HTMLDivElement | null>(null);
+  const terminalActive = activeView === TERMINAL_VIEW_ID;
+
+  // Whether the strip's tabs fit. Measured off the strip itself, which stays
+  // in the row even while collapsed (styles.css's .tab-strip.collapsed keeps
+  // its width and zeroes its height), so the same comparison also says when
+  // the tabs fit again. Re-checked on every render — a tab added or renamed
+  // changes scrollWidth without any resize — and on the strip's resize.
+  const [overflowing, setOverflowing] = useState(false);
+  const measureOverflow = () => {
+    const el = tabStripRef.current;
+    if (!el) return;
+    setOverflowing(el.scrollWidth > el.clientWidth + 1);
+  };
+  useLayoutEffect(measureOverflow);
+  useEffect(() => {
+    const el = tabStripRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(measureOverflow);
+    observer.observe(el);
+    return () => observer.disconnect();
+    // The strip element only exists while TERMINAL is showing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminalActive]);
 
   // Plain (unshifted) mouse wheel scrolls the strip horizontally too, not
   // just Shift+wheel (the browser's native horizontal-scroll gesture) —
@@ -120,6 +181,35 @@ export default function BottomPanel({
   const tabLabel = (tab: PanelTab): string => {
     const base = paneLabel(tab.panes[0]);
     return tab.panes.length > 1 ? `${base} (${tab.panes.length})` : base;
+  };
+
+  const activeTab = visibleTabs.find((t) => t.id === activeTabId) ?? null;
+
+  // Right-click on the view tabs: every view, checked while shown. TERMINAL
+  // is listed but can't be switched off (useBottomPanel ignores it).
+  const openViewsMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    showMenu(
+      e.clientX,
+      e.clientY,
+      allViews.map((view) => ({
+        label: view.title,
+        checked: !hiddenViews.includes(view.id),
+        disabled: view.id === TERMINAL_VIEW_ID,
+        onClick: () => onToggleViewHidden(view.id),
+      })),
+    );
+  };
+
+  // The collapsed strip's menu: one row per tab, the active one checked, an
+  // unseen-output tab marked the way its strip tab would be.
+  const openTabMenu = (anchor: DOMRect) => {
+    const items: MenuItem[] = visibleTabs.map((tab) => ({
+      label: unseenOutput.has(tab.id) ? `${tabLabel(tab)}  ●` : tabLabel(tab),
+      checked: tab.id === activeTabId,
+      onClick: () => onSelectTab(tab.id),
+    }));
+    showMenu(anchor.left, anchor.bottom, items);
   };
 
   // Drag the panel's top edge. Height grows as the pointer moves *up*, so the
@@ -194,65 +284,109 @@ export default function BottomPanel({
     <div className="bottom-panel" style={{ height: panel.height }}>
       <div className="bottom-panel-resize" onPointerDown={handleHeightPointerDown} />
       <div className="bottom-panel-header">
-        <span className="bottom-panel-title">TERMINAL</span>
-        <div className="tab-strip" ref={tabStripRef}>
-          {visibleTabs.map((tab) => (
-            <div
-              key={tab.id}
-              role="button"
-              tabIndex={0}
-              className={`tab${tab.id === activeTabId ? " active" : ""}`}
-              title={tab.panes.map(paneLabel).join("  |  ")}
-              onClick={() => onSelectTab(tab.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelectTab(tab.id);
-                }
-              }}
+        <div className="bottom-panel-views" role="tablist" onContextMenu={openViewsMenu}>
+          {views.map((view) => (
+            <button
+              key={view.id}
+              role="tab"
+              aria-selected={view.id === activeView}
+              className={`bottom-panel-view-tab${view.id === activeView ? " active" : ""}`}
+              onClick={() => onSelectView(view.id)}
             >
-              <span>{tabLabel(tab)}</span>
-              <button
-                className="tab-close"
-                title="Close terminal"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseTab(tab.id);
-                }}
-              >
-                <Icon name="close" />
-              </button>
-            </div>
+              {view.title}
+            </button>
           ))}
         </div>
+        {terminalActive && overflowing && activeTab && (
+          <button
+            className="bottom-panel-tab-dropdown"
+            data-menu-trigger="true"
+            aria-haspopup="menu"
+            title={activeTab.panes.map(paneLabel).join("  |  ")}
+            onClick={(e) => openTabMenu(e.currentTarget.getBoundingClientRect())}
+          >
+            <span>{tabLabel(activeTab)}</span>
+            {unseenOutput.size > 0 && <span className="bottom-panel-tab-dot" />}
+            <span className="bottom-panel-tab-count">({visibleTabs.length})</span>
+            <Icon name="chevron-down" />
+          </button>
+        )}
+        {terminalActive ? (
+          <div className={`tab-strip${overflowing ? " collapsed" : ""}`} ref={tabStripRef}>
+            {visibleTabs.map((tab) => (
+              <div
+                key={tab.id}
+                role="button"
+                tabIndex={overflowing ? -1 : 0}
+                className={`tab${tab.id === activeTabId ? " active" : ""}`}
+                title={tab.panes.map(paneLabel).join("  |  ")}
+                onClick={() => onSelectTab(tab.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelectTab(tab.id);
+                  }
+                }}
+              >
+                <span>{tabLabel(tab)}</span>
+                {unseenOutput.has(tab.id) && <span className="bottom-panel-tab-dot" />}
+                <button
+                  className="tab-close"
+                  title="Close terminal"
+                  tabIndex={overflowing ? -1 : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseTab(tab.id);
+                  }}
+                >
+                  <Icon name="close" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bottom-panel-header-spacer" onContextMenu={openViewsMenu} />
+        )}
         <div className="tab-bar-actions">
+          {terminalActive && (
+            <>
+              <button
+                className="panel-action"
+                title="New Terminal"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  onRequestTerminal({ x: rect.left, y: rect.bottom });
+                }}
+              >
+                <Icon name="add" />
+              </button>
+              <button
+                className="panel-action"
+                title="Attach Window"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  onRequestAttachWindow({ x: rect.left, y: rect.bottom });
+                }}
+              >
+                <Icon name="triangle-down" />
+              </button>
+              <button
+                className="panel-action"
+                title="Split Terminal Right"
+                disabled={activeTabId === null}
+                onClick={onSplit}
+              >
+                <Icon name="split-horizontal" />
+              </button>
+            </>
+          )}
           <button
             className="panel-action"
-            title="New Terminal"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              onRequestTerminal({ x: rect.left, y: rect.bottom });
-            }}
+            title={maximized ? "Restore Panel Size" : "Maximize Panel"}
+            aria-pressed={maximized}
+            onClick={onToggleMaximized}
           >
-            <Icon name="add" />
-          </button>
-          <button
-            className="panel-action"
-            title="Attach Window"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              onRequestAttachWindow({ x: rect.left, y: rect.bottom });
-            }}
-          >
-            <Icon name="triangle-down" />
-          </button>
-          <button
-            className="panel-action"
-            title="Split Terminal Right"
-            disabled={activeTabId === null}
-            onClick={onSplit}
-          >
-            <Icon name="split-horizontal" />
+            <Icon name={maximized ? "screen-normal" : "screen-full"} />
           </button>
           <button className="panel-action" title="Hide Panel" onClick={onHide}>
             <Icon name="chevron-down" />
@@ -260,9 +394,10 @@ export default function BottomPanel({
         </div>
       </div>
       <div className="bottom-panel-body">
-        {visibleTabs.length === 0 && (
+        {terminalActive && visibleTabs.length === 0 && (
           <div className="placeholder">No terminals in this project. Use + to open one.</div>
         )}
+        {!terminalActive && <div className="bottom-panel-view">{renderView(activeView)}</div>}
         {panel.tabs.map((tab) => {
           // Every project's tabs stay mounted here (see the module comment);
           // tabVisible naturally covers only the current project's active
@@ -270,7 +405,9 @@ export default function BottomPanel({
           // them — every other project's tabs, including their own last-
           // active one, resolve to display:none without needing a separate
           // project filter in this loop.
-          const tabVisible = tab.id === activeTabId;
+          // ...and only while TERMINAL is the view showing: another view
+          // owns the body then, and the panes wait behind display:none.
+          const tabVisible = terminalActive && tab.id === activeTabId;
           const nodes: React.ReactNode[] = [];
           tab.panes.forEach((pane, i) => {
             const paneVisible = tabVisible;
@@ -299,6 +436,7 @@ export default function BottomPanel({
                   bindings={bindings}
                   onExit={() => onPaneExit(tab.id, pane.id)}
                   onError={onError}
+                  onOutput={() => onPaneOutput(tab.id)}
                   onWindowSwitch={(windowIndex) => onWindowSwitch(pane.sessionName, windowIndex)}
                   onSessionSwitch={onSessionSwitch}
                   onOpenFile={onOpenFile}

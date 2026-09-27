@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import * as api from "../api";
+import { TERMINAL_VIEW_ID } from "../lib/panelViews";
 import type { TerminalSession } from "../types";
 
 // The bottom terminal panel (plans/bottom-terminal-panel.md). Deliberately
@@ -49,6 +50,14 @@ export interface PanelState {
   // project stay mounted together (see BottomPanel's module comment) and
   // only one project's tabs are ever shown in the strip at a time.
   activeTabByProject: Record<string, string>;
+  // Which view the panel shows (plans/bottom-panel-views.md): "terminal",
+  // core's "core.output", or an extension view's namespaced id. App
+  // re-resolves it against the views that exist (lib/panelViews.ts's
+  // resolveActiveView) so a stored id whose extension is gone falls back.
+  activeView: string;
+  // Views the user switched off from the header's right-click menu, by id.
+  // Per device, like the rest of this record. TERMINAL is never listed.
+  hiddenViews: string[];
 }
 
 const PANEL_KEY = "bottomPanel";
@@ -68,6 +77,8 @@ const EMPTY_STATE: PanelState = {
   height: DEFAULT_HEIGHT,
   tabs: [],
   activeTabByProject: {},
+  activeView: TERMINAL_VIEW_ID,
+  hiddenViews: [],
 };
 
 function isPane(value: unknown): value is PanelPane {
@@ -126,12 +137,20 @@ function loadPanelState(): { state: PanelState; legacyActiveTabId: string | null
     typeof raw.activeTabId === "string" && tabs.some((t) => t.id === raw.activeTabId)
       ? raw.activeTabId
       : null;
+  const activeView = typeof raw.activeView === "string" && raw.activeView ? raw.activeView : TERMINAL_VIEW_ID;
+  const hiddenViews = Array.isArray(raw.hiddenViews)
+    ? raw.hiddenViews.filter((id): id is string => typeof id === "string" && id !== TERMINAL_VIEW_ID)
+    : [];
   return {
     state: {
-      visible: raw.visible === true && tabs.length > 0,
+      // A panel showing a non-terminal view has something to show without
+      // any terminal tab; on TERMINAL an empty panel is not worth restoring.
+      visible: raw.visible === true && (tabs.length > 0 || activeView !== TERMINAL_VIEW_ID),
       height: clampPanelHeight(typeof raw.height === "number" ? raw.height : DEFAULT_HEIGHT),
       tabs,
       activeTabByProject: {},
+      activeView,
+      hiddenViews,
     },
     legacyActiveTabId,
   };
@@ -159,6 +178,13 @@ export function useBottomPanel(
   // `focused` is true, so exactly one side may claim it at a time — App ANDs
   // !panelFocused into every editor terminal's own focused prop.
   const [panelFocused, setPanelFocused] = useState(false);
+  // Maximized fills the window between the title bar and the status bar
+  // (App adds the panel-maximized class). Session-only by design: a reload
+  // comes back at the stored height.
+  const [maximized, setMaximized] = useState(false);
+  // Terminal tabs that printed output while another tab was showing
+  // (TerminalView's onOutput); cleared when the tab is selected.
+  const [unseenOutput, setUnseenOutput] = useState<Set<string>>(() => new Set());
 
   // Snapshot for the async/imperative paths below (splitActivePane must read
   // the current tabs across an await; removePane/closeTab need the panes they
@@ -192,15 +218,83 @@ export function useBottomPanel(
   // behavior. Reads the current visibility rather than toggling panelFocused
   // independently: the panel can be visible without being focused (a click in
   // an editor terminal), and toggling from there must hide it, not re-focus it.
+  //
+  // Focus follows only a TERMINAL view: revealing the panel on OUTPUT must
+  // not steal the keyboard from the editor for a view that has no terminal.
   const togglePanel = useCallback(() => {
     const nextVisible = !panelRef.current.visible;
     setPanel((prev) => ({ ...prev, visible: nextVisible }));
-    setPanelFocused(nextVisible);
+    setPanelFocused(nextVisible && panelRef.current.activeView === TERMINAL_VIEW_ID);
   }, []);
 
   const showPanel = useCallback(() => {
     setPanel((prev) => (prev.visible ? prev : { ...prev, visible: true }));
-    setPanelFocused(true);
+    setPanelFocused(panelRef.current.activeView === TERMINAL_VIEW_ID);
+  }, []);
+
+  // Switches the header's view tab. Only the terminal view owns keyboard
+  // focus (see panelFocused); every other view hands it back to the editor.
+  const selectView = useCallback((viewId: string) => {
+    setPanel((prev) => (prev.activeView === viewId ? prev : { ...prev, activeView: viewId }));
+    setPanelFocused(viewId === TERMINAL_VIEW_ID);
+  }, []);
+
+  // ctx.app.showPanelView and the "Panel: Show <view>" commands.
+  // A hidden view asked for by name comes back: the command or the status
+  // bar item that asked is a deliberate request for it.
+  const showView = useCallback((viewId: string) => {
+    setPanel((prev) => {
+      const hiddenViews = prev.hiddenViews.includes(viewId)
+        ? prev.hiddenViews.filter((id) => id !== viewId)
+        : prev.hiddenViews;
+      if (prev.visible && prev.activeView === viewId && hiddenViews === prev.hiddenViews) return prev;
+      return { ...prev, visible: true, activeView: viewId, hiddenViews };
+    });
+    setPanelFocused(viewId === TERMINAL_VIEW_ID);
+  }, []);
+
+  // ctx.app.togglePanelView: a status bar item's click — hides the panel
+  // when its view is the one showing, otherwise shows that view. A view the
+  // user switched off stays off: the click reports false and the item
+  // falls back to whatever it did before it had a view (its popover).
+  const toggleView = useCallback(
+    (viewId: string): boolean => {
+      const current = panelRef.current;
+      if (current.hiddenViews.includes(viewId)) return false;
+      if (current.visible && current.activeView === viewId) {
+        setPanel((prev) => ({ ...prev, visible: false }));
+        setPanelFocused(false);
+      } else {
+        showView(viewId);
+      }
+      return true;
+    },
+    [showView],
+  );
+
+  const toggleMaximized = useCallback(() => {
+    setMaximized((prev) => !prev);
+  }, []);
+
+  // The header's right-click menu. TERMINAL stays: the panel has to have a
+  // view that is always there.
+  const toggleViewHidden = useCallback((viewId: string) => {
+    if (viewId === TERMINAL_VIEW_ID) return;
+    setPanel((prev) => ({
+      ...prev,
+      hiddenViews: prev.hiddenViews.includes(viewId)
+        ? prev.hiddenViews.filter((id) => id !== viewId)
+        : [...prev.hiddenViews, viewId],
+    }));
+  }, []);
+
+  const markOutput = useCallback((tabId: string) => {
+    setUnseenOutput((prev) => {
+      if (prev.has(tabId)) return prev;
+      const next = new Set(prev);
+      next.add(tabId);
+      return next;
+    });
   }, []);
 
   const hidePanel = useCallback(() => {
@@ -208,7 +302,10 @@ export function useBottomPanel(
     setPanelFocused(false);
   }, []);
 
+  // A drag of the top edge ends maximized mode: the dragged height is the
+  // one the user wants (spec R8).
   const setHeight = useCallback((height: number) => {
+    setMaximized(false);
     setPanel((prev) => ({ ...prev, height: clampPanelHeight(height) }));
   }, []);
 
@@ -220,6 +317,12 @@ export function useBottomPanel(
         const key = projectKeyOf(tab);
         if (prev.activeTabByProject[key] === tabId) return prev;
         return { ...prev, activeTabByProject: { ...prev.activeTabByProject, [key]: tabId } };
+      });
+      setUnseenOutput((prev) => {
+        if (!prev.has(tabId)) return prev;
+        const next = new Set(prev);
+        next.delete(tabId);
+        return next;
       });
       setPanelFocused(true);
     },
@@ -278,9 +381,12 @@ export function useBottomPanel(
         activePaneId: pane.id,
       };
       const key = projectKeyOf(tab);
+      // A new terminal always lands on the TERMINAL view, whichever view was
+      // showing when the command ran.
       setPanel((prev) => ({
         ...prev,
         visible: true,
+        activeView: TERMINAL_VIEW_ID,
         tabs: [...prev.tabs, tab],
         activeTabByProject: { ...prev.activeTabByProject, [key]: tab.id },
       }));
@@ -328,6 +434,7 @@ export function useBottomPanel(
     setPanel((prev) => ({
       ...prev,
       visible: true,
+      activeView: TERMINAL_VIEW_ID,
       tabs: prev.tabs.map((t) => {
         if (t.id !== tab.id) return t;
         const idx = t.panes.findIndex((p) => p.id === source.id);
@@ -529,6 +636,20 @@ export function useBottomPanel(
   const activeTabId = activeProjectKey !== null ? (panel.activeTabByProject[activeProjectKey] ?? null) : null;
   const activeTab = (activeTabId && visibleTabs.find((t) => t.id === activeTabId)) || visibleTabs[0] || null;
 
+  // Whatever tab is on screen has been seen: selectTab clears its own pick,
+  // but a tab can also come into view through a project switch (the active
+  // editor tab moved to another project) or by being the last one left.
+  const shownTabId = activeTab?.id ?? null;
+  useEffect(() => {
+    if (shownTabId === null) return;
+    setUnseenOutput((prev) => {
+      if (!prev.has(shownTabId)) return prev;
+      const next = new Set(prev);
+      next.delete(shownTabId);
+      return next;
+    });
+  }, [shownTabId]);
+
   return {
     panel,
     visibleTabs,
@@ -539,6 +660,14 @@ export function useBottomPanel(
     togglePanel,
     showPanel,
     hidePanel,
+    selectView,
+    showView,
+    toggleView,
+    maximized,
+    toggleMaximized,
+    toggleViewHidden,
+    unseenOutput,
+    markOutput,
     setHeight,
     selectTab,
     selectPane,

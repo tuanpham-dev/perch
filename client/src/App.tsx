@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import BottomPanel from "./components/BottomPanel";
+import OutputView from "./components/OutputView";
 import ContextMenu from "./components/ContextMenu";
 import Dialog from "./components/Dialog";
 import FolderPickerDialog from "./components/FolderPickerDialog";
@@ -39,7 +40,11 @@ import {
   resolveWindowActionIcon,
   useExtensionRegistry,
   useExtensionRegistryVersion,
+  extensionPanelViews,
+  setPanelViewHandlers,
+  type PanelViewContext,
 } from "./extensions";
+import { OUTPUT_VIEW_ID, orderPanelViews, resolveActiveView } from "./lib/panelViews";
 import { useDialogs } from "./hooks/useDialogs";
 import { useSidebarLayout } from "./hooks/useSidebarLayout";
 import { useStatusBarLayout } from "./hooks/useStatusBarLayout";
@@ -1194,6 +1199,14 @@ export default function App() {
     togglePanel,
     showPanel,
     hidePanel,
+    selectView: selectPanelView,
+    showView: showPanelView,
+    toggleView: togglePanelView,
+    maximized: panelMaximized,
+    toggleMaximized: togglePanelMaximized,
+    toggleViewHidden: togglePanelViewHidden,
+    unseenOutput: panelUnseenOutput,
+    markOutput: markPanelOutput,
     setHeight: setPanelHeight,
     selectTab: selectPanelTab,
     selectPane: selectPanelPane,
@@ -1463,6 +1476,43 @@ export default function App() {
       }
     },
     [sessions, refresh, setProjects, newTerminal, showError, repoIndex, settingsRef],
+  );
+
+  // ctx.app.showPanelView / togglePanelView and every view's "Panel: Show"
+  // command (extensions.ts) — straight into useBottomPanel.
+  useEffect(() => {
+    setPanelViewHandlers({ show: showPanelView, toggle: togglePanelView });
+  }, [showPanelView, togglePanelView]);
+
+  // The header's view tabs: TERMINAL, then OUTPUT, then
+  // whatever extensions registered — re-read when the registry changes. A
+  // stored active view with no tab right now renders as TERMINAL, but the
+  // stored id is left alone: extensions activate after first mount, so on
+  // every reload the view's tab is missing for a moment, and writing the
+  // fallback back would forget the user's choice each time.
+  const panelAllViews = useMemo(
+    () => orderPanelViews(extensionPanelViews),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [extensionRegistryVersion],
+  );
+  // What the header shows: the user's switched-off views left out. A hidden
+  // active view resolves to TERMINAL the same way a missing one does.
+  const panelViews = useMemo(
+    () => panelAllViews.filter((v) => !panel.hiddenViews.includes(v.id)),
+    [panelAllViews, panel.hiddenViews],
+  );
+  const panelActiveView = resolveActiveView(panel.activeView, panelViews);
+  const panelViewContext = useMemo<PanelViewContext>(
+    () => ({ mobilePointer, showMenu, confirmDialog }),
+    [mobilePointer, showMenu, confirmDialog],
+  );
+  const renderPanelView = useCallback(
+    (viewId: string): React.ReactNode => {
+      if (viewId === OUTPUT_VIEW_ID) return <OutputView />;
+      const view = extensionPanelViews.find((v) => v.id === viewId);
+      return view ? <view.component context={panelViewContext} /> : null;
+    },
+    [panelViewContext],
   );
 
   // ctx.app.openSessionWindow / ctx.app.killSession (extensions.ts) — the
@@ -1828,6 +1878,8 @@ export default function App() {
         requestPanelTerminal({ x: sidebarVisible ? sidebarWidth : 0, y: window.innerHeight - panel.height });
       },
       "panel.split": () => !IS_DETACHED && splitActivePane(),
+      "panel.toggleMaximized": () => !IS_DETACHED && togglePanelMaximized(),
+      "panel.showOutput": () => !IS_DETACHED && showPanelView(OUTPUT_VIEW_ID),
     }),
     [
       activeSessionName,
@@ -1858,6 +1910,8 @@ export default function App() {
       togglePanel,
       showPanel,
       splitActivePane,
+      togglePanelMaximized,
+      showPanelView,
       requestPanelTerminal,
       panel.height,
       sidebarVisible,
@@ -2310,7 +2364,7 @@ export default function App() {
   );
 
   return (
-    <div className="app">
+    <div className={`app${panelMaximized && panel.visible ? " panel-maximized" : ""}`}>
       {showTitleBar && (
         <TitleBar
           rect={windowControlsOverlay.rect}
@@ -2772,6 +2826,18 @@ export default function App() {
       {!IS_DETACHED && panel.visible && (
         <BottomPanel
           panel={panel}
+          views={panelViews}
+          allViews={panelAllViews}
+          hiddenViews={panel.hiddenViews}
+          onToggleViewHidden={togglePanelViewHidden}
+          activeView={panelActiveView}
+          onSelectView={selectPanelView}
+          renderView={renderPanelView}
+          maximized={panelMaximized}
+          onToggleMaximized={togglePanelMaximized}
+          unseenOutput={panelUnseenOutput}
+          onPaneOutput={markPanelOutput}
+          showMenu={showMenu}
           visibleTabs={panelVisibleTabs}
           activeTabId={panelActiveTabId}
           panelFocused={panelFocused}
