@@ -652,7 +652,23 @@ export default function TerminalView({
       };
       sendInputRef.current = sendKeyOrEcho;
 
+      // A letter the phone keyboard was still composing when sticky Ctrl
+      // took it (see onComposingChange below): its control code is already
+      // sent, so the IME's later commit of the same letter is dropped.
+      let ctrlTookComposed: string | null = null;
+      let ctrlTookTimer: ReturnType<typeof setTimeout> | null = null;
+      const forgetCtrlTook = () => {
+        ctrlTookComposed = null;
+        if (ctrlTookTimer !== null) clearTimeout(ctrlTookTimer);
+        ctrlTookTimer = null;
+      };
+
       const forwardInput = (data: string) => {
+        if (ctrlTookComposed !== null && data.startsWith(ctrlTookComposed)) {
+          data = data.slice(ctrlTookComposed.length);
+          forgetCtrlTook();
+          if (!data) return;
+        }
         let toSend = data;
         // Sticky Ctrl from the touch key bar: converts the next single
         // letter typed into its control code (Ctrl+A..Z is ASCII & 0x1f for
@@ -839,6 +855,31 @@ export default function TerminalView({
       // other typed burst.
       engine.onComposingChange((text) => {
         inputDebug("comp", text ?? "<end>");
+        // Sticky Ctrl can't wait for the word to commit: predictive
+        // keyboards (Gboard, SwiftKey) hold a typed letter in a composing
+        // word until a space or a suggestion commits it, so Ctrl then "c"
+        // did nothing until the next space. The first composed letter is
+        // taken as the chord at once; the commit that follows drops it.
+        if (text !== null && stickyCtrlRef.current && ctrlTookComposed === null) {
+          const first = text.charAt(0);
+          if (/[a-zA-Z]/.test(first)) {
+            stickyCtrlRef.current = false;
+            setStickyCtrl(false);
+            ctrlTookComposed = first;
+            sendKeyOrEcho(String.fromCharCode(first.charCodeAt(0) & 0x1f));
+          }
+        }
+        if (text === null && ctrlTookComposed !== null) {
+          // The commit arrives through onData right behind compositionend
+          // (the engine reads it in a 0ms timer). A composition cancelled
+          // without a commit must not eat a later letter.
+          if (ctrlTookTimer !== null) clearTimeout(ctrlTookTimer);
+          ctrlTookTimer = setTimeout(forgetCtrlTook, 250);
+        }
+        // The taken letter is not part of the word any more.
+        if (text !== null && ctrlTookComposed !== null && text.startsWith(ctrlTookComposed)) {
+          text = text.slice(ctrlTookComposed.length) || null;
+        }
         // No composition preview while suspended either — its commit will
         // arrive through onData and pass straight through to the PTY.
         if (!localEchoActive() || echoSuspended) return;
