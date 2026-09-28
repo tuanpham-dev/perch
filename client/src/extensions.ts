@@ -92,6 +92,13 @@ export interface RegisteredFileViewer {
   // "preview"-mode viewers, which already open in nvim by default. Defaults
   // to true when omitted.
   editorFallback: boolean;
+  // Whether this viewer's tabs belong to the app rather than to a project:
+  // a global tab never joins the tab group of the session it was opened
+  // from, so it stays in the tab bar when you switch to another project or
+  // worktree (the "active project" tab-bar scope hides every other
+  // project's group). For a viewer whose content follows the active project
+  // by itself, like a dashboard, rather than showing one project's file.
+  global: boolean;
   component: ReactNS.ComponentType<FileViewerHostProps>;
 }
 
@@ -294,6 +301,8 @@ export interface ExtensionContext {
     mode?: FileViewerModeSource;
     // See RegisteredFileViewer.editorFallback. Defaults to true.
     editorFallback?: boolean;
+    // See RegisteredFileViewer.global. Defaults to false.
+    global?: boolean;
     component: ReactNS.ComponentType<FileViewerHostProps>;
   }): void;
   // Asynchronously claims a file open that would otherwise land in nvim —
@@ -1693,6 +1702,7 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         extensions: viewer.extensions.map((e) => e.toLowerCase()),
         mode: viewer.mode ?? "default",
         editorFallback: viewer.editorFallback ?? true,
+        global: viewer.global ?? false,
         component: viewer.component,
       });
       notify();

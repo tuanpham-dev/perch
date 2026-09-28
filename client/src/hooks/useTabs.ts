@@ -147,6 +147,10 @@ export function useTabs(
   // `sessions` closure it captured when this render created it.
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  // For openExtViewerTab, whose callback deliberately doesn't re-create on
+  // every registry change: whether a viewer is global is read at open time.
+  const extFileViewersRef = useRef(extFileViewers);
+  extFileViewersRef.current = extFileViewers;
 
   // One-time defensive migration: a tab whose groupId doesn't name a leaf
   // in the restored tree (corrupted/partial localStorage — normal operation
@@ -360,7 +364,10 @@ export function useTabs(
     // the last real session, not none — so it can join that session's tab
     // group (groupKeyForTab). Undefined origin (no real tab ever opened)
     // just means the tab stays ungrouped, same as today.
-    const origin = tabsRef.current.find((t) => t.id === lastRealTabIdRef.current);
+    // A global viewer (RegisteredFileViewer.global) has no origin at all, so
+    // it stays ungrouped and visible whichever project is active.
+    const global = extFileViewersRef.current.some((v) => v.id === viewerId && v.global);
+    const origin = global ? undefined : tabsRef.current.find((t) => t.id === lastRealTabIdRef.current);
     setTabs((prev) => {
       const activeGroup = splitLayoutRef.current.activeGroupId;
       const existing = prev.find(
@@ -373,15 +380,19 @@ export function useTabs(
         // <-> Staged on the same path — and bumps extViewerReloadKey so the
         // mounted viewer re-fetches from disk (every call here is an
         // explicit open/preview action, never a plain tab switch).
-        return prev.map((t) =>
-          t.id === existing.id
-            ? {
-                ...t,
-                extViewerTitle: title !== undefined ? title : t.extViewerTitle,
-                extViewerReloadKey: (t.extViewerReloadKey ?? 0) + 1,
-              }
-            : t,
-        );
+        return prev.map((t) => {
+          if (t.id !== existing.id) return t;
+          const next: Tab = {
+            ...t,
+            extViewerTitle: title !== undefined ? title : t.extViewerTitle,
+            extViewerReloadKey: (t.extViewerReloadKey ?? 0) + 1,
+          };
+          if (global) {
+            delete next.originSessionName;
+            delete next.originSessionId;
+          }
+          return next;
+        });
       }
       const tab: Tab = {
         id: crypto.randomUUID(),
@@ -962,6 +973,25 @@ export function useTabs(
       if (!stillExists) closeTab(tab.id);
     }
   }, [sessions, tabs, sessionsLoadedRef, closeTab]);
+
+  // A global viewer's tab restored from before its viewer was global (or
+  // from a host that didn't know the flag) still carries an origin, which
+  // would keep it in one project's group. Cleared once the registry says
+  // the viewer is global, same ungrouping as the vanished-origin sweep below.
+  useEffect(() => {
+    const globalIds = new Set(extFileViewers.filter((v) => v.global).map((v) => v.id));
+    if (globalIds.size === 0) return;
+    setTabs((prev) => {
+      let changed = false;
+      const next = prev.map((tab) => {
+        if (tab.originSessionName === undefined || !tab.extViewerId || !globalIds.has(tab.extViewerId)) return tab;
+        changed = true;
+        const { originSessionName: _n, originSessionId: _i, ...rest } = tab;
+        return rest;
+      });
+      return changed ? next : prev;
+    });
+  }, [extFileViewers]);
 
   // A viewer tab's origin session (see openExtViewerTab) can go away —
   // killed, or its last real tab closed independently of the viewer tab.
