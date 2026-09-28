@@ -587,6 +587,7 @@ ctx.registerFileViewer({
   extensions: string[],       // lowercase, no dot: ["md", "markdown"] — [] = openViewerTab-only
   mode?: "default" | "preview" | (() => "default" | "preview"), // default "default"; a thunk is re-read on every lookup
   editorFallback?: boolean,       // default true; "default"-mode only
+  global?: boolean,               // default false; tabs never join a project's group
   component: React.ComponentType<FileViewerHostProps>,
 });
 ```
@@ -599,6 +600,11 @@ ctx.registerFileViewer({
   Editor" as an escape hatch from a `"default"`-mode viewer.
 - Among same-extension matches, a user-installed viewer beats a bundled
   one; otherwise first registered wins.
+- `global` makes the viewer's tabs app-wide: a tab it opens never joins the
+  tab group of the project it was opened from, so it stays in the tab bar
+  when you switch to another project or worktree. Use it for a viewer whose
+  content follows the active project by itself, like a dashboard, rather
+  than one project's file. Open it with a fixed path so there is one tab.
 
 ```ts
 interface FileViewerHostProps {
