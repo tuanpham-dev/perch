@@ -41,6 +41,7 @@ to read).
   - [Settings components](#settings-components--registersettingscomponent)
   - [The `ctx.app` host API](#the-ctxapp-host-api)
   - [`ctx.serverFetch` / `ctx.assetUrl`](#ctxserverfetch--ctxasseturl)
+  - [`ctx.serverEventSource`](#ctxservereventsource)
   - [`ctx.settings`](#ctxsettings)
 - [Server API](#server-api)
 - [Agent hooks](#agent-hooks)
@@ -1616,6 +1617,37 @@ Resolves an extension-relative path to a fetchable URL (the same
 `/api/extensions/<id>/file/*` route your client entry loads from). Use it
 with `extensions/_shared/injectStylesheet.ts` to attach `dist/client.css`,
 images, etc. Traversal outside the extension folder is rejected.
+
+### `ctx.serverEventSource`
+
+```ts
+ctx.serverEventSource(path: string): EventSourceLike
+```
+A server-sent-events stream from your own server hook, same path
+convention as `serverFetch` (`serverEventSource("/events")` reads
+`/api/ext/<id>/events`). Use it instead of `new EventSource(...)` for any
+stream the client keeps open.
+
+Over plain `http://` a browser allows six connections per origin, shared by
+every tab and window, and an open stream holds one for as long as it lives.
+One `EventSource` per window per extension fills that pool after two or
+three Perch windows (a tab moved into a new window is enough), and from then
+on every other request from those windows waits in the browser's queue.
+`serverEventSource` opens one connection per path for all windows of the
+origin: one window holds it and relays every event to the others over a
+`BroadcastChannel`, and another takes over when that window closes.
+
+The returned object behaves like an `EventSource`: `addEventListener`,
+`removeEventListener`, `onmessage`, `onopen`, `onerror`, `readyState` and
+`close()`. Named events reach you once you have added a listener for their
+type. `"open"` and `"error"` describe the shared connection; subscribing to
+one that is already open gives you an `"open"` of your own, as a new
+`EventSource` would. A connection the browser gives up on (the server
+restarted) is reopened with a backoff, reported as `"error"` and then
+`"open"`, so refetch on a repeat `"open"` if you may have missed events.
+
+Older Perch versions lack it; fall back to `new EventSource(...)` when
+`ctx.serverEventSource` is undefined.
 
 ### `ctx.settings`
 

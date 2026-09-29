@@ -21,6 +21,7 @@ import { getFileIconResult, getFolderIconResult, subscribeIconTheme } from "./ut
 import type { IconResult } from "./utils/iconThemes";
 import { getActiveThemeColors, getActiveTokenColors, subscribeColorTheme } from "./theme";
 import type { TokenColorRule } from "./theme";
+import { openSharedEventSource, type EventSourceLike } from "./lib/sharedEventSource";
 
 export interface ActiveContext {
   sessionName: string | null;
@@ -665,6 +666,15 @@ export interface ExtensionContext {
   // /api/ext/<extensionId> — 404s if the extension has no server entry or
   // is disabled.
   serverFetch(path: string, init?: RequestInit): Promise<Response>;
+  // A server-sent-events stream from this extension's own server hook
+  // (same path convention as serverFetch), shared by every Perch window of
+  // this origin: one connection however many windows subscribe, so an
+  // extension's live updates don't use up the browser's six connections per
+  // origin (plain HTTP/1.1) and stall every other request. Behaves like an
+  // EventSource: addEventListener, onmessage/onopen/onerror, readyState,
+  // close(). A connection the browser gives up on is reopened with a
+  // backoff; "error" and a later "open" report it.
+  serverEventSource(path: string): EventSourceLike;
   // Resolves an extension-relative path (a bundled stylesheet, an image) to
   // a fetchable URL — same route registerFileViewer's own client entry is
   // dynamic-imported from.
@@ -2097,6 +2107,9 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
     },
     serverFetch(path, init) {
       return fetch(`${extensionApiBase(ext.id)}${path}`, init);
+    },
+    serverEventSource(path) {
+      return openSharedEventSource(`${extensionApiBase(ext.id)}${path}`);
     },
     settings: {
       get(key) {
