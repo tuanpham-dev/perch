@@ -569,6 +569,29 @@ export default function App() {
     }
   }, []);
 
+  // Double-clicking a tab is "give me the terminal": it hides BOTH sidebars,
+  // not just the left one, and the next double-click brings back exactly the
+  // ones it hid — someone who only ever had the left sidebar open doesn't
+  // suddenly get the right one too. Nothing remembered (both were already
+  // hidden some other way) falls back to the left sidebar.
+  const sidebarsHiddenByTabRef = useRef<{ left: boolean; right: boolean } | null>(null);
+  const toggleSidebarsFromTab = useCallback(() => {
+    const left = sidebarVisibleRef.current;
+    const right = rightSidebarVisibleRef.current;
+    if (left || right) {
+      sidebarsHiddenByTabRef.current = { left, right };
+      setSidebarSideVisible("left", false);
+      setSidebarSideVisible("right", false);
+      return;
+    }
+    const restore = sidebarsHiddenByTabRef.current ?? { left: true, right: false };
+    sidebarsHiddenByTabRef.current = null;
+    // A phone shows one drawer at a time, so restoring both would just
+    // leave whichever was opened last; the left one is the useful default.
+    if (restore.left) setSidebarSideVisible("left", true);
+    if (restore.right && !(restore.left && isMobileDrawer())) setSidebarSideVisible("right", true);
+  }, [setSidebarSideVisible]);
+
   // Extension-registered commands/viewers/panels (extensions.ts) — commands
   // join the built-in list inside useSettingsSync (always "global" scope in
   // v1, namespaced ext.<extensionId>.<cmd> so they can't collide with a
@@ -2524,7 +2547,7 @@ export default function App() {
           dragPayloadFor={dragPayloadFor}
           onForeignDrop={handleForeignDrop}
           onNativeDragEnd={finishForeignDrag}
-          onToggleSidebar={() => setSidebarSideVisible("left", !sidebarVisible)}
+          onToggleSidebar={toggleSidebarsFromTab}
           groupingEnabled={settings.tabGroupsBySession}
           groupKey={tabGroupKey}
           groupLabel={groupLabelForKey}

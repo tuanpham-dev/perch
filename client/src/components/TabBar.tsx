@@ -40,6 +40,7 @@ interface Props {
   // portal target; null/undefined renders nothing. See App.tsx's
   // tabExtrasFor.
   extras?: React.ReactNode;
+  // Tab double-click: hides both sidebars, or brings them back.
   onToggleSidebar: () => void;
   // Chrome-style tab groups (settings.tabGroupsBySession) — see
   // plans/tab-groups-by-session.md. groupKey returns null for a tab that
