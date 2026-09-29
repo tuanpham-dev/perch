@@ -81,6 +81,7 @@ import { rewriteLocalUrl } from "./lib/openUrlRewrite";
 import { outdatedExtensions } from "./lib/extensionUpdates";
 import { isAbsolutePath, parentPath } from "./lib/paths";
 import { detachedWindowGeometryAt, IS_DETACHED, WINDOW_INSTANCE_ID } from "./lib/detachedWindows";
+import { openSharedEventSource } from "./lib/sharedEventSource";
 import { useDetachedWindows, type DetachedApi } from "./hooks/useDetachedWindows";
 import { useTabDragTransfer } from "./hooks/useTabDragTransfer";
 import type { TabDragPayload } from "./lib/detachedWindows";
@@ -152,7 +153,10 @@ export default function App() {
         proxyDomain = cfg?.domain ?? null;
       })
       .catch(() => {});
-    const es = new EventSource("/api/open-url/events");
+    // Shared by every window of this origin: one connection however many
+    // windows are open, so detached windows don't exhaust the browser's
+    // per-origin connection pool (see lib/sharedEventSource.ts).
+    const es = openSharedEventSource("/api/open-url/events");
     es.onmessage = (e: MessageEvent<string>) => {
       if (!document.hasFocus()) return;
       let payload: { url?: unknown; serverPort?: unknown };
