@@ -30,13 +30,14 @@ import { tabStorage } from "../lib/detachedWindows";
 import type { ExtensionInfo, RegistrySourceResult, Tab, TerminalSession } from "../types";
 import type { DetachedApi } from "./useDetachedWindows";
 import type { DropTarget } from "../components/SplitLayout";
+import { randomUUID } from "../lib/uuid";
 
 const SPLIT_LAYOUT_KEY = "splitLayout";
 // The id of the app's very first editor group — before any split has ever
 // been made, and the fallback every pre-splits tab (and a corrupted/partial
 // splitLayout entry) migrates onto. Just needs to be unique within the tree,
 // not globally — every group created afterward (splitLeaf) gets a real
-// crypto.randomUUID() instead.
+// randomUUID() instead.
 const DEFAULT_GROUP_ID = "root";
 
 // A pane edge zone (SplitLayout's DropTarget) to the split direction it means.
@@ -329,7 +330,7 @@ export function useTabs(
           setActiveTabId(pinnedActive.id);
           return prev;
         }
-        const tab: Tab = { id: crypto.randomUUID(), sessionName: name, attachName: name, groupId: activeGroup };
+        const tab: Tab = { id: randomUUID(), sessionName: name, attachName: name, groupId: activeGroup };
         setActiveTabId(tab.id, activeGroup);
         return insertTab(prev, tab);
       });
@@ -395,7 +396,7 @@ export function useTabs(
         });
       }
       const tab: Tab = {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         sessionName: "",
         attachName: "",
         groupId: activeGroup,
@@ -457,7 +458,7 @@ export function useTabs(
         return prev;
       }
       const groupId = splitLayoutRef.current.activeGroupId;
-      const tab: Tab = { id: crypto.randomUUID(), sessionName: "", attachName: "", settingsView: true, groupId };
+      const tab: Tab = { id: randomUUID(), sessionName: "", attachName: "", settingsView: true, groupId };
       setActiveTabId(tab.id, groupId);
       return insertTab(prev, tab);
     });
@@ -477,7 +478,7 @@ export function useTabs(
         return prev;
       }
       const groupId = splitLayoutRef.current.activeGroupId;
-      const tab: Tab = { id: crypto.randomUUID(), sessionName: "", attachName: "", keyboardView: true, groupId };
+      const tab: Tab = { id: randomUUID(), sessionName: "", attachName: "", keyboardView: true, groupId };
       setActiveTabId(tab.id, groupId);
       return insertTab(prev, tab);
     });
@@ -505,7 +506,7 @@ export function useTabs(
       }
       const groupId = splitLayoutRef.current.activeGroupId;
       const tab: Tab = {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         sessionName: "",
         attachName: "",
         groupId,
@@ -583,7 +584,7 @@ export function useTabs(
       try {
         const { attachName } = await api.openWindowTab(session, index);
         const tab: Tab = {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           sessionName: session,
           attachName,
           windowIndex: index,
@@ -1172,7 +1173,7 @@ export function useTabs(
         try {
           const { attachName } = await api.openWindowTab(tab.sessionName, tab.windowIndex);
           const copy: Tab = {
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             sessionName: tab.sessionName,
             attachName,
             windowIndex: tab.windowIndex,
@@ -1187,7 +1188,7 @@ export function useTabs(
       }
       if (tab.extViewerId !== undefined && tab.extViewerPath !== undefined) {
         const copy: Tab = {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           sessionName: "",
           attachName: "",
           groupId: targetGroupId,
@@ -1203,7 +1204,7 @@ export function useTabs(
       }
       if (tab.sessionName) {
         const copy: Tab = {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           sessionName: tab.sessionName,
           attachName: tab.attachName,
           groupId: targetGroupId,
@@ -1227,7 +1228,7 @@ export function useTabs(
       const targetTabId = tabId ?? splitLayoutRef.current.groupActive[splitLayoutRef.current.activeGroupId];
       const sourceTab = targetTabId ? tabsRef.current.find((t) => t.id === targetTabId) : undefined;
       const sourceGroupId = sourceTab?.groupId ?? splitLayoutRef.current.activeGroupId;
-      const newGroupId = crypto.randomUUID();
+      const newGroupId = randomUUID();
       const currentTree = splitLayoutRef.current.tree;
       const nextTree = splitLeaf(currentTree, sourceGroupId, direction, newGroupId);
       if (nextTree === currentTree) return;
@@ -1305,7 +1306,7 @@ export function useTabs(
   // tab's source group.
   const splitGroupAndMoveTab = useCallback(
     (targetGroupId: string, direction: SplitDirection, tabId: string) => {
-      const newGroupId = crypto.randomUUID();
+      const newGroupId = randomUUID();
       const currentTree = splitLayoutRef.current.tree;
       const nextTree = splitLeaf(currentTree, targetGroupId, direction, newGroupId);
       if (nextTree === currentTree) return;
@@ -1350,7 +1351,7 @@ export function useTabs(
       const lastId = fresh[fresh.length - 1].id;
 
       if (target.kind === "zone" && target.zone !== "center") {
-        const newGroupId = crypto.randomUUID();
+        const newGroupId = randomUUID();
         const direction = ZONE_DIRECTIONS[target.zone];
         const currentTree = splitLayoutRef.current.tree;
         const nextTree = splitLeaf(currentTree, groupId, direction, newGroupId);

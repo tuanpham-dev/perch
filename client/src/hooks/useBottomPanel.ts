@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import * as api from "../api";
 import { TERMINAL_VIEW_ID } from "../lib/panelViews";
 import type { TerminalSession } from "../types";
+import { randomUUID } from "../lib/uuid";
 
 // The bottom terminal panel (plans/bottom-terminal-panel.md). Deliberately
 // its *own* small state model rather than a second SplitNode tree over the
@@ -363,7 +364,7 @@ export function useBottomPanel(
       try {
         const index = windowIndex ?? (await api.createWindow(session)).index;
         const { attachName } = await api.openWindowTab(session, index);
-        return { id: crypto.randomUUID(), sessionName: session, windowIndex: index, attachName };
+        return { id: randomUUID(), sessionName: session, windowIndex: index, attachName };
       } catch (err) {
         showError(err);
         return null;
@@ -375,7 +376,7 @@ export function useBottomPanel(
   const addTabWithPane = useCallback(
     (pane: PanelPane) => {
       const tab: PanelTab = {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         panes: [pane],
         sizes: [1],
         activePaneId: pane.id,

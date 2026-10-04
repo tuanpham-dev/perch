@@ -1,4 +1,5 @@
 import type { Tab } from "../types";
+import { randomUUID } from "./uuid";
 
 // Detached windows (plans/detach-tab-to-new-window.md): "Move into New
 // Window" opens a second window of the app that shows only the editor area.
@@ -30,8 +31,7 @@ export const IS_DETACHED = DETACHED_WINDOW_ID !== null;
 // Identifies this window within one drag (plans/cross-window-tab-drag.md):
 // a drop whose payload carries this id is an in-window drop. A main window
 // gets a fresh id per load, which is all a drag needs.
-export const WINDOW_INSTANCE_ID: string =
-  DETACHED_WINDOW_ID ?? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : "main");
+export const WINDOW_INSTANCE_ID: string = DETACHED_WINDOW_ID ?? randomUUID();
 
 // Where this window's tab state lives. sessionStorage is copied from the
 // opener when a window is opened by script, so a detached window that spawns

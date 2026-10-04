@@ -87,6 +87,7 @@ import { useTabDragTransfer } from "./hooks/useTabDragTransfer";
 import type { TabDragPayload } from "./lib/detachedWindows";
 import type { DragSource } from "./components/TabBar";
 import type { DropTarget, NativeDragEndInfo } from "./components/SplitLayout";
+import { randomUUID } from "./lib/uuid";
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 500;
@@ -974,7 +975,7 @@ export default function App() {
       const rect = groupContentRects[editorGroupId];
       return {
         payload: {
-          dragId: crypto.randomUUID(),
+          dragId: randomUUID(),
           windowId: WINDOW_INSTANCE_ID,
           kind: source.kind,
           tabs,

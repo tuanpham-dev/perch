@@ -15,6 +15,7 @@ import {
   type DetachedRegistry,
 } from "../lib/detachedWindows";
 import type { Tab } from "../types";
+import { randomUUID } from "../lib/uuid";
 
 // Both roles of the detached-window protocol (plans/detach-tab-to-new-window.md).
 //
@@ -216,7 +217,7 @@ export function useDetachedWindows(
   const detachTabs = useCallback(
     (tabs: Tab[], geometry: WindowGeometry): boolean => {
       if (tabs.length === 0) return false;
-      const windowId = crypto.randomUUID();
+      const windowId = randomUUID();
       const url = detachedWindowUrl(windowId, { tabs, activeTabId: tabs[0].id });
       const handle = window.open(url, `perch-detached-${windowId}`, detachedWindowFeatures(geometry));
       if (!handle) {
