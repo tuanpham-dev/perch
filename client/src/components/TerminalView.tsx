@@ -901,16 +901,22 @@ export default function TerminalView({
       // used again (focus, click, typing, its box resizing) and claims the
       // window back. Null until the current connection reports one.
       let windowGrid: { cols: number; rows: number } | null = null;
+      // Every resize the engine is handed goes through this, so a touch
+      // selection can survive it (the real implementation is assigned in
+      // the touch-selection section below, where that state lives; until
+      // then no selection can exist and this passthrough is correct).
+      let keepTouchSelection: <T>(apply: () => T) => T = (apply) => apply();
       const showWindowGrid = () => {
         if (!windowGrid || !engine.resize) return;
-        engine.resize(windowGrid.cols, windowGrid.rows);
+        const grid = windowGrid;
+        keepTouchSelection(() => engine.resize!(grid.cols, grid.rows));
       };
       const refit = () => {
         // fit() itself no-ops (returns null) on a disposed/zero-size
         // terminal; a ResizeObserver callback can still fire after cleanup
         // disconnects it.
         const mirrors = engine.measure !== undefined && engine.resize !== undefined;
-        const result = mirrors ? engine.measure!() : engine.fit();
+        const result = mirrors ? engine.measure!() : keepTouchSelection(() => engine.fit());
         if (result) {
           // LocalEcho caches cellMetrics at construction time (before this
           // terminal's very first fit ever runs, since refit is defined and
@@ -927,12 +933,12 @@ export default function TerminalView({
             sentSize = size;
             // A changed box claims the window, so show it at the new size
             // now rather than a round trip later.
-            if (mirrors) engine.resize!(result.cols, result.rows);
+            if (mirrors) keepTouchSelection(() => engine.resize!(result.cols, result.rows));
             ws.send(JSON.stringify({ type: "resize", cols: result.cols, rows: result.rows }));
           } else if (mirrors) {
             // Re-measured for an idle reason: keep showing the window's grid.
             if (windowGrid) showWindowGrid();
-            else engine.resize!(result.cols, result.rows);
+            else keepTouchSelection(() => engine.resize!(result.cols, result.rows));
           }
         }
       };
@@ -1016,7 +1022,7 @@ export default function TerminalView({
         // can change while disconnected (rotation, keyboard); it returns
         // null only when the terminal is hidden/unmeasurable, where the
         // server's 80x24 default plus the onopen refit covers it as before.
-        const dims = engine.fit();
+        const dims = keepTouchSelection(() => engine.fit());
         const size = dims ? `&cols=${dims.cols}&rows=${dims.rows}` : "";
         // The theme's colors ride along so the backend can answer color
         // queries (OSC 10/11) for this viewer; a theme change remounts the
@@ -1664,7 +1670,13 @@ export default function TerminalView({
       // comes first in reading order, spanning any number of rows.
       const linearOf = (col: number, row: number) => row * engine.cols + col;
 
+      // Set only by keepTouchSelection below: the text the selection held
+      // before a resize, which the program's redraw for the new size must
+      // not have changed under it.
+      let textBeforeResize: string | null = null;
+
       function dismissTouchSelection() {
+        textBeforeResize = null;
         if (!activeSel) return;
         engine.clearSelection();
         setActiveSel(null);
@@ -1798,10 +1810,50 @@ export default function TerminalView({
       }
       touchHandleBeginRef.current = beginHandleDrag;
 
+      // A long-press closes the on-screen keyboard (beginTouchSelection
+      // blurs the input), and on a phone that resizes the terminal a
+      // moment later. The engine drops its selection whenever the row
+      // count changes, and the toolbar went with it before Copy could ever
+      // be tapped. A rows-only resize leaves every buffer line where it was
+      // and only moves the viewport, so the same buffer cells are selected
+      // again afterwards, shifted by however far the viewport moved. A
+      // column change reflows the buffer instead, and the selection is
+      // dropped with it. The program may still redraw for the new size:
+      // the render check below drops the selection if that redraw puts
+      // different text under it.
+      keepTouchSelection = (apply) => {
+        const sel = activeSel;
+        if (!sel) return apply();
+        const colsBefore = engine.cols;
+        const viewportBefore = engine.getScrollState().viewportY;
+        const text = engine.getSelection();
+        const result = apply();
+        const shift = viewportBefore - engine.getScrollState().viewportY;
+        const anchorRow = sel.anchorRow + shift;
+        const headRow = sel.headRow + shift;
+        const onScreen = (row: number) => row >= 0 && row < engine.rows;
+        if (engine.cols !== colsBefore || !onScreen(anchorRow) || !onScreen(headRow)) {
+          dismissTouchSelection();
+          return result;
+        }
+        selectRange(sel.anchorCol, anchorRow, sel.headCol, headRow);
+        if (engine.getSelection() !== text) {
+          dismissTouchSelection();
+          return result;
+        }
+        textBeforeResize = text;
+        setActiveSel({ ...sel, anchorRow, headRow });
+        return result;
+      };
+
       // Dismisses a shown selection if new output redrew over it and wiped
-      // the engine's own highlight out from under us (T6).
+      // the engine's own highlight out from under us (T6), or if the redraw
+      // that follows a resize changed the text under a selection
+      // keepTouchSelection carried across it.
       const unsubTouchSelRenderCheck = engine.onRender(() => {
-        if (activeSel && !engine.getSelection()) dismissTouchSelection();
+        if (!activeSel) return;
+        const text = engine.getSelection();
+        if (!text || (textBeforeResize !== null && text !== textBeforeResize)) dismissTouchSelection();
       });
 
       // Right-click/long-press context menu would otherwise pop over a

@@ -37,6 +37,12 @@ const TOOLBAR_GAP = 8;
 // estimated for the flip/clamp decision — close enough for a two-button bar;
 // the browser reflows the real size on top of it.
 const ESTIMATED_HEIGHT = 40;
+// The drag handles' touch target (.touch-select-handle in styles.css): a
+// 32px square hanging below the selection's first and last cells. With no
+// room above, the toolbar opens below the selection, and it has to clear
+// that box, or the start handle sits over the Copy button and a tap there
+// starts a drag instead of copying.
+const HANDLE_SIZE = 32;
 
 // Toolbar + drag handles for a touch long-press selection
 // (plans/mobile-touch-select-copy-open.md). Touch-only: desktop keeps its
@@ -63,7 +69,7 @@ export default function TouchSelection({
   const openAbove = rect.top - ESTIMATED_HEIGHT - TOOLBAR_GAP >= 0;
   const top = openAbove
     ? rect.top - ESTIMATED_HEIGHT - TOOLBAR_GAP
-    : rect.top + rect.height + TOOLBAR_GAP;
+    : rect.top + rect.height + HANDLE_SIZE;
   const clampedTop = Math.max(0, Math.min(top, Math.max(containerHeight - ESTIMATED_HEIGHT, 0)));
 
   const centerX = rect.left + rect.width / 2;
