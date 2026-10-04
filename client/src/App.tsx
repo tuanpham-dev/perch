@@ -1264,9 +1264,23 @@ export default function App() {
 
   // Right-click anywhere without a dedicated context menu (empty terminal
   // space, tab bar gaps, etc.) would otherwise show the browser's native
-  // menu, which has no useful actions in this app.
+  // menu, which has no useful actions in this app. Mouse only: a touch
+  // long-press raises the same event, and on Android Chrome the Copy/Share
+  // bar that follows a text selection IS the context menu, so cancelling it
+  // left text in the Claude Viewer (or any other page) selectable but
+  // uncopyable. Surfaces with their own long-press handling (the terminal,
+  // file links) cancel the event themselves and are unaffected.
   useEffect(() => {
-    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+    const onContextMenu = (e: MouseEvent) => {
+      const pointerType = (e as PointerEvent).pointerType;
+      // sourceCapabilities is Chrome's older, pre-PointerEvent signal for
+      // the same thing.
+      const fromTouch =
+        pointerType === "touch" ||
+        pointerType === "pen" ||
+        (e as MouseEvent & { sourceCapabilities?: { firesTouchEvents: boolean } }).sourceCapabilities?.firesTouchEvents === true;
+      if (!fromTouch) e.preventDefault();
+    };
     window.addEventListener("contextmenu", onContextMenu);
     return () => window.removeEventListener("contextmenu", onContextMenu);
   }, []);
