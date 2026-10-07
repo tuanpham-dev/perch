@@ -297,18 +297,34 @@ fn state_dir_for(preferred: &Path) -> PathBuf {
     short_state_dir()
 }
 
+// Somewhere short for the terminal daemon's socket, private to this user:
+// macOS's per-user $TMPDIR, Linux's $XDG_RUNTIME_DIR, else a folder in /tmp
+// that is made 0700 and used only when it's ours (/tmp is shared, and
+// whoever owns the folder could swap the socket). None of them, and the
+// long path is kept: the server then says why it can't start.
 #[cfg(unix)]
 fn short_state_dir() -> PathBuf {
     let uid = unsafe { libc::getuid() };
-    if cfg!(target_os = "linux") {
-        if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
-            let dir = PathBuf::from(runtime).join("perch-desktop");
-            if dir.join("daemon.sock").as_os_str().len() <= MAX_SOCKET_PATH {
-                return dir;
-            }
-        }
-    }
-    PathBuf::from(format!("/tmp/perch-desktop-{uid}"))
+    let env_dir = |var: &str| std::env::var_os(var).map(|d| PathBuf::from(d).join("perch-desktop"));
+    let candidates = [
+        if cfg!(target_os = "macos") { env_dir("TMPDIR") } else { None },
+        if cfg!(target_os = "linux") { env_dir("XDG_RUNTIME_DIR") } else { None },
+        Some(PathBuf::from(format!("/tmp/perch-desktop-{uid}"))),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|dir| dir.join("daemon.sock").as_os_str().len() <= MAX_SOCKET_PATH && private_dir(dir, uid))
+        .unwrap_or_else(|| PathBuf::from(format!("/tmp/perch-desktop-{uid}")))
+}
+
+/// Creates `dir` 0700 if it's missing; true when it is a real directory
+/// (not a symlink) owned by `uid` that no one else can enter.
+#[cfg(unix)]
+fn private_dir(dir: &Path, uid: u32) -> bool {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    let _ = std::fs::DirBuilder::new().mode(0o700).create(dir);
+    std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o077 == 0)
 }
 
 #[cfg(not(unix))]
@@ -416,6 +432,27 @@ mod tests {
         let dir = state_dir_for(&long);
         assert_ne!(dir, long);
         assert!(dir.join("daemon.sock").as_os_str().len() <= MAX_SOCKET_PATH);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uses_only_a_private_folder_of_its_own() {
+        use std::os::unix::fs::PermissionsExt;
+        let uid = unsafe { libc::getuid() };
+        let root = std::env::temp_dir().join(format!("perch-private-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let fresh = root.join("fresh");
+        assert!(private_dir(&fresh, uid));
+        assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o700);
+        let open = root.join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(!private_dir(&open, uid));
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&fresh, &link).unwrap();
+        assert!(!private_dir(&link, uid));
+        assert!(!private_dir(&fresh, uid + 1));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
