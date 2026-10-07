@@ -15,6 +15,15 @@ import os from "node:os";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { buildDirStatuses, classify } from "./statusModel.mjs";
 
+// Paths from the page may arrive "~"-shortened, the way core shows them
+// (server files.ts's shortenHome) - expand before touching the filesystem
+// (docs/EXTENSION_API.md, server entry rules).
+function expandHome(p) {
+  if (p === "~") return os.homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASKPASS_PATH = path.join(__dirname, "askpass.cjs");
 
@@ -249,7 +258,7 @@ function requireCwd(req, res) {
     res.status(400).json({ error: "cwd is required" });
     return null;
   }
-  return cwd;
+  return expandHome(cwd);
 }
 
 function requirePaths(req, res) {

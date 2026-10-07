@@ -4,6 +4,16 @@
 
 import { open, stat } from "node:fs/promises";
 import path from "node:path";
+import { homedir } from "node:os";
+
+// Paths from the page may arrive "~"-shortened, the way core shows them
+// (server files.ts's shortenHome) - expand before touching the filesystem
+// (docs/EXTENSION_API.md, server entry rules).
+function expandHome(p) {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(homedir(), p.slice(2));
+  return p;
+}
 
 // A NUL byte anywhere in the first chunk is git's own "binary" heuristic —
 // same check as git-scm's conflict viewer (see its looksBinary).
@@ -18,7 +28,7 @@ function looksBinary(buf, len) {
 
 export function activate({ router }) {
   router.get("/stat", async (req, res) => {
-    const target = typeof req.query.path === "string" ? req.query.path : "";
+    const target = typeof req.query.path === "string" ? expandHome(req.query.path) : "";
     if (!path.isAbsolute(target)) {
       res.status(400).json({ error: "an absolute path is required" });
       return;

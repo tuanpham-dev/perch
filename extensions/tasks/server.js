@@ -11,7 +11,17 @@
 // only ever types a script that is declared in the target package.json.
 import fs from "node:fs";
 import path from "node:path";
+import { homedir } from "node:os";
 import fg from "fast-glob";
+
+// Paths from the page may arrive "~"-shortened, the way core shows them
+// (server files.ts's shortenHome) - expand before touching the filesystem
+// (docs/EXTENSION_API.md, server entry rules).
+function expandHome(p) {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(homedir(), p.slice(2));
+  return p;
+}
 
 // A window whose foreground process is one of these is sitting at a prompt —
 // the script it was created for has exited, so it can be re-typed into rather
@@ -162,7 +172,7 @@ export function activate({ router, log, host }) {
   // running flags. session is optional: without it nothing is "running", which
   // is also the degraded answer when the terminals can't be listed at all.
   router.get("/scripts", async (req, res) => {
-    const cwd = typeof req.query.cwd === "string" ? req.query.cwd : "";
+    const cwd = typeof req.query.cwd === "string" ? expandHome(req.query.cwd) : "";
     if (!cwd || !path.isAbsolute(cwd)) {
       res.status(400).json({ error: "cwd must be an absolute path" });
       return;
@@ -216,7 +226,8 @@ export function activate({ router, log, host }) {
   // to, a finished one is re-typed into (typing into the surviving shell keeps
   // the previous output in scrollback).
   router.post("/run", async (req, res) => {
-    const { session, dir, script } = req.body ?? {};
+    const { session, script } = req.body ?? {};
+    const dir = typeof req.body?.dir === "string" ? expandHome(req.body.dir) : req.body?.dir;
     if (typeof session !== "string" || !session || typeof dir !== "string" || !path.isAbsolute(dir) || typeof script !== "string" || !script) {
       res.status(400).json({ error: "session, dir (absolute path), and script are required" });
       return;

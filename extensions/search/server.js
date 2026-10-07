@@ -19,6 +19,16 @@ import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { homedir } from "node:os";
+
+// Paths from the page may arrive "~"-shortened, the way core shows them
+// (server files.ts's shortenHome) - expand before touching the filesystem
+// (docs/EXTENSION_API.md, server entry rules).
+function expandHome(p) {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(homedir(), p.slice(2));
+  return p;
+}
 
 const execFileP = promisify(execFile);
 
@@ -501,7 +511,7 @@ export function activate({ router, log, getSettings }) {
   });
 
   router.post("/search", async (req, res) => {
-    const cwd = typeof req.body?.cwd === "string" ? req.body.cwd : "";
+    const cwd = typeof req.body?.cwd === "string" ? expandHome(req.body.cwd) : "";
     if (!cwd) {
       res.status(400).json({ error: "cwd is required" });
       return;
@@ -552,7 +562,7 @@ export function activate({ router, log, getSettings }) {
   });
 
   router.post("/replace", async (req, res) => {
-    const cwd = typeof req.body?.cwd === "string" ? req.body.cwd : "";
+    const cwd = typeof req.body?.cwd === "string" ? expandHome(req.body.cwd) : "";
     if (!cwd) {
       res.status(400).json({ error: "cwd is required" });
       return;

@@ -6,6 +6,16 @@
 import { randomBytes } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { homedir } from "node:os";
+
+// Paths from the page may arrive "~"-shortened, the way core shows them
+// (server files.ts's shortenHome) - expand before touching the filesystem
+// (docs/EXTENSION_API.md, server entry rules).
+function expandHome(p) {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(homedir(), p.slice(2));
+  return p;
+}
 
 // Injected into HTML responses so the previewed page can report its scroll
 // position to the host tab and accept a restore command after a reload —
@@ -192,7 +202,7 @@ export function activate({ router }) {
   // is the only way a token can come into existence, so an attacker's page
   // (which fails the app's normal Origin check) can never mint one.
   router.get("/token", async (req, res) => {
-    const dir = typeof req.query.dir === "string" ? req.query.dir : "";
+    const dir = typeof req.query.dir === "string" ? expandHome(req.query.dir) : "";
     if (!dir) {
       res.status(400).json({ error: "dir is required" });
       return;
