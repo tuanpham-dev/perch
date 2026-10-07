@@ -48,11 +48,13 @@ struct BundleInfo {
 pub struct LocalServer {
     bundle: Option<PathBuf>,
     data: PathBuf,
+    // The last pid is_ours confirmed.
+    verified_pid: std::sync::Mutex<Option<u32>>,
 }
 
 impl LocalServer {
     pub fn new(resource_dir: Option<PathBuf>) -> Self {
-        Self { bundle: paths::server_bundle_dir(resource_dir), data: paths::data_dir().join("perch") }
+        Self { bundle: paths::server_bundle_dir(resource_dir), data: paths::data_dir().join("perch"), verified_pid: Default::default() }
     }
 
     fn state_path(&self) -> PathBuf {
@@ -81,7 +83,31 @@ impl LocalServer {
     /// The port it's answering on, if it is.
     pub fn port(&self) -> Option<u16> {
         let state = self.read_state()?;
-        probe::is_perch(state.port).then_some(state.port)
+        (self.is_ours(state.pid) && probe::is_perch(state.port)).then_some(state.port)
+    }
+
+    /// Whether `pid` is still the server this app started. The state file
+    /// outlives it: after a crash or a reboot the pid may belong to anything,
+    /// and another Perch (an installed or a development one) may answer on
+    /// the saved port. Only a process running from this app's runtime
+    /// copies is ours to adopt or stop.
+    fn is_ours(&self, pid: u32) -> bool {
+        if !pid_alive(pid) {
+            return false;
+        }
+        // A pid already checked stays ours while it lives (pids are only
+        // reused after a process exits), so `ps` runs once per server.
+        let mut verified = self.verified_pid.lock().unwrap();
+        if *verified == Some(pid) {
+            return true;
+        }
+        let runtime = self.data.join("runtime");
+        // A command line that can't be read is given the benefit of the doubt.
+        let ours = command_line(pid).is_none_or(|line| line.contains(&*runtime.to_string_lossy()));
+        if ours {
+            *verified = Some(pid);
+        }
+        ours
     }
 
     pub fn status(&self) -> Status {
@@ -100,7 +126,7 @@ impl LocalServer {
     pub fn ensure_running(&self) -> Result<u16, Status> {
         let (shipped, bundle) = self.bundle_info().ok_or(Status::Missing)?;
         if let Some(state) = self.read_state() {
-            if probe::is_perch(state.port) {
+            if self.is_ours(state.pid) && probe::is_perch(state.port) {
                 if state.commit == bundle.commit {
                     return Ok(state.port);
                 }
@@ -198,7 +224,10 @@ impl LocalServer {
     /// for the next start).
     pub fn stop(&self) -> Result<(), String> {
         let Some(state) = self.read_state() else { return Ok(()) };
-        if !probe::is_perch(state.port) && !pid_alive(state.pid) {
+        // Checked afresh before signalling anything: the cached answer is
+        // for reading status, and this is the one call that can hurt.
+        *self.verified_pid.lock().unwrap() = None;
+        if !self.is_ours(state.pid) {
             return Ok(());
         }
         terminate(state.pid)?;
@@ -320,6 +349,26 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 #[cfg(unix)]
+fn command_line(pid: u32) -> Option<String> {
+    let out = Command::new("ps").args(["-ww", "-o", "command=", "-p", &pid.to_string()]).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[cfg(windows)]
+fn command_line(pid: u32) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    let filter = format!("ProcessId={pid}");
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &format!("(Get-CimInstance Win32_Process -Filter '{filter}').CommandLine")])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !line.is_empty()).then_some(line)
+}
+
+#[cfg(unix)]
 fn terminate(pid: u32) -> Result<(), String> {
     if unsafe { libc::kill(pid as i32, libc::SIGTERM) } == 0 {
         Ok(())
@@ -343,6 +392,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_adopts_a_server_running_from_its_runtime_copies() {
+        let me = std::process::id();
+        let exe = std::env::current_exe().unwrap();
+        let elsewhere = LocalServer { bundle: None, data: PathBuf::from("/nonexistent/perch"), verified_pid: Default::default() };
+        // A live process not running from <data>/runtime (this test), and a
+        // pid nothing has.
+        assert!(!elsewhere.is_ours(me));
+        assert!(!elsewhere.is_ours(u32::MAX / 2));
+        assert!(command_line(me).is_some_and(|line| line.contains(&*exe.file_name().unwrap().to_string_lossy())));
+    }
+
+    #[test]
     fn keeps_a_short_state_dir() {
         let short = PathBuf::from("/home/me/.local/share/dev.perch.desktop/perch/state");
         assert_eq!(state_dir_for(&short), short);
@@ -364,7 +425,7 @@ mod tests {
         std::fs::create_dir_all(shipped.join("node").join("bin")).unwrap();
         std::fs::write(shipped.join("node").join("bin").join("node"), "bin").unwrap();
         std::fs::write(shipped.join("server-bundle.json"), r#"{"version":"0.1.0","commit":"c4"}"#).unwrap();
-        let server = LocalServer { bundle: Some(shipped.clone()), data: root.join("data") };
+        let server = LocalServer { bundle: Some(shipped.clone()), data: root.join("data"), verified_pid: Default::default() };
         for old in ["c1", "c2", "c3"] {
             std::fs::create_dir_all(root.join("data").join("runtime").join(old)).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(20));
