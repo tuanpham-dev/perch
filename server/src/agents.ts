@@ -23,6 +23,7 @@ import path from "node:path";
 import { isOnPath } from "./which.js";
 import { readSettingsDoc } from "./settingsStore.js";
 import { configDir } from "./configDir.js";
+import { shQuote } from "./openUrl.js";
 
 // How one agent's CLI wants its hooks written, as data rather than as code.
 // Core used to carry three hard-coded flavours (claude / codex / agy); it now
@@ -516,9 +517,16 @@ export const agentHookShimPath = path.join(
   process.platform === "win32" ? "agent-hook.cmd" : "agent-hook",
 );
 
-// How the shim path is written in a hook command: quoted on Windows, where
-// the path usually contains the user's name and may contain spaces.
-const shimInCommand = process.platform === "win32" ? `"${agentHookShimPath}"` : agentHookShimPath;
+// How the shim path is written in a hook command, which agents run through a
+// shell: quoted on Windows, where the path usually contains the user's name
+// and may contain spaces, and elsewhere when it needs it — the desktop app's
+// config dir on macOS is under "~/Library/Application Support". A path that
+// doesn't is left bare, so an existing install's entries stay recognized.
+export function shimCommandWord(shimPath: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return `"${shimPath}"`;
+  return /^[A-Za-z0-9_/.,:+@%=-]+$/.test(shimPath) ? shimPath : shQuote(shimPath);
+}
+const shimInCommand = shimCommandWord(agentHookShimPath);
 
 // An id safe to put in a hook command's argument list, and safe as a plain
 // object key. Ids come from a user-editable settings document, and the
@@ -650,7 +658,17 @@ export function snippetFor(agent: AgentPreset, events: readonly AgentEvent[]): H
 // with core's shim path. Nothing else in a file is ever read, rewritten or
 // removed, whatever it points at.
 function isCoreHookCommand(command: unknown): boolean {
-  return typeof command === "string" && command.startsWith(`${shimInCommand} `);
+  return typeof command === "string" && corePrefix(command) !== null;
+}
+
+// The shim as a command starts with it: as written now, or bare, the way a
+// build before shimCommandWord quoted it wrote it (and so still core's own,
+// to be replaced in place).
+function corePrefix(command: string): string | null {
+  for (const word of new Set([shimInCommand, agentHookShimPath])) {
+    if (command.startsWith(`${word} `)) return `${word} `;
+  }
+  return null;
 }
 
 // The agent id core's own command was installed for. Hooks are per config
@@ -658,7 +676,7 @@ function isCoreHookCommand(command: unknown): boolean {
 // and this is whichever of them was installed last - see hookStateFor's stale
 // check.
 function coreHookAgentId(command: string): string {
-  return command.slice(shimInCommand.length + 1).split(" ")[0] ?? "";
+  return command.slice(corePrefix(command)?.length ?? 0).split(" ")[0] ?? "";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

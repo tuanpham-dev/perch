@@ -40,6 +40,7 @@ const {
   parseOneShot,
   oneShotArgs,
   setContributedAgentsSource,
+  shimCommandWord,
   snippetFor,
 } = agents;
 
@@ -319,4 +320,13 @@ test("the bundled agents' own templates produce the argv ai.ts used to hardcode"
 after(async () => {
   // The fixture home is under the OS temp dir; leaving it is harmless and
   // removing it recursively from a test is not a risk worth taking.
+});
+
+test("the shim is quoted in a hook command only when its path needs it", () => {
+  assert.equal(shimCommandWord("/home/me/.config/perch/bin/agent-hook", "linux"), "/home/me/.config/perch/bin/agent-hook");
+  assert.equal(
+    shimCommandWord("/Users/me/Library/Application Support/dev.perch.desktop/perch/config/bin/agent-hook", "darwin"),
+    "'/Users/me/Library/Application Support/dev.perch.desktop/perch/config/bin/agent-hook'",
+  );
+  assert.equal(shimCommandWord("C:\\Users\\Me Too\\agent-hook.cmd", "win32"), '"C:\\Users\\Me Too\\agent-hook.cmd"');
 });
