@@ -39,6 +39,14 @@ describe("sessionNameForProject", () => {
 
   it("sanitizes characters session names forbid", () => {
     expect(sessionNameForProject("~/works/my.app:v2", [])).toBe("my-app-v2");
+    expect(sessionNameForProject("~/works/My Project (old)", [])).toBe("My-Project-old");
+    expect(sessionNameForProject("~/works/a@b+c", [])).toBe("a-b-c");
+  });
+
+  it("names a folder with nothing usable in its name", () => {
+    expect(sessionNameForProject("~", [])).toBe("home");
+    expect(sessionNameForProject("/", [])).toBe("project");
+    expect(sessionNameForProject("~/works/日本", ["project"])).toBe("project-2");
   });
 
   it("suffixes -2, -3… until unique", () => {

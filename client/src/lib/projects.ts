@@ -10,13 +10,16 @@ export function projectName(cwd: string): string {
   return base || trimmed || "/";
 }
 
-// Session names may not contain "." or ":" (a rule inherited from the tmux backend,
-// which rejects or mangles them; the daemon keeps it so names work on either);
-// the folder basename is otherwise used as-is, suffixed -2, -3… when a live
-// session already holds the name (two projects sharing a basename). The name
-// is purely cosmetic — project↔session matching is by path, never name.
+// The daemon takes only letters, digits, "_" and "-" in a session name ("."
+// and ":" are target syntax in the tmux backend it inherited the rule from),
+// so every other run of characters in the folder basename becomes "-" — a
+// folder named "My Project" or "~" must still open. The result is suffixed
+// -2, -3… when a live session already holds it (two projects sharing a
+// basename). The name is purely cosmetic — project↔session matching is by
+// path, never name.
 export function sessionNameForProject(cwd: string, existingSessionNames: Iterable<string>): string {
-  const base = projectName(cwd).replace(/[.:]/g, "-");
+  const base =
+    projectName(cwd).replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || (cwd === "~" ? "home" : "project");
   const taken = new Set(existingSessionNames);
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) {
