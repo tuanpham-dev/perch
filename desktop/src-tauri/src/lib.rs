@@ -35,6 +35,8 @@ pub struct AppState {
     // Scripts waiting for a window's page to load (perch:// opens,
     // notification clicks).
     pub pending_scripts: Mutex<HashMap<String, Vec<String>>>,
+    // Servers whose window is being opened (windows::open_server_then).
+    pub opening: Mutex<HashSet<String>>,
     pub child_counter: AtomicU32,
     // Per window: how many pages it has started loading, and whether the
     // current one is Perch's app (it says how it wants the title bar drawn).
@@ -80,6 +82,7 @@ pub fn run() {
         pending_scripts: Mutex::new(HashMap::new()),
         page_loads: Mutex::new(HashMap::new()),
         app_pages: Mutex::new(HashSet::new()),
+        opening: Mutex::new(HashSet::new()),
         child_counter: AtomicU32::new(1),
         button_layout: Mutex::new(windows::DEFAULT_BUTTON_LAYOUT.to_string()),
     };

@@ -120,6 +120,17 @@ pub fn open_server_then(app: &AppHandle, id: &str, script: Option<String>) {
     std::thread::spawn(move || {
         let label = label_for(&id);
         let state = app.state::<AppState>();
+        // One open per server at a time: a second click (or a perch:// link)
+        // while the first is still starting the server or building the
+        // window would start a second server or fail on the taken label.
+        // Its script waits for the window the first one is building.
+        if !state.opening.lock().unwrap().insert(id.clone()) {
+            if let Some(script) = script {
+                state.pending_scripts.lock().unwrap().entry(label).or_default().push(script);
+            }
+            return;
+        }
+        let _opening = Opening(&state, &id);
         if let Some(w) = app.get_webview_window(&label) {
             // The Local window can outlive its server (Stop, a crash): then
             // opening it means starting the server again, not just focusing
@@ -153,6 +164,12 @@ pub fn open_server_then(app: &AppHandle, id: &str, script: Option<String>) {
                 return;
             }
             let _ = w.destroy();
+            // destroy() completes on the main thread; building under the
+            // same label before it has would fail as a taken label.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while app.get_webview_window(&label).is_some() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
         let entry = if id == LOCAL_ID {
             match start_local(&app) {
@@ -173,6 +190,14 @@ pub fn open_server_then(app: &AppHandle, id: &str, script: Option<String>) {
             report_error(&app, format!("Couldn't open {}: {e}", entry.name));
         }
     });
+}
+
+struct Opening<'a>(&'a AppState, &'a str);
+
+impl Drop for Opening<'_> {
+    fn drop(&mut self) {
+        self.0.opening.lock().unwrap().remove(self.1);
+    }
 }
 
 // Starts the bundled server if it isn't running, keeping the tray and the
