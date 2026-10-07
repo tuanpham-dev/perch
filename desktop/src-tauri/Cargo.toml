@@ -32,6 +32,11 @@ notify-rust = "4"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The same GTK the webview runs on: its gtk-decoration-layout setting says
+# where the desktop puts the window buttons.
+gtk = "0.18"
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_System_Threading"] }

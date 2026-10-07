@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { formatBinding, type Keybinding } from "../keybindings";
 import type { TitlebarAreaRect } from "../hooks/useWindowControlsOverlay";
-import { desktop } from "../desktop";
+import { desktop, type ButtonLayout } from "../desktop";
 import Icon from "./Icon";
 import WindowControls from "./WindowControls";
 
@@ -32,8 +32,8 @@ interface Props {
   rect: TitlebarAreaRect;
   emulated: "left" | "right" | null;
   focused: boolean;
-  // Draw the desktop app's own minimize/maximize/close at the right end.
-  desktopControls?: boolean;
+  // The desktop app's own window buttons, drawn at either end.
+  windowButtons?: ButtonLayout | null;
   title: string;
   commandCenterLabel: string;
   commandCenterCommand: string;
@@ -60,7 +60,7 @@ export default function TitleBar({
   rect,
   emulated,
   focused,
-  desktopControls = false,
+  windowButtons = null,
   title,
   commandCenterLabel,
   commandCenterCommand,
@@ -155,7 +155,12 @@ export default function TitleBar({
       {...desktopDrag}
     >
       {emulated && <div className="titlebar-emulated-controls" data-side={emulated} />}
-      {desktopControls && desktop && <WindowControls bridge={desktop} />}
+      {windowButtons && desktop && windowButtons.left.length > 0 && (
+        <WindowControls bridge={desktop} buttons={windowButtons.left} side="left" />
+      )}
+      {windowButtons && desktop && windowButtons.right.length > 0 && (
+        <WindowControls bridge={desktop} buttons={windowButtons.right} side="right" />
+      )}
       {minimal ? (
         <div className="titlebar-center">
           <span className="titlebar-title-static titlebar-command-center-label" title={title}>

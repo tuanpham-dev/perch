@@ -36,6 +36,10 @@ pub struct AppState {
     // notification clicks).
     pub pending_scripts: Mutex<HashMap<String, Vec<String>>>,
     pub child_counter: AtomicU32,
+    // The desktop's window button layout, GTK's gtk-decoration-layout
+    // ("close,minimize,maximize:" puts them on the left). Read on the main
+    // thread at startup and kept current (windows.rs).
+    pub button_layout: Mutex<String>,
 }
 
 pub fn quit(app: &AppHandle) {
@@ -69,6 +73,7 @@ pub fn run() {
         loaded: Mutex::new(HashSet::new()),
         pending_scripts: Mutex::new(HashMap::new()),
         child_counter: AtomicU32::new(1),
+        button_layout: Mutex::new(windows::DEFAULT_BUTTON_LAYOUT.to_string()),
     };
 
     let app = tauri::Builder::default()
@@ -113,6 +118,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            windows::watch_button_layout(&handle);
             tray::create(&handle)?;
             // An AppImage or a development build has no installer to tell
             // the OS about perch://; register it at run time there.

@@ -11,6 +11,42 @@ use crate::{paths, AppState};
 
 pub const LAUNCHER: &str = "launcher";
 
+// Where the window buttons go when the desktop doesn't say: Windows' place
+// for them, and what GTK itself defaults to.
+pub const DEFAULT_BUTTON_LAYOUT: &str = ":minimize,maximize,close";
+
+/// Reads the desktop's window button layout (Linux: GTK's
+/// gtk-decoration-layout, which GNOME, KDE, XFCE, Cinnamon and MATE all
+/// set) and follows changes to it, passing each change to every open
+/// server window. Must run on the main thread, once GTK is up.
+#[cfg(target_os = "linux")]
+pub fn watch_button_layout(app: &AppHandle) {
+    use gtk::prelude::*;
+    let Some(settings) = gtk::Settings::default() else { return };
+    let set = |app: &AppHandle, layout: Option<gtk::glib::GString>| {
+        let layout = layout.map(|l| l.to_string()).unwrap_or_else(|| DEFAULT_BUTTON_LAYOUT.to_string());
+        *app.state::<AppState>().button_layout.lock().unwrap() = layout.clone();
+        layout
+    };
+    set(app, settings.gtk_decoration_layout());
+    let app = app.clone();
+    settings.connect_gtk_decoration_layout_notify(move |s| {
+        let layout = set(&app, s.gtk_decoration_layout());
+        let script = format!(
+            "window.__perchDesktopButtonLayout && window.__perchDesktopButtonLayout({});",
+            serde_json::to_string(&layout).unwrap()
+        );
+        for (label, w) in app.webview_windows() {
+            if server_id_of(&label).is_some() {
+                let _ = w.eval(&script);
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn watch_button_layout(_app: &AppHandle) {}
+
 pub fn label_for(server_id: &str) -> String {
     format!("server-{server_id}")
 }
@@ -150,6 +186,7 @@ fn configure<'a>(
         "platform": platform(),
         "version": app.package_info().version.to_string(),
         "isLocal": is_local,
+        "buttonLayout": app.state::<AppState>().button_layout.lock().unwrap().clone(),
     });
     let builder = builder
         .initialization_script(format!("window.__PERCH_DESKTOP__ = Object.freeze({info});"))

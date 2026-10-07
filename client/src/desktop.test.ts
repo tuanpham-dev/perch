@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createDesktopBridge, desktop, fileManagerName } from "./desktop";
+import { createDesktopBridge, desktop, fileManagerName, parseButtonLayout } from "./desktop";
 
 function stub(info: Record<string, unknown> = { platform: "linux", version: "0.1.0", isLocal: true }) {
   const invoke = vi.fn(async (cmd: string) => (cmd === "pick_folder" ? "/home/me/code" : cmd === "window_is_maximized" ? true : null));
@@ -20,8 +20,38 @@ describe("desktop bridge", () => {
   });
 
   it("reads the window info", () => {
-    expect(stub().bridge!.info).toEqual({ platform: "linux", version: "0.1.0", isLocal: true });
-    expect(stub({ platform: "macos" }).bridge!.info).toEqual({ platform: "macos", version: "", isLocal: false });
+    const right = { left: [], right: ["minimize", "maximize", "close"] };
+    expect(stub().bridge!.info).toEqual({ platform: "linux", version: "0.1.0", isLocal: true, buttonLayout: right });
+    expect(stub({ platform: "macos" }).bridge!.info).toEqual({ platform: "macos", version: "", isLocal: false, buttonLayout: right });
+  });
+
+  it("follows the desktop's button layout on Linux only", () => {
+    const globals: Record<string, unknown> = {
+      __TAURI_INTERNALS__: { invoke: async () => null },
+      __PERCH_DESKTOP__: { platform: "linux", buttonLayout: "close,minimize,maximize:" },
+    };
+    const bridge = createDesktopBridge(globals)!;
+    expect(bridge.info.buttonLayout).toEqual({ left: ["close", "minimize", "maximize"], right: [] });
+    const seen: unknown[] = [];
+    bridge.onButtonLayoutChange((l) => seen.push(l));
+    (globals.__perchDesktopButtonLayout as (l: string) => void)("appmenu:close");
+    expect(seen).toEqual([{ left: [], right: ["close"] }]);
+    expect(bridge.info.buttonLayout).toEqual({ left: [], right: ["close"] });
+    const win = createDesktopBridge({
+      __TAURI_INTERNALS__: { invoke: async () => null },
+      __PERCH_DESKTOP__: { platform: "windows", buttonLayout: "close:" },
+    })!;
+    expect(win.info.buttonLayout).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
+  });
+
+  it("parses gtk-decoration-layout", () => {
+    expect(parseButtonLayout(":minimize,maximize,close")).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
+    expect(parseButtonLayout("close,minimize,maximize:")).toEqual({ left: ["close", "minimize", "maximize"], right: [] });
+    expect(parseButtonLayout("appmenu:close")).toEqual({ left: [], right: ["close"] });
+    expect(parseButtonLayout("icon:minimize,spacer,maximize,close")).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
+    expect(parseButtonLayout("close:menu")).toEqual({ left: ["close"], right: [] });
+    expect(parseButtonLayout("")).toEqual({ left: [], right: [] });
+    expect(parseButtonLayout(undefined)).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
   });
 
   it("maps each method to its app command and arguments", async () => {

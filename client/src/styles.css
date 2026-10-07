@@ -311,15 +311,23 @@ textarea {
 }
 
 /* The desktop app's own window controls (WindowControls.tsx), on Windows
-   and Linux, in the same strip the emulation outlines. Close turns red on
+   and Linux, at whichever end the desktop puts them. Close turns red on
    hover, as it does on Windows. */
 .window-controls {
   position: absolute;
   top: 0;
-  right: 0;
   height: 100%;
-  width: var(--tb-end);
   display: flex;
+}
+
+.window-controls[data-side="left"] {
+  left: 0;
+  width: var(--tb-start);
+}
+
+.window-controls[data-side="right"] {
+  right: 0;
+  width: var(--tb-end);
 }
 
 .window-control {

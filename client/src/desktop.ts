@@ -13,11 +13,39 @@
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
+export type WindowButton = "minimize" | "maximize" | "close";
+
+// Which window buttons the title bar draws, in order, on each side.
+export interface ButtonLayout {
+  left: WindowButton[];
+  right: WindowButton[];
+}
+
 export interface DesktopInfo {
   platform: DesktopPlatform;
   version: string;
   // This window shows the server bundled with the app, on this machine.
   isLocal: boolean;
+  // Where the desktop puts window buttons (Linux follows its setting;
+  // Windows is always minimize, maximize, close at the right).
+  buttonLayout: ButtonLayout;
+}
+
+const BUTTONS: readonly WindowButton[] = ["minimize", "maximize", "close"];
+
+/**
+ * GTK's gtk-decoration-layout, the setting GNOME, KDE, XFCE, Cinnamon and
+ * MATE use for where window buttons go: buttons before the colon sit at the
+ * left, after it at the right ("close,minimize,maximize:" is macOS-style,
+ * GNOME's default "appmenu:close" shows only close). Anything that isn't a
+ * button (appmenu, icon, menu, spacer) is skipped.
+ */
+export function parseButtonLayout(layout: string | undefined): ButtonLayout {
+  if (typeof layout !== "string") return { left: [], right: [...BUTTONS] };
+  const [before, after = ""] = layout.split(":");
+  const pick = (side: string) =>
+    side.split(",").map((b) => b.trim()).filter((b): b is WindowButton => BUTTONS.includes(b as WindowButton));
+  return { left: pick(before), right: pick(after) };
 }
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -38,12 +66,18 @@ export interface DesktopBridge {
   openWithDefault(path: string): Promise<void>;
   // The chosen folder, or null when the user cancelled.
   pickFolder(start?: string): Promise<string | null>;
+  // Calls `cb` when the desktop's button layout changes (Linux). Returns an
+  // unsubscribe function.
+  onButtonLayoutChange(cb: (layout: ButtonLayout) => void): () => void;
 }
 
 interface DesktopGlobals {
   __TAURI_INTERNALS__?: { invoke?: Invoke };
-  __PERCH_DESKTOP__?: Partial<DesktopInfo>;
+  __PERCH_DESKTOP__?: Partial<Omit<DesktopInfo, "buttonLayout">> & { buttonLayout?: string };
   __perchDesktop?: DesktopPageHooks;
+  // The app calls this with the new layout string when the desktop's
+  // setting changes.
+  __perchDesktopButtonLayout?: (layout: string) => void;
 }
 
 const PLATFORMS: readonly DesktopPlatform[] = ["macos", "windows", "linux"];
@@ -56,7 +90,15 @@ export function createDesktopBridge(globals: DesktopGlobals | undefined): Deskto
     platform: raw.platform as DesktopPlatform,
     version: typeof raw.version === "string" ? raw.version : "",
     isLocal: raw.isLocal === true,
+    buttonLayout: raw.platform === "linux" ? parseButtonLayout(raw.buttonLayout) : parseButtonLayout(undefined),
   };
+  const layoutListeners = new Set<(layout: ButtonLayout) => void>();
+  if (info.platform === "linux") {
+    globals!.__perchDesktopButtonLayout = (layout) => {
+      info.buttonLayout = parseButtonLayout(layout);
+      for (const cb of layoutListeners) cb(info.buttonLayout);
+    };
+  }
   const call = (cmd: string, args?: Record<string, unknown>) => invoke(cmd, args);
   const run = async (cmd: string, args?: Record<string, unknown>) => {
     await call(cmd, args);
@@ -92,6 +134,10 @@ export function createDesktopBridge(globals: DesktopGlobals | undefined): Deskto
     pickFolder: async (start) => {
       const picked = await call("pick_folder", start ? { start } : {});
       return typeof picked === "string" ? picked : null;
+    },
+    onButtonLayoutChange(cb) {
+      layoutListeners.add(cb);
+      return () => layoutListeners.delete(cb);
     },
   };
 }

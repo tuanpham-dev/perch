@@ -2480,7 +2480,7 @@ export default function App() {
           rect={windowControlsOverlay.rect}
           emulated={windowControlsOverlay.emulated}
           focused={windowControlsOverlay.focused}
-          desktopControls={windowControlsOverlay.desktopControls}
+          windowButtons={windowControlsOverlay.windowButtons}
           title={windowTitle}
           commandCenterLabel={settings.commandCenterAction === "commandPalette" ? "Command Palette" : "Quick Switcher"}
           commandCenterCommand={
