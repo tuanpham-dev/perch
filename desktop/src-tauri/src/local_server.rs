@@ -267,18 +267,63 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-// Keeps the current copy and the two newest others.
+// Keeps the current copy, the two newest others, and any copy a process
+// still runs from: the terminal daemon outlives every server restart and
+// app update (only a reboot ends it), and with its copy deleted under it
+// every terminal it starts afterwards fails ("posix_spawnp failed.", as
+// node-pty's spawn-helper goes with the copy). When the running processes
+// can't be listed, nothing is pruned.
 fn prune_runtimes(root: &Path, current: &str) {
+    let Some(lines) = all_command_lines() else { return };
+    prune_runtimes_except(root, current, &runtimes_in_use(root, &lines));
+}
+
+fn prune_runtimes_except(root: &Path, current: &str, in_use: &std::collections::HashSet<String>) {
     let Ok(entries) = std::fs::read_dir(root) else { return };
     let mut others: Vec<(std::time::SystemTime, PathBuf)> = entries
         .flatten()
         .filter(|e| e.file_name().to_string_lossy() != current)
+        .filter(|e| !in_use.contains(&*e.file_name().to_string_lossy()))
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .collect();
     others.sort_by(|a, b| b.0.cmp(&a.0));
     for (_, path) in others.into_iter().skip(2) {
         let _ = std::fs::remove_dir_all(path);
     }
+}
+
+/// The copies under `root` that one of these command lines runs from.
+fn runtimes_in_use(root: &Path, command_lines: &[String]) -> std::collections::HashSet<String> {
+    let prefix = format!("{}{}", root.display(), std::path::MAIN_SEPARATOR);
+    let mut found = std::collections::HashSet::new();
+    for line in command_lines {
+        for (at, _) in line.match_indices(&prefix) {
+            let name = line[at + prefix.len()..].split(['/', '\\']).next().unwrap_or_default();
+            if !name.is_empty() {
+                found.insert(name.to_string());
+            }
+        }
+    }
+    found
+}
+
+/// Every running process's command line.
+#[cfg(unix)]
+fn all_command_lines() -> Option<Vec<String>> {
+    let out = Command::new("ps").args(["-axww", "-o", "command="]).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect())
+}
+
+#[cfg(windows)]
+fn all_command_lines() -> Option<Vec<String>> {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect())
 }
 
 fn node_binary(bundle: &Path) -> PathBuf {
@@ -484,6 +529,33 @@ mod tests {
         left.sort();
         assert_eq!(left, ["c2", "c3", "c4"]);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn keeps_a_runtime_copy_a_process_still_runs_from() {
+        let root = std::env::temp_dir().join(format!("perch-inuse-{}", uuid::Uuid::new_v4()));
+        for old in ["c1", "c2", "c3", "c4", "c5"] {
+            std::fs::create_dir_all(root.join(old)).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let sep = std::path::MAIN_SEPARATOR;
+        // A daemon started three updates ago, still running from c1.
+        let lines = vec![format!("{}{sep}c1{sep}node{sep}bin{sep}node {}{sep}c1{sep}mux{sep}src{sep}daemon{sep}index.ts", root.display(), root.display())];
+        let in_use = runtimes_in_use(&root, &lines);
+        assert_eq!(in_use.into_iter().collect::<Vec<_>>(), ["c1"]);
+        prune_runtimes_except(&root, "c5", &runtimes_in_use(&root, &lines));
+        let mut left: Vec<String> = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["c1", "c3", "c4", "c5"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lists_running_command_lines() {
+        let lines = all_command_lines().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        assert!(lines.iter().any(|l| l.contains(&*exe.file_name().unwrap().to_string_lossy())));
     }
 
     #[test]
