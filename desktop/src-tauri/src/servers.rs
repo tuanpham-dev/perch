@@ -117,6 +117,7 @@ impl Servers {
             return Err("Give the server a name.".into());
         }
         let mut stored = self.stored.lock().unwrap();
+        check_unique(&stored, None, Some(name), Some(&url))?;
         let entry = ServerEntry {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.into(),
@@ -146,6 +147,7 @@ impl Servers {
             }
             _ => {
                 let url = url.map(normalize_url).transpose()?;
+                check_unique(&stored, Some(id), name.map(str::trim), url.as_deref())?;
                 let entry = stored.remotes.iter_mut().find(|s| s.id == id).ok_or("No such server.")?;
                 if let Some(name) = name {
                     let name = name.trim();
@@ -190,6 +192,25 @@ impl Servers {
         *current = found;
         changed
     }
+}
+
+/// A server's name picks it in perch:// links and `perch-desktop --server`,
+/// and its address is what its window and sign-in belong to, so neither may
+/// repeat another server's. `except` is the server being edited.
+fn check_unique(stored: &Stored, except: Option<&str>, name: Option<&str>, url: Option<&str>) -> Result<(), String> {
+    let others = || stored.remotes.iter().filter(|s| Some(s.id.as_str()) != except);
+    if let Some(name) = name {
+        let fixed = ["Local", "Installed"].iter().any(|n| n.eq_ignore_ascii_case(name));
+        if fixed || others().any(|s| s.name.eq_ignore_ascii_case(name)) {
+            return Err(format!("There's already a server named \"{name}\"."));
+        }
+    }
+    if let Some(url) = url {
+        if let Some(s) = others().find(|s| s.url == url) {
+            return Err(format!("\"{}\" already has that address.", s.name));
+        }
+    }
+    Ok(())
 }
 
 /// An http(s) URL reduced to its origin plus "/".
@@ -303,6 +324,21 @@ mod tests {
         assert!(reloaded.remove(LOCAL_ID).is_err());
         reloaded.remove(&added.id).unwrap();
         assert_eq!(Servers::load(dir.join("servers.json")).list(None).len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_repeated_names_and_addresses() {
+        let (servers, dir) = temp_store();
+        let a = servers.add("build box", "https://build.example.com").unwrap();
+        let b = servers.add("other", "https://other.example.com").unwrap();
+        assert!(servers.add("Build Box", "https://new.example.com").is_err());
+        assert!(servers.add("local", "https://new.example.com").is_err());
+        assert!(servers.add("new", "https://build.example.com/path").is_err());
+        assert!(servers.update(&b.id, Some("BUILD BOX"), None, None).is_err());
+        assert!(servers.update(&b.id, None, Some("build.example.com"), None).is_err());
+        // Saving a server under its own name and address is no conflict.
+        servers.update(&a.id, Some("build box"), Some("https://build.example.com"), None).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
 
