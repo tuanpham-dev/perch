@@ -2235,6 +2235,13 @@ export default function App() {
   useEffect(() => {
     void desktop?.setDecorations(!settings.customTitleBar).catch(() => {});
   }, [settings.customTitleBar]);
+  // How far the title bar reaches down the window, for what's pinned to the
+  // top (the error and upload banners): below it, not over its window
+  // buttons.
+  const titleBarBottom = showTitleBar ? windowControlsOverlay.rect.y + windowControlsOverlay.rect.height : 0;
+  useEffect(() => {
+    document.documentElement.style.setProperty("--titlebar-bottom", `${titleBarBottom}px`);
+  }, [titleBarBottom]);
 
   // The Manage menu, shared by the sidebar's gear button and (on a phone,
   // where that button is behind a closed drawer) the status bar's own. Built
