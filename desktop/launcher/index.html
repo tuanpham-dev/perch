@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Perch</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="head">
+        <h1>Servers</h1>
+        <button id="add-toggle" class="ghost">+ Add server</button>
+      </header>
+      <div id="error" class="error" role="alert" hidden>
+        <pre id="error-text"></pre>
+        <button id="error-close" class="ghost" aria-label="Dismiss">Dismiss</button>
+      </div>
+      <form id="add-form" class="add" hidden>
+        <input id="add-name" placeholder="Name" autocomplete="off" required />
+        <input id="add-url" placeholder="https://perch.example.com" autocomplete="off" required />
+        <button type="submit">Add</button>
+        <button type="button" id="add-cancel" class="ghost">Cancel</button>
+      </form>
+      <ul id="servers" class="servers"></ul>
+      <footer id="local" class="local"></footer>
+    </main>
+    <script src="main.js"></script>
+  </body>
+</html>

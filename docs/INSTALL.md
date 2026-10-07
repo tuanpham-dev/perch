@@ -27,6 +27,55 @@ irm https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.ps1 | iex
 
 Clones to `%LOCALAPPDATA%\perch\app`, builds it, adds its `bin` folder to your user `PATH`, and adds a Task Scheduler task that starts Perch when you sign in (hidden, logging to `%LOCALAPPDATA%\perch\perch.log`). Needs Node 23+ and Git for Windows; no administrator rights. Terminals run PowerShell 7 (`pwsh`) when it's installed, else Windows PowerShell; pick another shell in Settings → Terminal Backend. Command history and prompt jumps work in those terminals out of the box (the shell integration is loaded automatically). Search works without ripgrep, but installing it (`winget install BurntSushi.ripgrep.MSVC`) makes it faster and adds full glob support.
 
+## Desktop app
+
+Perch also comes as a desktop app for macOS, Windows and Linux. It opens any Perch server in its own window, and it carries a Perch server of its own, so it works with no Node, toolchain or `install.sh` on the machine.
+
+Download it from the [Releases page](https://github.com/tuanpham-dev/perch/releases) (the `desktop-v*` releases):
+
+| Platform | File |
+|---|---|
+| macOS (Apple silicon, Intel) | `.dmg` |
+| Windows | `-setup.exe` |
+| Linux (x64, arm64) | `.AppImage` or `.deb` |
+
+The builds aren't signed yet, so each OS warns the first time:
+
+- **macOS** says the app "can't be opened" or is "damaged". Right-click Perch in Applications and choose **Open**, or run `xattr -dr com.apple.quarantine /Applications/Perch.app` once.
+- **Windows** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**.
+- **Linux**: make the AppImage executable (`chmod +x Perch_*.AppImage`) and run it, or install the `.deb` with `sudo apt install ./perch_*.deb`.
+
+### Servers
+
+The app opens on a list of servers. Each one opens in its own window, which remembers its size and position:
+
+- **Local** - the server bundled with the app, on `127.0.0.1:3101` (or the next free port). It starts the first time you open it and keeps running after you quit the app, so its terminals survive just as they do for an installed Perch. Its settings, extensions and terminals are kept apart from any installed Perch, under the app's data folder (`~/.local/share/dev.perch.desktop/perch` on Linux, `~/Library/Application Support/dev.perch.desktop/perch` on macOS, `%APPDATA%\dev.perch.desktop\perch` on Windows).
+- **Installed** - a Perch already running on this machine (from `install.sh` or `install.ps1`), listed while it answers.
+- **Remote servers** you add with **+ Add server**: a name and an address, such as `https://perch.example.com`. A server with `AUTH_TOKEN` shows its sign-in page once; the window keeps the sign-in after that.
+
+Inside a server window, Perch looks as it does in a browser, with its own title bar in place of the OS one (Settings → UI → Use custom title bar turns that off). Links to other sites open in your browser. The Local window can also do a few things a browser can't: **Reveal in Finder / File Explorer / Files** and **Open with Default App** in the FILES menu, and the OS folder picker for Open Folder. Remote servers never get those.
+
+### Tray and notifications
+
+Closing a window leaves Perch in the tray (the menu bar on macOS), where you can open any server, start or stop the local server, and quit. Alerts, such as an agent waiting for input or a long command finishing, arrive as OS notifications from every server whose **Notify** is on, even with its window closed. Local and Installed have it on by default; turn it on for a remote server from its **...** menu. Click a notification to open that server on the terminal it's about.
+
+### `perch-desktop` and `perch://` links
+
+Choose **Install perch-desktop Command** in the tray menu to get a command that talks to the app. It never replaces an installed `perch` command.
+
+```bash
+perch-desktop src/index.ts:42           # open a file at a line in the Local window
+perch-desktop . --server "build box"    # open a folder in another server's window (a path on that machine)
+perch-desktop start | stop | status     # the bundled local server
+```
+
+On Linux and macOS it goes in `~/.local/bin`; the app tells you if that folder isn't on your `PATH`. Links do the same from anywhere: `perch://open?path=/home/me/app/main.rs&line=12` (add `&server=<name>` for another server, `&action=editor` or `&action=preview` to choose how a file opens).
+
+### Known limitations
+
+- **Linux:** H.264 video in the media viewer needs `gstreamer1.0-libav` (the `.deb` installs it; install it yourself for the AppImage). Dragging files in from a file manager hasn't been confirmed yet. Typing through an input method (IME) needs `GTK_IM_MODULE` set the way your desktop normally sets it.
+- **macOS and Windows** builds haven't been tested on real machines yet. Clicking a notification may only bring the app forward there, without switching to the terminal it's about.
+
 ### The `perch` command
 
 | Command | What it does |

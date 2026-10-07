@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spike-report"
+description = "Enables the spike_report command without any pre-configured scope."
+commands.allow = ["spike_report"]
+
+[[permission]]
+identifier = "deny-spike-report"
+description = "Denies the spike_report command without any pre-configured scope."
+commands.deny = ["spike_report"]

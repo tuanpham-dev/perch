@@ -20,6 +20,20 @@ npm run dev
 
 Open http://localhost:5173.
 
+## Desktop app
+
+The desktop app lives in `desktop/`, a separate npm package (not a workspace) with a Tauri 2 shell in `desktop/src-tauri` and the launcher window in `desktop/launcher`. You need Rust and, on Linux, `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`.
+
+```bash
+npm install                      # the repo, once
+cd desktop && npm install
+npm run stage                    # build the web app, stage Node + the server into src-tauri/resources/perch
+npm run dev                      # run the app (debug build)
+npm run build                    # stage, then build this platform's packages into src-tauri/target/release/bundle
+```
+
+`PERCH_DESKTOP_BUNDLE=<dir>` points the app at another staged server. On a headless Linux host, run it under `xvfb-run`, or use `desktop/scripts/spike.sh`, which starts a virtual display and can type, run JS in the window and take screenshots. A debug build also evaluates any `<window label>.js` dropped in `PERCH_DESKTOP_QA_DIR` in that window. Pushing a `desktop-v*` tag builds every platform in CI (`.github/workflows/desktop.yml`) into a draft release.
+
 ## Project layout
 
 ```
@@ -31,6 +45,7 @@ cli/        tunnel.mjs — standalone port-forwarding client, served at GET /tun
 bin/        perch — entry point of the CLI for managing an installed instance, see [Install](INSTALL.md)
 cli/        perch/ — that CLI (Node; systemd and launchd behind one service-manager interface)
 systemd/    perch.service — the user-mode systemd unit installed by install.sh
+desktop/    The desktop app (Tauri) - see Desktop app above
 examples/   hello-extension — a reference extension covering every surface in [EXTENSION_API.md](EXTENSION_API.md)
 plans/      Design docs written during development
 ```

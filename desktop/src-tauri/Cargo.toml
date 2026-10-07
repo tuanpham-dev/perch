@@ -1,0 +1,37 @@
+[package]
+name = "perch-desktop"
+version = "0.1.0"
+description = "Perch as a desktop app"
+edition = "2021"
+publish = false
+
+[lib]
+name = "perch_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+url = "2"
+uuid = { version = "1", features = ["v4", "v5"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["time", "sync", "macros"] }
+notify-rust = "4"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_System_Threading"] }

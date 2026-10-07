@@ -1,0 +1,190 @@
+# The Perch desktop app (desktop/). Modeled on tuanpham-dev/openray's
+# build.yml, whose notes below come from real runs.
+#
+# - check: on every push and PR that touches the app or what it bundles,
+#   Rust tests on Linux and a compile check on macOS and Windows - the
+#   target_os-gated code there can't be checked on a Linux machine (the
+#   -sys crates need each platform's own C compiler).
+# - build: every platform's packages. A desktop-v* tag attaches them to a
+#   draft GitHub Release; a manual run or a push to a desktop/* or
+#   feature/desktop* branch uploads them as this run's artifacts. Each
+#   platform builds on its own runner, so the bundled server's native module
+#   (node-pty) is compiled for exactly the Node it ships with.
+name: Desktop app
+
+on:
+  push:
+    tags: ["desktop-v*"]
+    branches: ["**"]
+    paths:
+      - "desktop/**"
+      - "server/**"
+      - "mux/**"
+      - "client/**"
+      - "extensions/**"
+      - "cli/tunnel.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "server/**"
+      - "mux/**"
+      - "client/**"
+      - "extensions/**"
+      - "cli/tunnel.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: macos
+            runner: macos-latest
+            target: aarch64-apple-darwin
+          - name: windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libgtk-3-dev patchelf build-essential
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: check-${{ matrix.target }}
+
+      # generate_context!() embeds the launcher, and Tauri's build script
+      # wants every `resources` path to exist - a placeholder stands in for
+      # the staged server, which only the package build needs.
+      - name: Launcher + resource placeholder
+        shell: bash
+        run: |
+          npm ci --prefix desktop
+          npm run build:launcher --prefix desktop
+          mkdir -p desktop/src-tauri/resources/perch
+          touch desktop/src-tauri/resources/perch/.keep
+
+      - name: Rust tests
+        if: runner.os == 'Linux'
+        working-directory: desktop/src-tauri
+        run: cargo test
+
+      - name: Compile check
+        working-directory: desktop/src-tauri
+        run: cargo check --release --target ${{ matrix.target }}
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/desktop-v') || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/desktop/') || startsWith(github.ref, 'refs/heads/feature/desktop')
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runner: ubuntu-22.04
+          - name: linux-arm64
+            runner: ubuntu-22.04-arm
+          - name: macos-arm64
+            runner: macos-latest
+          - name: macos-x64
+            runner: macos-15-intel
+          - name: windows-x64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # xdg-utils: on the x86_64 Ubuntu image but not the -arm one, and the
+      # AppImage bundler fails with "xdg-open binary not found" without it
+      # (openray's note).
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libgtk-3-dev patchelf build-essential xdg-utils
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: build-${{ matrix.name }}
+
+      - name: Install
+        run: |
+          npm ci
+          npm ci --prefix desktop
+
+      # Builds the web app and extensions, then stages Node + the server
+      # into desktop/src-tauri/resources/perch.
+      - name: Stage the bundled server
+        run: npm run stage --prefix desktop
+
+      # Two steps rather than one with ternary'd inputs: tauri-action treats
+      # a present-but-empty tagName differently from an omitted one (only
+      # omitting it skips creating a release) - openray's note.
+      - name: Build and publish release (tag)
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: Perch Desktop ${{ github.ref_name }}
+          releaseBody: Unsigned builds. See docs/INSTALL.md (Desktop app) for first-run steps on each platform.
+          releaseDraft: true
+          prerelease: true
+
+      - name: Build only (branch or manual run)
+        if: "!startsWith(github.ref, 'refs/tags/desktop-v')"
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: desktop
+
+      - name: Upload packages
+        if: "!startsWith(github.ref, 'refs/tags/desktop-v')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: perch-desktop-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/release/bundle/nsis/*.exe

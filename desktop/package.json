@@ -1,0 +1,20 @@
+{
+  "name": "perch-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build:launcher": "node scripts/build-launcher.mjs",
+    "stage": "node scripts/stage-server.mjs",
+    "build": "node scripts/stage-server.mjs && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "esbuild": "^0.28.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.1"
+  }
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-window-set-decorations"
+description = "Enables the window_set_decorations command without any pre-configured scope."
+commands.allow = ["window_set_decorations"]
+
+[[permission]]
+identifier = "deny-window-set-decorations"
+description = "Denies the window_set_decorations command without any pre-configured scope."
+commands.deny = ["window_set_decorations"]

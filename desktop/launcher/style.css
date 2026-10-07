@@ -1,0 +1,106 @@
+/* The launcher: one list of servers, in Perch's default colors. */
+:root {
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --fg: #1f2329;
+  --muted: #6b7280;
+  --border: #e3e5e8;
+  --accent: #2f7bd4;
+  --hover: rgba(31, 35, 41, 0.06);
+  --ok: #2e9e5b;
+  --off: #9aa1ab;
+  --bad: #c9473d;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1e23;
+    --panel: #22262c;
+    --fg: #d6dae0;
+    --muted: #8b93a0;
+    --border: #2f343c;
+    --accent: #5aa2ec;
+    --hover: rgba(255, 255, 255, 0.06);
+    --ok: #4cc27c;
+    --off: #6b727d;
+    --bad: #e06c62;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif;
+  user-select: none;
+}
+main { display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 14px; min-height: 100%; }
+.head { display: flex; align-items: center; justify-content: space-between; }
+h1 { font-size: 15px; font-weight: 600; margin: 0; }
+button {
+  font: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+button.ghost:hover { background: var(--hover); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button:disabled { opacity: 0.5; cursor: default; }
+input {
+  font: inherit;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+.add { display: flex; gap: 6px; flex-wrap: wrap; }
+.add input { flex: 1 1 140px; }
+.error {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid var(--bad);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--panel);
+}
+.error pre { flex: 1; margin: 0; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; user-select: text; max-height: 160px; overflow: auto; }
+.servers { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
+.server { display: grid; grid-template-columns: 10px 1fr auto auto; gap: 10px; align-items: center; padding: 9px 12px; position: relative; }
+.server + .server { border-top: 1px solid var(--border); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
+.dot.up { background: var(--ok); }
+.dot.down { background: var(--bad); }
+.who { min-width: 0; }
+.name { font-weight: 600; }
+.where, .note { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note.warn { color: var(--bad); }
+.menu {
+  position: absolute;
+  right: 12px;
+  top: 38px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.menu button { background: transparent; color: var(--fg); text-align: left; border: none; padding: 5px 10px; }
+.menu button:hover { background: var(--hover); }
+.menu button.danger { color: var(--bad); }
+.edit { grid-column: 2 / -1; display: flex; gap: 6px; }
+.edit input { flex: 1; }
+.local { margin-top: auto; display: flex; align-items: center; gap: 10px; color: var(--muted); padding-top: 4px; }
+.local .grow { flex: 1; }
