@@ -3,6 +3,7 @@ import {
   bindingMatches,
   COMMANDS,
   findMatchingBinding,
+  formatBinding,
   migrateKeybindingOverrides,
   pickCommand,
   resolveBindings,
@@ -190,5 +191,14 @@ describe("COMMANDS", () => {
       "projects.kill": [{ key: "Backspace", when: "projectsListFocus" }],
       "sidebar.focusProjects": [{ key: "ctrl+shift+KeyS" }],
     });
+  });
+});
+
+describe("formatBinding", () => {
+  it("names modifiers the way the keyboard does", () => {
+    expect(formatBinding("ctrl+shift+KeyP", false)).toBe("Ctrl+Shift+P");
+    expect(formatBinding("meta+alt+Digit1", false)).toBe("Meta+Alt+1");
+    expect(formatBinding("meta+alt+Digit1", true)).toBe("Cmd+Option+1");
+    expect(formatBinding("ctrl+Backquote", true)).toBe("Ctrl+`");
   });
 });

@@ -8,6 +8,7 @@
 // Ctrl+S) are out of scope — a chord-prefix state machine conflicts with a
 // terminal app where Ctrl+K is a live shell key.
 import { evaluateWhen } from "./whenClause";
+import { isMac } from "./utils/platform";
 
 export interface Keybinding {
   key: string;
@@ -299,7 +300,9 @@ const CODE_LABELS: Record<string, string> = {
   ArrowRight: "→",
 };
 
-export function formatBinding(binding: string): string {
+// A Mac keyboard says Cmd and Option where others say Meta and Alt; Ctrl is
+// Ctrl everywhere (a "ctrl" binding is the Control key on a Mac too).
+export function formatBinding(binding: string, mac: boolean = isMac): string {
   return binding
     .split("+")
     .map((part) => {
@@ -309,9 +312,9 @@ export function formatBinding(binding: string): string {
         case "shift":
           return "Shift";
         case "alt":
-          return "Alt";
+          return mac ? "Option" : "Alt";
         case "meta":
-          return "Meta";
+          return mac ? "Cmd" : "Meta";
         default:
           if (part.startsWith("Key")) return part.slice(3);
           if (part.startsWith("Digit")) return part.slice(5);
