@@ -1,3 +1,4 @@
+import { desktop } from "../../desktop";
 import type { AppSettings } from "../../settings";
 import { listColorThemeOptions } from "../../theme";
 import { listIconThemeOptions } from "../../utils/iconThemes";
@@ -62,8 +63,9 @@ export default function UiSection() {
         <span>Use custom title bar</span>
       </label>
       <div className="settings-hint">
-        When an installed app&apos;s title bar is hidden, show back/forward, a command center, and layout
-        buttons in its place. Turning it off keeps the buttons in the left sidebar&apos;s footer.
+        {desktop
+          ? "Draw Perch's own title bar, with back/forward, a command center, layout buttons and the window buttons, in place of the system's. Turning it off brings the system title bar back and keeps the layout buttons in the left sidebar's footer."
+          : "When an installed app's title bar is hidden, show back/forward, a command center, and layout buttons in its place. Turning it off keeps the buttons in the left sidebar's footer."}
       </div>
 
       <label className="settings-row">
