@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bannerText, appendBanner, appendBannerRaw } from '../src/daemon/restore-banner.ts';
+import { bannerText, appendBanner, appendBannerRaw, LEAVE_ALT_SCREEN, MODE_RESET } from '../src/daemon/restore-banner.ts';
 
 const banner = (n: number) => bannerText(new Date(2026, 0, n, 12, 0, 0));
 const count = (s: string) => (s.match(/\[restored /g) ?? []).length;
@@ -90,4 +90,22 @@ test('leaves high bytes untouched', () => {
   const raw = Buffer.from([0x41, 0xff, 0xfe, 0x0d, 0x0a]);
   const out = appendBannerRaw(raw, banner(1));
   assert.deepEqual(out.subarray(0, 5), raw);
+});
+
+test('leaves the alternate screen only when the history ended on it', () => {
+  // A ?1049l on the main screen still restores the saved cursor (the top
+  // row), so the banner would overwrite the history it follows.
+  assert.ok(!appendBanner('plain shell output\r\n', banner(1)).includes(LEAVE_ALT_SCREEN));
+  assert.ok(!appendBanner('\x1b[?1049hvim\x1b[?1049lback\r\n', banner(1)).includes(`${LEAVE_ALT_SCREEN}${MODE_RESET}`));
+  const inVim = appendBanner('\x1b[?1049hvim still open', banner(1));
+  assert.ok(inVim.endsWith(`${LEAVE_ALT_SCREEN}${banner(1)}`));
+  const raw = appendBannerRaw(Buffer.from('\x1b[?47hless', 'latin1'), banner(1)).toString('latin1');
+  assert.ok(raw.endsWith(`${LEAVE_ALT_SCREEN}${banner(1)}`));
+});
+
+test('strips banners written before the leave-alt switch became conditional', () => {
+  const legacy = `history\r\n${MODE_RESET.replace('\x1b[0m', `\x1b[0m${LEAVE_ALT_SCREEN}`)}\r\n\x1b[2m[restored old]\x1b[0m\r\n`;
+  assert.equal(appendBanner(legacy, banner(2)), `history\r\n${banner(2)}`);
+  const inVim = appendBanner('\x1b[?1049hvim', banner(1));
+  assert.equal(appendBanner(inVim, banner(2)), `\x1b[?1049hvim${LEAVE_ALT_SCREEN}${banner(2)}`);
 });
