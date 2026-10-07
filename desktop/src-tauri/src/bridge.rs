@@ -106,7 +106,9 @@ fn local_path(app: &AppHandle, webview: &Webview, raw: &str) -> Result<std::path
 }
 
 fn check_local(app: &AppHandle, webview: &Webview) -> Result<(), String> {
-    let local = app.state::<AppState>().local.port().map(|p| format!("http://127.0.0.1:{p}"));
+    // The port it was started on, not asked over the network: these run on
+    // the main thread, and a page that called here is being served anyway.
+    let local = app.state::<AppState>().local.recorded_port().map(|p| format!("http://127.0.0.1:{p}"));
     let url = webview.url().map_err(|e| e.to_string())?;
     if is_local_caller(webview.label(), &url, local.as_deref()) {
         Ok(())

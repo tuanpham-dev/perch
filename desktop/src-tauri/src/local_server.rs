@@ -80,6 +80,13 @@ impl LocalServer {
         Some((dir, info))
     }
 
+    /// The port this app's server was started on, while that process is
+    /// alive — without asking it anything over the network.
+    pub fn recorded_port(&self) -> Option<u16> {
+        let state = self.read_state()?;
+        self.is_ours(state.pid).then_some(state.port)
+    }
+
     /// The port it's answering on, if it is.
     pub fn port(&self) -> Option<u16> {
         let state = self.read_state()?;

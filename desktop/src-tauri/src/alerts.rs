@@ -44,7 +44,8 @@ pub fn sync(app: &AppHandle) {
     let state = app.state::<AppState>();
     let wanted: Vec<String> = state
         .servers
-        .list(state.local.port())
+        // Ids only: whether the local server answers is the listener's job.
+        .list(None)
         .into_iter()
         .filter(|s| s.notify)
         .map(|s| s.id)

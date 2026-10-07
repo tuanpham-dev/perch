@@ -12,7 +12,9 @@ use crate::{cli, windows, AppState};
 const TRAY_ID: &str = "perch";
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let menu = build_menu(app)?;
+    // Built first with the local server taken as stopped; refresh() finds
+    // out off the main thread, where a slow answer can't freeze the app.
+    let menu = build_menu(app, &Status::Stopped)?;
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().cloned().expect("app icon"))
         .tooltip("Perch")
@@ -21,35 +23,43 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .build(app)?;
     #[cfg(target_os = "macos")]
-    set_app_menu(app)?;
+    set_app_menu(app, &Status::Stopped)?;
+    refresh(app);
     Ok(())
 }
 
-/// Rebuilds the menus from the current state. Cheap; call it freely.
+/// Rebuilds the menus from the current state. Asking the local server how
+/// it is takes a network round trip, so that happens on a thread of its own
+/// and only the rebuild runs on the main thread. Call it freely.
 pub fn refresh(app: &AppHandle) {
-    let app2 = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        if let (Some(tray), Ok(menu)) = (app2.tray_by_id(TRAY_ID), build_menu(&app2)) {
-            let _ = tray.set_menu(Some(menu));
-        }
-        #[cfg(target_os = "macos")]
-        let _ = set_app_menu(&app2);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let status = app.state::<AppState>().local.status();
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let (Some(tray), Ok(menu)) = (app2.tray_by_id(TRAY_ID), build_menu(&app2, &status)) {
+                let _ = tray.set_menu(Some(menu));
+            }
+            #[cfg(target_os = "macos")]
+            let _ = set_app_menu(&app2, &status);
+        });
     });
 }
 
-fn local_status_line(app: &AppHandle) -> String {
-    match app.state::<AppState>().local.status() {
+fn local_status_line(status: &Status) -> String {
+    match status {
         Status::Running { port } => format!("Local server: running on :{port}"),
         Status::Missing => "Local server: not in this build".into(),
         _ => "Local server: stopped".into(),
     }
 }
 
-fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+fn build_menu(app: &AppHandle, status: &Status) -> tauri::Result<Menu<Wry>> {
     let state = app.state::<AppState>();
-    let running = matches!(state.local.status(), Status::Running { .. });
+    let running = matches!(status, Status::Running { .. });
     let mut servers = SubmenuBuilder::new(app, "Open Server");
-    for s in state.servers.list(state.local.port()) {
+    // Names and ids only: the local server's port doesn't matter here.
+    for s in state.servers.list(None) {
         servers = servers.item(&MenuItemBuilder::with_id(format!("open:{}", s.id), &s.name).build(app)?);
     }
     let local_toggle = if running {
@@ -63,7 +73,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         MenuItemBuilder::with_id("install-cli", "Install perch-desktop Command").build(app)?
     };
     MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id("status", local_status_line(app)).enabled(false).build(app)?)
+        .item(&MenuItemBuilder::with_id("status", local_status_line(status)).enabled(false).build(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id("launcher", "Open Launcher").build(app)?)
         .item(&servers.build()?)
@@ -78,10 +88,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 // macOS: the standard app menu (Edit carries copy and paste for the
 // webview), plus a Perch menu with the tray's items.
 #[cfg(target_os = "macos")]
-fn set_app_menu(app: &AppHandle) -> tauri::Result<()> {
+fn set_app_menu(app: &AppHandle, status: &Status) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
     let perch = SubmenuBuilder::new(app, "Server").build()?;
-    for item in build_menu(app)?.items()? {
+    for item in build_menu(app, status)?.items()? {
         if let Some(i) = item.as_menuitem() {
             if i.id().as_ref() == "quit" {
                 continue; // the app menu already has Quit
