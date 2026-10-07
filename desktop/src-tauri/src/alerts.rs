@@ -172,9 +172,12 @@ fn notify_data(frame: &str) -> Option<String> {
 }
 
 // The server window's cookies when it's open (saved for later), else the
-// ones saved the last time it was.
+// ones saved the last time it was. Saved with the origin they belong to: a
+// server's address can be edited, and one server's sign-in must never be
+// sent to another.
 async fn cookie_header(app: &AppHandle, id: &str, base: &Url) -> Option<String> {
     let saved = saved_cookie_path(id);
+    let origin = base.origin().ascii_serialization();
     if let Some(window) = app.get_webview_window(&windows::label_for(id)) {
         let base = base.clone();
         // Not on the main thread: on Windows that would deadlock.
@@ -190,17 +193,23 @@ async fn cookie_header(app: &AppHandle, id: &str, base: &Url) -> Option<String> 
                 .join("; ");
             if !header.is_empty() {
                 let _ = std::fs::create_dir_all(saved.parent().unwrap());
-                let _ = std::fs::write(&saved, &header);
+                let _ = std::fs::write(&saved, format!("{origin}\n{header}"));
                 return Some(header);
             }
         }
     }
-    std::fs::read_to_string(saved).ok().filter(|h| !h.is_empty())
+    saved_cookies_for(&std::fs::read_to_string(saved).ok()?, &origin)
+}
+
+fn saved_cookies_for(saved: &str, origin: &str) -> Option<String> {
+    let (saved_origin, header) = saved.split_once('\n')?;
+    (saved_origin == origin && !header.is_empty()).then(|| header.to_string())
 }
 
 fn saved_cookie_path(id: &str) -> PathBuf {
     paths::profile_dir(id).join("alert-cookies")
 }
+
 
 fn set_needs_sign_in(app: &AppHandle, id: &str, on: bool) {
     let state = app.state::<AppState>();
@@ -301,5 +310,14 @@ mod tests {
         assert_eq!(notify_data("data: {\"url\":\"https://x\"}\n\n"), None, "an open-url message");
         assert_eq!(notify_data("event: open-target\ndata: {}\n\n"), None);
         assert_eq!(notify_data(": ping\n\n"), None);
+    }
+
+    #[test]
+    fn uses_saved_cookies_only_for_their_own_origin() {
+        let saved = "https://a.example.com\nsid=1";
+        assert_eq!(saved_cookies_for(saved, "https://a.example.com").as_deref(), Some("sid=1"));
+        assert_eq!(saved_cookies_for(saved, "https://b.example.com"), None);
+        assert_eq!(saved_cookies_for("sid=1", "https://a.example.com"), None, "saved before origins were");
+        assert_eq!(saved_cookies_for("https://a.example.com\n", "https://a.example.com"), None);
     }
 }
