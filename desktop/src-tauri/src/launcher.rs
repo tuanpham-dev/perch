@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::local_server::Status;
 use crate::servers::{ServerEntry, LOCAL_ID};
-use crate::{alerts, tray, windows, AppState};
+use crate::{alerts, paths, tray, windows, AppState};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,9 +79,20 @@ pub fn update_server(
 #[tauri::command]
 pub fn remove_server(app: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
     state.servers.remove(&id)?;
-    if let Some(w) = app.get_webview_window(&windows::label_for(&id)) {
-        let _ = w.close();
+    // Its window and any tab popped out of it.
+    for (label, w) in app.webview_windows() {
+        if windows::server_id_of(&label) == Some(id.as_str()) {
+            let _ = w.destroy();
+        }
     }
+    // Its browser profile holds the server's sign-in cookies (and the copy
+    // alerts use): a removed server shouldn't stay signed in on disk. Once
+    // the windows' web processes have let go of it.
+    let profile = paths::profile_dir(&id);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let _ = std::fs::remove_dir_all(profile);
+    });
     changed(&app);
     Ok(())
 }
