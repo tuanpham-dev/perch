@@ -79,11 +79,25 @@ pub fn show_launcher(app: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
+    let (width, height) = fit_to_screen(app, 560.0, 480.0);
     let _ = WebviewWindowBuilder::new(app, LAUNCHER, WebviewUrl::App("index.html".into()))
         .title("Perch")
-        .inner_size(560.0, 480.0)
-        .min_inner_size(420.0, 320.0)
+        .inner_size(width, height)
+        .min_inner_size(420.0_f64.min(width), 320.0_f64.min(height))
         .build();
+}
+
+/// A window's first size (logical pixels), shrunk to fit the primary
+/// screen's work area - a 1280x800 window doesn't fit a small or 2x-scaled
+/// laptop screen. The window-state plugin restores the user's own size after
+/// that.
+fn fit_to_screen(app: &AppHandle, width: f64, height: f64) -> (f64, f64) {
+    let Some(monitor) = app.primary_monitor().ok().flatten() else { return (width, height) };
+    let area = monitor.work_area().size.to_logical::<f64>(monitor.scale_factor());
+    if area.width <= 0.0 || area.height <= 0.0 {
+        return (width, height);
+    }
+    (width.min(area.width * 0.9).floor(), height.min(area.height * 0.9).floor())
 }
 
 /// Tells the launcher something went wrong, and brings it up to say so.
@@ -195,10 +209,11 @@ fn build_server_window(app: &AppHandle, entry: &ServerEntry) -> tauri::Result<()
     let is_local = entry.kind == ServerKind::Local;
     add_capability(app, &entry.id, &origin, is_local);
 
+    let (width, height) = fit_to_screen(app, 1280.0, 800.0);
     let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url.clone()))
         .title(format!("{} - Perch", entry.name))
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(640.0, 400.0);
+        .inner_size(width, height)
+        .min_inner_size(640.0_f64.min(width), 400.0_f64.min(height));
     let builder = configure(app, builder, entry, &origin, is_local);
     builder.build()?;
     Ok(())
