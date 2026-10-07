@@ -39,6 +39,10 @@ export interface WindowControlsOverlayState {
 
 // One drawn window button's width.
 export const WINDOW_BUTTON_WIDTH = 46;
+// The desktop app's own title bar on Windows and Linux, where nothing else
+// dictates its height (the PWA's comes from the browser, macOS's from where
+// its traffic lights sit).
+const DESKTOP_TITLEBAR_HEIGHT = 31;
 
 // Not in every TS DOM lib yet.
 interface WindowControlsOverlay extends EventTarget {
@@ -75,7 +79,7 @@ function read(): WindowControlsOverlayState {
     const buttons = desktop.info.buttonLayout;
     const start = buttons.left.length * WINDOW_BUTTON_WIDTH;
     const end = buttons.right.length * WINDOW_BUTTON_WIDTH;
-    const rect = { x: start, y: 0, width: window.innerWidth - start - end, height: 33 };
+    const rect = { x: start, y: 0, width: window.innerWidth - start - end, height: DESKTOP_TITLEBAR_HEIGHT };
     return { visible: true, rect, emulated: null, focused, windowButtons: buttons };
   }
   if (EMULATED === "right") {
