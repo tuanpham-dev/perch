@@ -19,6 +19,7 @@ import type {
   TerminalEngineOptions,
   TerminalEngineSettings,
 } from "../../_shared/terminalEngineTypes";
+import { keepTextareaClear } from "../textareaInput.mjs";
 
 function toFontWeight(weight: TerminalEngineSettings["fontWeight"]): FontWeight {
   // "medium" maps to the numeric 500 weight — utils/fonts.ts registers the
@@ -326,6 +327,10 @@ export async function createXtermEngine(
     }, 0);
   };
   term.textarea?.addEventListener("compositionend", onCompositionEndCleanup);
+  // The same stale-value problem on WebKit's desktop input path, where an
+  // IME commit can re-send everything still in the textarea (see
+  // textareaInput.mjs).
+  const disposeTextareaClear = term.textarea ? keepTextareaClear(term.textarea) : () => {};
 
   // With the textarea kept empty, xterm's value-diff can no longer see
   // Android backspaces (keydown is 229; the delete arrives only as a
@@ -685,6 +690,7 @@ export async function createXtermEngine(
       term.textarea?.removeEventListener("compositionupdate", onCompositionUpdate);
       term.textarea?.removeEventListener("compositionend", onCompositionEndForPreview);
       term.textarea?.removeEventListener("compositionend", onCompositionEndCleanup);
+      disposeTextareaClear();
       term.textarea?.removeEventListener("beforeinput", onBeforeInput as EventListener);
       dataSub.dispose();
       oscHandlerDisposable.dispose();
