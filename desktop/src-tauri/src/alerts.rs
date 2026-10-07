@@ -264,7 +264,24 @@ pub fn show(app: &AppHandle, server_id: &str, title: &str, body: &str, window_id
     let app = app.clone();
     let server_id = server_id.to_string();
     let window_id = window_id.map(str::to_string);
+    let body = body.to_string();
     std::thread::spawn(move || {
+        // macOS: notify-rust can't tell a click from a dismissal; the library
+        // it uses underneath can, so a click opens the terminal that rang, as
+        // the Open action does on Linux. Blocks this thread until then.
+        #[cfg(target_os = "macos")]
+        {
+            let _ = notification;
+            let response = mac_notification_sys::Notification::new()
+                .title(&summary)
+                .message(&body)
+                .wait_for_click(true)
+                .send();
+            if matches!(response, Ok(mac_notification_sys::NotificationResponse::Click)) {
+                open_alert(&app, &server_id, window_id.as_deref());
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
         let Ok(handle) = notification.show() else { return };
         #[cfg(all(unix, not(target_os = "macos")))]
         handle.wait_for_action(|action| {
@@ -272,13 +289,14 @@ pub fn show(app: &AppHandle, server_id: &str, title: &str, body: &str, window_id
                 open_alert(&app, &server_id, window_id.as_deref());
             }
         });
-        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        #[cfg(windows)]
         {
-            let _ = (handle, &app, &server_id, &window_id);
+            let _ = (handle, &app, &server_id, &window_id, &body);
         }
     });
 }
 
+#[cfg(not(windows))]
 fn open_alert(app: &AppHandle, server_id: &str, window_id: Option<&str>) {
     let script = window_id.map(|id| {
         format!("window.__perchDesktop.focusTerminal({});", serde_json::to_string(id).unwrap())

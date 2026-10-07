@@ -2616,6 +2616,7 @@ dependencies = [
  "futures-util",
  "gtk",
  "libc",
+ "mac-notification-sys",
  "notify-rust",
  "reqwest 0.12.28",
  "serde",
