@@ -188,12 +188,15 @@ async fn cookie_header(app: &AppHandle, id: &str, base: &Url) -> Option<String> 
     let saved = saved_cookie_path(id);
     let origin = base.origin().ascii_serialization();
     if let Some(window) = app.get_webview_window(&windows::label_for(id)) {
-        let base = base.clone();
-        // Not on the main thread: on Windows that would deadlock.
-        let cookies = tauri::async_runtime::spawn_blocking(move || window.cookies_for_url(base))
+        // Every cookie of the window, matched to the server here: on macOS
+        // cookies_for_url finds none for a host-only cookie on 127.0.0.1
+        // (the sign-in cookie of a server reached by IP), while cookies()
+        // has it. Not on the main thread: on Windows that would deadlock.
+        let cookies = tauri::async_runtime::spawn_blocking(move || window.cookies())
             .await
             .ok()
-            .and_then(|r| r.ok());
+            .and_then(|r| r.ok())
+            .map(|all| all.into_iter().filter(|c| sent_to(base, c.domain(), c.path(), c.secure())).collect::<Vec<_>>());
         if let Some(cookies) = cookies {
             let header = cookies
                 .iter()
@@ -208,6 +211,24 @@ async fn cookie_header(app: &AppHandle, id: &str, base: &Url) -> Option<String> 
         }
     }
     saved_cookies_for(&std::fs::read_to_string(saved).ok()?, &origin)
+}
+
+/// Whether a browser would send a cookie with this domain, path and Secure
+/// flag to `url` (RFC 6265 domain and path matching).
+fn sent_to(url: &Url, domain: Option<&str>, path: Option<&str>, secure: Option<bool>) -> bool {
+    let Some(host) = url.host_str() else { return false };
+    let domain_ok = match domain.map(|d| d.trim_start_matches('.').to_ascii_lowercase()) {
+        None => true,
+        Some(d) => host.eq_ignore_ascii_case(&d) || host.to_ascii_lowercase().ends_with(&format!(".{d}")),
+    };
+    let path_ok = match path {
+        None | Some("") | Some("/") => true,
+        Some(p) => {
+            let req = url.path();
+            req == p || (req.starts_with(p) && (p.ends_with('/') || req[p.len()..].starts_with('/')))
+        }
+    };
+    domain_ok && path_ok && (secure != Some(true) || url.scheme() == "https")
 }
 
 fn saved_cookies_for(saved: &str, origin: &str) -> Option<String> {
@@ -349,6 +370,19 @@ mod tests {
         assert_eq!(next_frame(&mut buffer).as_deref(), Some("event: notify\ndata: {\"title\":\"a…\"}\n\n"));
         assert_eq!(next_frame(&mut buffer).as_deref(), Some(": ping\n\n"));
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn matches_cookies_to_the_server_like_a_browser() {
+        let ip: Url = "http://127.0.0.1:3205/".parse().unwrap();
+        assert!(sent_to(&ip, Some("127.0.0.1"), Some("/"), Some(false)), "host-only cookie on an IP");
+        assert!(!sent_to(&ip, Some("127.0.0.1"), Some("/"), Some(true)), "Secure over http");
+        let host: Url = "https://perch.example.com/".parse().unwrap();
+        assert!(sent_to(&host, Some(".example.com"), None, Some(true)));
+        assert!(sent_to(&host, Some("perch.example.com"), Some("/"), None));
+        assert!(!sent_to(&host, Some("other.com"), Some("/"), None));
+        assert!(!sent_to(&host, Some("ple.com"), Some("/"), None), "a suffix that isn't a label");
+        assert!(!sent_to(&host, Some("example.com"), Some("/api"), None), "path below the page");
     }
 
     #[test]
