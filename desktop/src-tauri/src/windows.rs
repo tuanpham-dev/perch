@@ -319,7 +319,6 @@ fn configure<'a>(
                 }
                 PageLoadEvent::Finished => {
                     state.loaded.lock().unwrap().insert(label.clone());
-                    #[cfg(not(target_os = "macos"))]
                     frame_if_not_app(webview.app_handle(), &label);
                     let pending = state.pending_scripts.lock().unwrap().remove(&label).unwrap_or_default();
                     for script in pending {
@@ -335,8 +334,9 @@ fn configure<'a>(
 
 // Perch's page reports its title bar choice (window_set_decorations) as
 // soon as it mounts; give it a few seconds, then give a page that didn't
-// the OS's title bar.
-#[cfg(not(target_os = "macos"))]
+// the OS's title bar. On macOS the window keeps its traffic lights either
+// way, but under the overlay title bar such a page draws beneath them and
+// nothing can drag the window, so it gets the standard bar there too.
 fn frame_if_not_app(app: &AppHandle, label: &str) {
     let state = app.state::<AppState>();
     let load = state.page_loads.lock().unwrap().get(label).copied();
@@ -351,6 +351,9 @@ fn frame_if_not_app(app: &AppHandle, label: &str) {
             return;
         }
         if let Some(w) = app.get_webview_window(&label) {
+            #[cfg(target_os = "macos")]
+            let _ = w.set_title_bar_style(tauri::TitleBarStyle::Visible);
+            #[cfg(not(target_os = "macos"))]
             let _ = w.set_decorations(true);
         }
     });
