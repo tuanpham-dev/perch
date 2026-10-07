@@ -28,6 +28,7 @@
     "active": true,
     "targets": [
       "deb",
+      "rpm",
       "appimage",
       "dmg",
       "nsis"
@@ -49,6 +50,12 @@
         "depends": [
           "gstreamer1.0-libav",
           "gstreamer1.0-plugins-good"
+        ],
+        "desktopTemplate": "perch.desktop"
+      },
+      "rpm": {
+        "depends": [
+          "gstreamer1-plugins-good"
         ],
         "desktopTemplate": "perch.desktop"
       }

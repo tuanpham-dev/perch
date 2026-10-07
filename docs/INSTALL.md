@@ -37,13 +37,13 @@ Download it from the [Releases page](https://github.com/tuanpham-dev/perch/relea
 |---|---|
 | macOS (Apple silicon, Intel) | `.dmg` |
 | Windows | `-setup.exe` |
-| Linux (x64, arm64) | `.AppImage` or `.deb` |
+| Linux (x64, arm64) | `.AppImage`, `.deb` (Debian, Ubuntu) or `.rpm` (Fedora) |
 
 The builds aren't signed yet, so each OS warns the first time:
 
 - **macOS** says the app "can't be opened" or is "damaged". Right-click Perch in Applications and choose **Open**, or run `xattr -dr com.apple.quarantine /Applications/Perch.app` once.
 - **Windows** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**.
-- **Linux**: make the AppImage executable (`chmod +x Perch_*.AppImage`) and run it, or install the `.deb` with `sudo apt install ./perch_*.deb`.
+- **Linux**: make the AppImage executable (`chmod +x Perch_*.AppImage`) and run it, or install the package: `sudo apt install ./Perch_*.deb` on Debian and Ubuntu, `sudo dnf install ./Perch-*.rpm` on Fedora.
 
 ### Servers
 
@@ -73,7 +73,7 @@ On Linux and macOS it goes in `~/.local/bin`; the app tells you if that folder i
 
 ### Known limitations
 
-- **Linux:** H.264 video in the media viewer needs `gstreamer1.0-libav` (the `.deb` installs it; install it yourself for the AppImage). Dragging files in from a file manager hasn't been confirmed yet. Typing through an input method (IME) needs `GTK_IM_MODULE` set the way your desktop normally sets it.
+- **Linux:** H.264 video in the media viewer needs `gstreamer1.0-libav` (the `.deb` installs it; install it yourself for the AppImage). On Fedora it comes from RPM Fusion (`gstreamer1-libav`), so the `.rpm` can't install it for you. Dragging files in from a file manager hasn't been confirmed yet. Typing through an input method (IME) needs `GTK_IM_MODULE` set the way your desktop normally sets it.
 - **macOS and Windows** builds haven't been tested on real machines yet. Clicking a notification may only bring the app forward there, without switching to the terminal it's about.
 
 ### The `perch` command
