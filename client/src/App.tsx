@@ -1470,7 +1470,19 @@ export default function App() {
     if (IS_DETACHED) return;
     installDesktopHooks({
       openPath: (path, line, action) => {
-        api.resolveOpenTarget(path, line, action).then((payload) => openTargetRef.current(payload), showError);
+        // A window the app just opened may not have its session list yet,
+        // and opening a project before it would miss the live session that
+        // already holds it: wait for the list (as the ?folder= link below
+        // does), up to ten seconds.
+        const deadline = Date.now() + 10_000;
+        const attempt = () => {
+          if (!sessionsLoadedRef.current && Date.now() < deadline) {
+            setTimeout(attempt, 100);
+            return;
+          }
+          api.resolveOpenTarget(path, line, action).then((payload) => openTargetRef.current(payload), showError);
+        };
+        attempt();
       },
       focusTerminal: (windowId) => {
         // A window the app just opened may not have its session list yet:
