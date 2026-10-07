@@ -227,6 +227,20 @@ pub fn show(app: &AppHandle, server_id: &str, title: &str, body: &str, window_id
     let summary = if title.eq_ignore_ascii_case("perch") { server_name } else { format!("{server_name}: {title}") };
     let mut notification = notify_rust::Notification::new();
     notification.summary(&summary).body(body).appname("Perch");
+    // Linux: the icon by file path, since an AppImage or a development
+    // build has none in the icon theme, plus the installed desktop entry
+    // (the .deb's and .rpm's Perch.desktop) for desktops that group by app.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(icon) = icon_path() {
+            notification.icon(&icon.to_string_lossy());
+        }
+        notification.hint(notify_rust::Hint::DesktopEntry("Perch".into()));
+    }
+    // Windows: notify-rust otherwise posts as PowerShell, with its icon. The
+    // installer's Start menu shortcut carries this id.
+    #[cfg(windows)]
+    notification.app_id(crate::paths::IDENTIFIER);
     #[cfg(all(unix, not(target_os = "macos")))]
     notification.action("default", "Open");
 
@@ -253,6 +267,27 @@ fn open_alert(app: &AppHandle, server_id: &str, window_id: Option<&str>) {
         format!("window.__perchDesktop.focusTerminal({});", serde_json::to_string(id).unwrap())
     });
     windows::open_server_then(app, server_id, script);
+}
+
+
+// The app icon, written once to the data dir for notifications to point at.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn icon_path() -> Option<PathBuf> {
+    static ICON: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    ICON.get_or_init(|| {
+        let path = paths::data_dir().join("notification-icon.png");
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        std::fs::write(&path, include_bytes!("../icons/128x128.png")).ok()?;
+        Some(path)
+    })
+    .clone()
+}
+
+/// macOS shows a notification with the icon of the app it says it's from;
+/// without this, notify-rust says Finder. Call once at startup.
+pub fn init() {
+    #[cfg(target_os = "macos")]
+    let _ = notify_rust::set_application(crate::paths::IDENTIFIER);
 }
 
 #[cfg(test)]
