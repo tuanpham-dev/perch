@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { vimCommand } from "./editor.js";
+import { escapeForVimCmdline, vimCommand } from "./editor.js";
 
 const installed = (...bins: string[]) => async (bin: string) => bins.includes(bin);
 
@@ -18,5 +18,15 @@ describe("vimCommand", () => {
 
   it("stays nvim on Windows, which has no vi", async () => {
     expect(await vimCommand(installed(), "win32")).toBe("nvim");
+  });
+});
+
+describe("escapeForVimCmdline", () => {
+  it("escapes what vim would expand or split, as fnameescape() does", () => {
+    expect(escapeForVimCmdline("/w/cost$HOME.txt")).toBe("/w/cost\\$HOME.txt");
+    expect(escapeForVimCmdline("/w/b*c?[x]{y}.txt")).toBe("/w/b\\*c\\?\\[x]\\{y}.txt");
+    expect(escapeForVimCmdline("/w/my file #1 `x` 'q'.txt")).toBe("/w/my\\ file\\ \\#1\\ \\`x\\`\\ \\'q\\'.txt");
+    expect(escapeForVimCmdline("+cmd")).toBe("\\+cmd");
+    expect(escapeForVimCmdline("/plain/path.ts")).toBe("/plain/path.ts");
   });
 });

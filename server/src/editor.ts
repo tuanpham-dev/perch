@@ -140,10 +140,13 @@ async function nvimRemoteOpen(socket: string, filePath: string, line?: number): 
   if (line) await nvimRemote(socket, ["--remote-send", `<Esc>:${line}<CR>`]);
 }
 
-// Backslash-escapes characters vim's cmdline treats specially, so a path with
-// spaces or one of these symbols is one filename argument to ":tabe".
-function escapeForVimCmdline(p: string): string {
-  return p.replace(/([ \\%#|"!<])/g, "\\$1");
+// Backslash-escapes what vim's cmdline treats specially in a file name, so a
+// path is one literal filename argument to ":tabe" - the set vim's own
+// fnameescape() escapes: whitespace, wildcards (* ? [ {), $ and backticks
+// (expansion), and %, #, |, ", !, <, plus a leading + or >. Short of it,
+// "cost$HOME.txt" opened /Users/me's "cost/Users/me.txt" instead.
+export function escapeForVimCmdline(p: string): string {
+  return p.replace(/[ \t\n*?[{`$\\%#'"|!<]/g, "\\$&").replace(/^[+>]/, "\\$&");
 }
 
 // Quoting for a command typed into the window's shell: POSIX single quotes, or
