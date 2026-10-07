@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -379,6 +379,41 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
 
   const { meta: frontmatter, body } = useMemo(() => splitFrontmatter(content ?? ""), [content]);
 
+  // Kept across renders: react-markdown treats each entry as a component
+  // type, so a fresh object every render remounted every link, image and
+  // code block - dropping a text selection inside them and re-requesting
+  // each image (a broken one in a loop) whenever the view re-rendered.
+  const components = useMemo<Components>(
+    () => ({
+      img: ({ src, ...props }) => (
+        <img {...props} src={src ? resolveImageSrc(filePath, src) : src} />
+      ),
+      // Three link kinds: in-document fragments keep the existing
+      // clobber-prefix scroll; external URLs open a new browser
+      // tab; everything else is a file path opened in-app.
+      a: ({ href, ...props }) => {
+        if (!href || href.startsWith("#")) {
+          return <a {...props} href={href ? resolveHref(href) : href} />;
+        }
+        if (isExternalHref(href)) {
+          return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
+        }
+        return (
+          <a
+            {...props}
+            href={href}
+            onClick={(e) => {
+              e.preventDefault();
+              openLinkTarget(href);
+            }}
+          />
+        );
+      },
+      pre: (props) => <CodeBlock {...props} />,
+    }),
+    [filePath, openLinkTarget],
+  );
+
   const controls = (
     <>
       <button className="icon-button" title="Refresh" onClick={load}>
@@ -409,33 +444,7 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw, rehypeSlug, rehypeSanitizePlugin, rehypeHighlightPlugin]}
-              components={{
-                img: ({ src, ...props }) => (
-                  <img {...props} src={src ? resolveImageSrc(filePath, src) : src} />
-                ),
-                // Three link kinds: in-document fragments keep the existing
-                // clobber-prefix scroll; external URLs open a new browser
-                // tab; everything else is a file path opened in-app.
-                a: ({ href, ...props }) => {
-                  if (!href || href.startsWith("#")) {
-                    return <a {...props} href={href ? resolveHref(href) : href} />;
-                  }
-                  if (isExternalHref(href)) {
-                    return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
-                  }
-                  return (
-                    <a
-                      {...props}
-                      href={href}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        openLinkTarget(href);
-                      }}
-                    />
-                  );
-                },
-                pre: (props) => <CodeBlock {...props} />,
-              }}
+              components={components}
             >
               {body}
             </ReactMarkdown>
