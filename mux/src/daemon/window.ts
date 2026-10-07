@@ -292,12 +292,16 @@ export class Window {
     this.scrollbackDirty = true;
   }
 
-  /** Escape-sequence replay that reconstructs this window's screen and scrollback. */
-  serializeState(scrollbackLines: number): string {
+  /** Escape-sequence replay that reconstructs this window's screen and scrollback.
+   *  `forRestore` (the default, for snapshots) ends on the normal buffer. */
+  serializeState(scrollbackLines: number, forRestore = true): string {
     let out = this.#serialize.serialize({ scrollback: scrollbackLines });
-    // Persisted/replayed state must land on the normal buffer: a restored vim
-    // frame would swallow keystrokes bound for the fresh shell beneath it.
-    if (this.#term.buffer.active.type === 'alternate') out += '\x1b[?1049l';
+    // Persisted state must land on the normal buffer: a restored vim frame
+    // would swallow keystrokes bound for the fresh shell beneath it. A live
+    // viewer (re)attaching to a window whose vim is still running must not:
+    // leaving the alternate screen there hid vim behind the shell's screen
+    // while it went on taking keystrokes, and left its frame behind on quit.
+    if (forRestore && this.#term.buffer.active.type === 'alternate') out += '\x1b[?1049l';
     return out;
   }
 
@@ -323,7 +327,7 @@ export class Window {
     if (platform.rawReplaySafe && raw.length > 0 && !this.#raw.onAltScreen) {
       return Buffer.concat([Buffer.from(RESET_PREFIX, 'latin1'), raw]);
     }
-    return Buffer.from(refreshPrefix + this.serializeState(scrollbackLines), 'utf8');
+    return Buffer.from(refreshPrefix + this.serializeState(scrollbackLines, false), 'utf8');
   }
 
   /** Text of the viewport plus the last `extraScrollback` history lines:

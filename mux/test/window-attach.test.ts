@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { killDaemons as killTestDaemons } from './procs.ts';
+import xtermPkg from '@xterm/headless';
 import {
   FRAME_CONTROL, FRAME_OUTPUT, FRAME_INPUT,
   FrameReader, encodeControl, encodeFrame,
@@ -125,6 +126,33 @@ test('session.attach still follows window switches (regression)', async () => {
     await sleep(600);
     assert.match(s.output, /SWITCHED_VIEW/, 'session client follows the switch and reaches window 1');
     s.close();
+  } finally {
+    killDaemons(env);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a viewer attaching while a full-screen program runs sees that program, not the shell', async () => {
+  const { env, dir } = makeEnv();
+  try {
+    sp(env, 'new', 'fullscreen');
+    await sleep(500);
+    const path = socketPathOf(env);
+    const a = new Client(path); await a.ready(); a.attachWindow('fullscreen:0');
+    await sleep(400);
+    // What vim does: switch to the alternate screen, draw, and keep running.
+    a.type("printf '\\033[?1049hFULLSCREEN_FRAME'; sleep 30\n");
+    await sleep(900);
+
+    // A second viewer - a reloaded page - gets the replay.
+    const b = new Client(path); await b.ready(); b.attachWindow('fullscreen:0');
+    await sleep(700);
+    const term = new xtermPkg.Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    await new Promise<void>((done) => term.write(b.output, done));
+    const screen = Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(i)?.translateToString(true) ?? '').join('\n');
+    assert.equal(term.buffer.active.type, 'alternate', 'the replay leaves the viewer on the alternate screen');
+    assert.match(screen, /FULLSCREEN_FRAME/, 'with the program\'s frame on it');
+    a.close(); b.close();
   } finally {
     killDaemons(env);
     rmSync(dir, { recursive: true, force: true });
