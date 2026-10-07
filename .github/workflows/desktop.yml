@@ -5,11 +5,11 @@
 #   Rust tests on Linux and a compile check on macOS and Windows - the
 #   target_os-gated code there can't be checked on a Linux machine (the
 #   -sys crates need each platform's own C compiler).
-# - build: every platform's packages. A desktop-v* tag attaches them to a
-#   draft GitHub Release; a manual run or a push to a desktop/* or
-#   feature/desktop* branch uploads them as this run's artifacts. Each
-#   platform builds on its own runner, so the bundled server's native module
-#   (node-pty) is compiled for exactly the Node it ships with.
+# - build: every platform's packages, only on a desktop-v* tag (attached to
+#   a draft GitHub Release) or a manual run (uploaded as the run's
+#   artifacts) - never on an ordinary push. Each platform builds on its own
+#   runner, so the bundled server's native module (node-pty) is compiled for
+#   exactly the Node it ships with.
 name: Desktop app
 
 on:
@@ -104,7 +104,7 @@ jobs:
   build:
     name: Build (${{ matrix.name }})
     needs: check
-    if: startsWith(github.ref, 'refs/tags/desktop-v') || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/desktop/') || startsWith(github.ref, 'refs/heads/feature/desktop')
+    if: startsWith(github.ref, 'refs/tags/desktop-v') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     strategy:
@@ -171,7 +171,7 @@ jobs:
           releaseDraft: true
           prerelease: true
 
-      - name: Build only (branch or manual run)
+      - name: Build only (manual run)
         if: "!startsWith(github.ref, 'refs/tags/desktop-v')"
         uses: tauri-apps/tauri-action@v0
         with:
