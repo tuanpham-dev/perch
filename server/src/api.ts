@@ -1338,8 +1338,10 @@ api.get("/download", async (req, res) => {
   try {
     if (await isDirectory(targetPath)) {
       const name = path.basename(targetPath);
-      res.setHeader("content-type", "application/zip");
-      res.setHeader("content-disposition", `attachment; filename="${name}.zip"`);
+      // res.attachment encodes the name properly (filename*=UTF-8''...):
+      // written by hand, a quote broke the header and a name like 文件夹
+      // was refused outright as an invalid header value.
+      res.attachment(`${name}.zip`);
       // Streamed as it's built, entries rooted at <name>/. A download the
       // browser abandons stops the walk.
       const abort = new AbortController();
@@ -1365,7 +1367,12 @@ api.get("/download", async (req, res) => {
     // dotfiles: "allow" because send's default 404s any path whose basename
     // starts with a dot, which made .zshrc or .gitignore unopenable in every
     // viewer and editor that reads through this route.
+    // The file's name goes along as an inline disposition, which a viewer
+    // still renders - without it Chrome's PDF viewer titled every PDF
+    // "download" and saved it as download.pdf.
     if (req.query.inline === "1") {
+      res.attachment(path.basename(targetPath));
+      res.setHeader("content-disposition", String(res.getHeader("content-disposition")).replace(/^attachment/, "inline"));
       res.sendFile(targetPath, { dotfiles: "allow" });
       return;
     }
