@@ -138,15 +138,16 @@ async fn stream_once(app: &AppHandle, client: &reqwest::Client, id: &str, genera
     }
     set_needs_sign_in(app, id, false);
     let mut body = response.bytes_stream();
-    let mut buffer = String::new();
+    // Raw bytes until a frame is complete: a chunk can end inside a
+    // multi-byte character ("…" in a command-finished alert).
+    let mut buffer: Vec<u8> = Vec::new();
     while let Some(chunk) = body.next().await {
         if !current(app, id, generation) {
             return Ok(true);
         }
         let Ok(chunk) = chunk else { return Ok(true) };
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(end) = buffer.find("\n\n") {
-            let frame: String = buffer.drain(..end + 2).collect();
+        buffer.extend_from_slice(&chunk);
+        while let Some(frame) = next_frame(&mut buffer) {
             if let Some(data) = notify_data(&frame) {
                 if let Ok(alert) = serde_json::from_str::<AlertPayload>(&data) {
                     show(app, id, &alert.title, &alert.body, alert.window_id.as_deref());
@@ -155,6 +156,13 @@ async fn stream_once(app: &AppHandle, client: &reqwest::Client, id: &str, genera
         }
     }
     Ok(true)
+}
+
+/// Takes the first complete SSE frame (ending in a blank line) off `buffer`.
+fn next_frame(buffer: &mut Vec<u8>) -> Option<String> {
+    let end = buffer.windows(2).position(|w| w == b"\n\n")? + 2;
+    let frame: Vec<u8> = buffer.drain(..end).collect();
+    Some(String::from_utf8_lossy(&frame).into_owned())
 }
 
 /// The data of a `notify` event in one SSE frame, if it is one.
@@ -310,6 +318,18 @@ mod tests {
         assert_eq!(notify_data("data: {\"url\":\"https://x\"}\n\n"), None, "an open-url message");
         assert_eq!(notify_data("event: open-target\ndata: {}\n\n"), None);
         assert_eq!(notify_data(": ping\n\n"), None);
+    }
+
+    #[test]
+    fn splits_frames_across_chunks_without_breaking_characters() {
+        let stream = "event: notify\ndata: {\"title\":\"a…\"}\n\n: ping\n\n".as_bytes();
+        let split = stream.iter().position(|&b| b == 0xE2).unwrap() + 1;
+        let mut buffer = stream[..split].to_vec();
+        assert_eq!(next_frame(&mut buffer), None);
+        buffer.extend_from_slice(&stream[split..]);
+        assert_eq!(next_frame(&mut buffer).as_deref(), Some("event: notify\ndata: {\"title\":\"a…\"}\n\n"));
+        assert_eq!(next_frame(&mut buffer).as_deref(), Some(": ping\n\n"));
+        assert!(buffer.is_empty());
     }
 
     #[test]
