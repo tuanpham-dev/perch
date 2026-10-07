@@ -1,7 +1,8 @@
 // resolveOpenTarget: what `perch open` and the desktop app's resolve route
 // both turn a raw path into.
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { parseOpenTargetParams, resolveOpenTarget } from "./openTarget.js";
@@ -61,6 +62,21 @@ describe("resolveOpenTarget", () => {
 
   it("expands ~", async () => {
     const result = await resolveOpenTarget({ path: "~" });
-    expect(result).toMatchObject({ kind: "dir", path: shortenHome(await realpath(homedir())) });
+    expect(result).toMatchObject({ kind: "dir", path: shortenHome(homedir()) });
+  });
+
+  it.skipIf(process.platform === "win32")("keeps a path through a symlink as written, repo root included", async () => {
+    const repo = path.join(root, "repo");
+    await mkdir(path.join(repo, "lib"), { recursive: true });
+    await writeFile(path.join(repo, "lib", "a.ts"), "");
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    const link = path.join(root, "link");
+    await symlink(repo, link);
+    expect(await resolveOpenTarget({ path: path.join(link, "lib", "..", "lib", "a.ts") })).toEqual({
+      kind: "file",
+      path: shortenHome(path.join(link, "lib", "a.ts")),
+      projectCwd: shortenHome(link),
+    });
+    expect(await resolveOpenTarget({ path: link })).toMatchObject({ kind: "dir", path: shortenHome(link) });
   });
 });

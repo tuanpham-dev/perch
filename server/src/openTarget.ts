@@ -32,6 +32,21 @@ export function parseOpenTargetParams(body: Record<string, unknown> | undefined)
 }
 
 /**
+ * The repository `dir` is in, as an ancestor of `dir` the way it was written.
+ * git answers with symlinks resolved, so the ancestor whose real path is
+ * git's answer is the one returned; git's own answer only when none is.
+ */
+async function repoRootAsWritten(dir: string): Promise<string | null> {
+  const root = await getGitRoot(dir);
+  if (!root) return null;
+  const real = await realpath(root).catch(() => root);
+  for (let at = dir; ; at = path.dirname(at)) {
+    if ((await realpath(at).catch(() => null)) === real) return at;
+    if (path.dirname(at) === at) return root;
+  }
+}
+
+/**
  * The payload a client's open-target handler takes, or null when the path
  * doesn't exist. Like `perch open`, a trailing ":N" is a line number only
  * when the literal path doesn't exist, so a filename with a colon in it still
@@ -46,13 +61,13 @@ export async function resolveOpenTarget(params: OpenTargetParams): Promise<OpenT
     target = m[1]!;
     line ??= Number(m[2]);
   }
-  try {
-    target = await realpath(target);
-  } catch {
-    return null;
-  }
+  // Tidied (".", "..", a relative path) but not resolved through symlinks:
+  // a project opened as ~/code/app, where ~/code is a symlink, must match
+  // the same ~/code/app here, or opening one of its files would open the
+  // project a second time under its real path.
+  target = path.resolve(target);
   const dir = await isDirectory(target);
-  const projectCwd = dir ? target : ((await getGitRoot(path.dirname(target))) ?? path.dirname(target));
+  const projectCwd = dir ? target : ((await repoRootAsWritten(path.dirname(target))) ?? path.dirname(target));
   return {
     kind: dir ? "dir" : "file",
     path: shortenHome(target),
