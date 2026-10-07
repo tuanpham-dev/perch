@@ -395,6 +395,15 @@ void listen("servers-changed", () => {
   void refresh();
 });
 
+// The timer below skips a hidden launcher (WebKit also counts one covered
+// by other windows as hidden), so it would come back showing what was true
+// when it was last seen - Local "Stopped", a window that has since opened
+// still offered as "Open". It catches up as soon as it's shown.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void refresh();
+});
+window.addEventListener("focus", () => void refresh());
+
 // While the launcher is visible, look for an installed Perch and recheck
 // the remotes now and then.
 setInterval(() => {
