@@ -25,9 +25,12 @@ import { configDir } from "./configDir.js";
 // openUrl.ts's shim, accepted in the plan.
 export const shellIntegrationPath = path.join(configDir, "shell-integration.sh");
 
-function shortHome(p: string): string {
-  const home = homedir();
-  return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+// A path as a quoted shell word, written relative to $HOME when it's under
+// it. Quoted because the desktop app's config dir on macOS is under
+// "~/Library/Application Support", and an unquoted space splits the test.
+export function shellQuotedPath(p: string, home = homedir()): string {
+  const escape = (s: string) => s.replace(/["$`\\]/g, "\\$&");
+  return p.startsWith(home + path.sep) ? `"$HOME${escape(p.slice(home.length))}"` : `"${escape(p)}"`;
 }
 
 export const powershellIntegrationPath = path.join(configDir, "shell-integration.ps1");
@@ -38,7 +41,7 @@ export const powershellIntegrationPath = path.join(configDir, "shell-integration
 export const zshDotDir = path.join(configDir, "zsh");
 export const bashInitPath = path.join(configDir, "bash-init.sh");
 
-const posixSourceLine = `[ -f ${shortHome(shellIntegrationPath)} ] && . ${shortHome(shellIntegrationPath)}`;
+const posixSourceLine = `[ -f ${shellQuotedPath(shellIntegrationPath)} ] && . ${shellQuotedPath(shellIntegrationPath)}`;
 const powershellSourceLine = `if (Test-Path '${powershellIntegrationPath}') { . '${powershellIntegrationPath}' }`;
 
 // The line users add, and where — surfaced by the Settings card and the

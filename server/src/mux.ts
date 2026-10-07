@@ -35,12 +35,20 @@ function daemonEnv(): NodeJS.ProcessEnv {
 // wrappers exist — zsh pointed at an empty ZDOTDIR would skip the user's rc
 // files entirely.
 export function terminalEnv(port: number): Record<string, string> {
-  const env: Record<string, string> = { BROWSER: openShimPath, PERCH_PORT: String(port) };
+  const env: Record<string, string> = { BROWSER: browserVar(openShimPath), PERCH_PORT: String(port) };
   if (process.platform !== "win32") {
     env.PATH = withShimsFirst(process.env.PATH);
     Object.assign(env, zshEnv(process.env.ZDOTDIR, zshDotDir, existsSync(path.join(zshDotDir, ".zshrc"))));
   }
   return env;
+}
+
+// Tools split $BROWSER into words (gh, Python's webbrowser), so a shim path
+// with a space in it — the desktop app's config dir on macOS is under
+// "~/Library/Application Support" — is named by its bare name instead,
+// which resolves through the shim folder at the front of PATH.
+export function browserVar(shimPath: string, platform: NodeJS.Platform = process.platform): string {
+  return platform !== "win32" && /\s/.test(shimPath) ? path.basename(shimPath) : shimPath;
 }
 
 export function zshEnv(userZdotdir: string | undefined, wrapperDir: string, wrappersExist: boolean): Record<string, string> {
