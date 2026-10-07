@@ -36,6 +36,12 @@ pub struct AppState {
     // notification clicks).
     pub pending_scripts: Mutex<HashMap<String, Vec<String>>>,
     pub child_counter: AtomicU32,
+    // Per window: how many pages it has started loading, and whether the
+    // current one is Perch's app (it says how it wants the title bar drawn).
+    // A page that never does - a sign-in page, an error page - gets the OS
+    // title bar back, or the frameless window would have no way to close.
+    pub page_loads: Mutex<HashMap<String, u64>>,
+    pub app_pages: Mutex<HashSet<String>>,
     // The desktop's window button layout, GTK's gtk-decoration-layout
     // ("close,minimize,maximize:" puts them on the left). Read on the main
     // thread at startup and kept current (windows.rs).
@@ -72,6 +78,8 @@ pub fn run() {
         quitting: AtomicBool::new(false),
         loaded: Mutex::new(HashSet::new()),
         pending_scripts: Mutex::new(HashMap::new()),
+        page_loads: Mutex::new(HashMap::new()),
+        app_pages: Mutex::new(HashSet::new()),
         child_counter: AtomicU32::new(1),
         button_layout: Mutex::new(windows::DEFAULT_BUTTON_LAYOUT.to_string()),
     };

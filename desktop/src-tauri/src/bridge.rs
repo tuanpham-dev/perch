@@ -39,7 +39,8 @@ pub fn window_start_dragging(window: WebviewWindow) -> Result<(), String> {
 /// Perch's "Use custom title bar" setting: off gives the window back the
 /// OS's own title bar.
 #[tauri::command]
-pub fn window_set_decorations(window: WebviewWindow, on: bool) -> Result<(), String> {
+pub fn window_set_decorations(app: AppHandle, window: WebviewWindow, on: bool) -> Result<(), String> {
+    app.state::<AppState>().app_pages.lock().unwrap().insert(window.label().to_string());
     #[cfg(target_os = "macos")]
     {
         let style = if on { tauri::TitleBarStyle::Visible } else { tauri::TitleBarStyle::Overlay };

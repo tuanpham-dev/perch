@@ -243,9 +243,13 @@ fn configure<'a>(
             match payload.event() {
                 PageLoadEvent::Started => {
                     state.loaded.lock().unwrap().remove(&label);
+                    state.app_pages.lock().unwrap().remove(&label);
+                    *state.page_loads.lock().unwrap().entry(label.clone()).or_default() += 1;
                 }
                 PageLoadEvent::Finished => {
                     state.loaded.lock().unwrap().insert(label.clone());
+                    #[cfg(not(target_os = "macos"))]
+                    frame_if_not_app(webview.app_handle(), &label);
                     let pending = state.pending_scripts.lock().unwrap().remove(&label).unwrap_or_default();
                     for script in pending {
                         let _ = webview.eval(wait_for_hooks(&script));
@@ -256,6 +260,29 @@ fn configure<'a>(
                 }
             }
         })
+}
+
+// Perch's page reports its title bar choice (window_set_decorations) as
+// soon as it mounts; give it a few seconds, then give a page that didn't
+// the OS's title bar.
+#[cfg(not(target_os = "macos"))]
+fn frame_if_not_app(app: &AppHandle, label: &str) {
+    let state = app.state::<AppState>();
+    let load = state.page_loads.lock().unwrap().get(label).copied();
+    let app = app.clone();
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        let state = app.state::<AppState>();
+        if state.page_loads.lock().unwrap().get(&label).copied() != load
+            || state.app_pages.lock().unwrap().contains(&label)
+        {
+            return;
+        }
+        if let Some(w) = app.get_webview_window(&label) {
+            let _ = w.set_decorations(true);
+        }
+    });
 }
 
 /// Runs `script` in a server window once its page has loaded.
