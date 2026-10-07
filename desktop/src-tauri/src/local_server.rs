@@ -170,10 +170,14 @@ impl LocalServer {
             .env("PERCH_STATE_DIR", &state_dir)
             .env("PERCH_LAUNCHER", "desktop");
         detach(&mut cmd);
-        let child = cmd.spawn().map_err(|e| fail(format!("Couldn't start the bundled server: {e}")))?;
+        let mut child = cmd.spawn().map_err(|e| fail(format!("Couldn't start the bundled server: {e}")))?;
         let pid = child.id();
-        // Not waited on: it runs on after the app quits.
-        drop(child);
+        // It runs on after the app quits; while the app is up, reap it when
+        // it exits (Stop, a crash), or it lingers as a zombie that
+        // pid_alive() still counts as running.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
         self.write_state(&StateFile { pid, port, commit: bundle.commit.clone() })
             .map_err(fail)?;
 
