@@ -105,25 +105,45 @@ pub fn open_server_then(app: &AppHandle, id: &str, script: Option<String>) {
     let id = id.to_string();
     std::thread::spawn(move || {
         let label = label_for(&id);
-        if let Some(w) = app.get_webview_window(&label) {
-            focus(&w);
-            if let Some(script) = script {
-                eval_when_ready(&app, &label, &script);
-            }
-            return;
-        }
         let state = app.state::<AppState>();
-        let entry = if id == LOCAL_ID {
-            crate::tray::refresh(&app);
-            let result = state.local.ensure_running();
-            crate::tray::refresh(&app);
-            let _ = app.emit_to(LAUNCHER, "servers-changed", ());
-            match result {
-                Ok(port) => state.servers.get(LOCAL_ID, Some(port)),
-                Err(status) => {
-                    report_error(&app, describe_local_failure(&status));
-                    return;
+        if let Some(w) = app.get_webview_window(&label) {
+            // The Local window can outlive its server (Stop, a crash): then
+            // opening it means starting the server again, not just focusing
+            // a window that can't reach anything.
+            if id != LOCAL_ID || state.local.port().is_some() {
+                focus(&w);
+                if let Some(script) = script {
+                    eval_when_ready(&app, &label, &script);
                 }
+                return;
+            }
+            let port = match start_local(&app) {
+                Ok(port) => port,
+                Err(()) => return,
+            };
+            // Same port: point the window at it again. Another one (the old
+            // port was taken meanwhile): the window's origin, and with it
+            // its capability, no longer match, so build a fresh window.
+            if w.url().ok().and_then(|u| u.port()) == Some(port) {
+                // Queued for the reloaded page, not run on the dead one.
+                state.loaded.lock().unwrap().remove(&label);
+                if let Some(script) = script {
+                    state.pending_scripts.lock().unwrap().entry(label.clone()).or_default().push(script);
+                }
+                if let Some(entry) = state.servers.get(LOCAL_ID, Some(port)) {
+                    if let Ok(url) = entry.url.parse::<Url>() {
+                        let _ = w.navigate(url);
+                    }
+                }
+                focus(&w);
+                return;
+            }
+            let _ = w.destroy();
+        }
+        let entry = if id == LOCAL_ID {
+            match start_local(&app) {
+                Ok(port) => state.servers.get(LOCAL_ID, Some(port)),
+                Err(()) => return,
             }
         } else {
             state.servers.get(&id, state.local.port())
@@ -139,6 +159,17 @@ pub fn open_server_then(app: &AppHandle, id: &str, script: Option<String>) {
             report_error(&app, format!("Couldn't open {}: {e}", entry.name));
         }
     });
+}
+
+// Starts the bundled server if it isn't running, keeping the tray and the
+// launcher current; a failure is reported to the user.
+fn start_local(app: &AppHandle) -> Result<u16, ()> {
+    let state = app.state::<AppState>();
+    crate::tray::refresh(app);
+    let result = state.local.ensure_running();
+    crate::tray::refresh(app);
+    let _ = app.emit_to(LAUNCHER, "servers-changed", ());
+    result.map_err(|status| report_error(app, describe_local_failure(&status)))
 }
 
 fn describe_local_failure(status: &crate::local_server::Status) -> String {
