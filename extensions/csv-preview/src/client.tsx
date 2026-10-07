@@ -65,6 +65,10 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
   const [hasHeader, setHasHeader] = useState(true);
   const [delimiter, setDelimiter] = useState("auto");
   const detectedDelimiterRef = useRef(",");
+  // How the file on disk ends its lines, and whether its last line ends in
+  // one, so a save writes them back as they were - PapaParse's own default
+  // is CRLF with no final newline, which rewrote every line of an LF file.
+  const lineFormatRef = useRef({ newline: "\n", trailing: true });
 
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
@@ -175,6 +179,7 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
       skipEmptyLines: true,
       header: false,
     });
+    lineFormatRef.current = { newline: result.meta.linebreak || "\n", trailing: /\r?\n$/.test(text) };
     const errs = result.errors.filter((e) => e.type !== "Delimiter");
     applyParsed(result.data as string[][], result.meta.delimiter, errs.length ? errs[0].message : null);
   }
@@ -244,7 +249,9 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
       // sortedWithIdx, `rows` itself is never reordered by it, so this
       // never silently rewrites the file just because a sort is active.
       const activeDelimiter = delimiter === "auto" ? detectedDelimiterRef.current : delimiter;
-      const csvText = Papa.unparse(hasHeader ? [headers, ...rows] : rows, { delimiter: activeDelimiter });
+      const { newline, trailing } = lineFormatRef.current;
+      const csvText =
+        Papa.unparse(hasHeader ? [headers, ...rows] : rows, { delimiter: activeDelimiter, newline }) + (trailing ? newline : "");
       await saveFileText(filePath, csvText);
       setDirtyState(false);
     } catch (err) {
@@ -709,7 +716,10 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
 
   function exportToCSV() {
     const activeDelimiter = delimiter === "auto" ? detectedDelimiterRef.current : delimiter;
-    return Papa.unparse(hasHeader ? [headers, ...sortedWithIdx.map((x) => x.row)] : sortedWithIdx.map((x) => x.row), { delimiter: activeDelimiter });
+    return Papa.unparse(hasHeader ? [headers, ...sortedWithIdx.map((x) => x.row)] : sortedWithIdx.map((x) => x.row), {
+      delimiter: activeDelimiter,
+      newline: lineFormatRef.current.newline,
+    });
   }
   function handleCopyAll() {
     copyText(exportToCSV()).catch(() => {});
