@@ -6,11 +6,12 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, readlink, writeFile } from "node:fs/promises";
 import net from "node:net";
-import { tmpdir, userInfo } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { getMultiplexer, type MuxWindow } from "./multiplexer.js";
 import { buildProcessMap, findDescendants } from "./processes.js";
 import { findWindow, listSessionPanes, resolveAttachTarget } from "./terminals.js";
+import { isOnPath } from "./which.js";
 
 const mux = () => getMultiplexer();
 
@@ -160,7 +161,40 @@ function vimTabeCmd(filePath: string, line?: number): string {
   return `:tabe ${cmd}${escapeForVimCmdline(file)}`;
 }
 
-const EDITOR_COMMANDS = new Set(["nvim", "vim"]);
+const EDITOR_COMMANDS = new Set(["nvim", "vim", "vi"]);
+
+// Where an editor is often installed that the server's own PATH may lack: a
+// desktop app started from Finder gets only /usr/bin:/bin:/usr/sbin:/sbin,
+// while the user's shell finds Homebrew's nvim through their rc files.
+function extraBinDirs(): string[] {
+  const home = homedir();
+  return [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/snap/bin",
+    "/nix/var/nix/profiles/default/bin",
+    path.join(home, ".nix-profile", "bin"),
+    path.join(home, ".local", "bin"),
+    path.join(home, "bin"),
+    path.join(home, ".local", "share", "mise", "shims"),
+    path.join(home, ".asdf", "shims"),
+  ];
+}
+
+// The editor typed or launched to open a file: nvim, else vim (same +N and
+// -d arguments), else vi, which every macOS and Linux has — rather than an
+// `nvim` the shell answers with "command not found". Windows has no vi to
+// fall back to, so it stays nvim there.
+export async function vimCommand(
+  onPath: (bin: string, extraDirs: readonly string[]) => Promise<boolean> = isOnPath,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string> {
+  if (platform === "win32") return "nvim";
+  for (const bin of ["nvim", "vim"]) {
+    if (await onPath(bin, extraBinDirs())) return bin;
+  }
+  return "vi";
+}
 const SHELL_COMMANDS = new Set(["bash", "zsh", "fish", "sh", "dash", "ksh", "tcsh", "csh", "pwsh", "powershell"]);
 
 // RPC-only nvim open: true if `pid`'s nvim has a reachable socket and the
@@ -224,7 +258,7 @@ export async function openFileInWindow(target: string, filePath: string, line?: 
   if (SHELL_COMMANDS.has(command)) {
     // Ctrl-U clears anything half-typed at the prompt first.
     await mux().sendText(`@${window.id}`, "\x15");
-    await mux().sendText(`@${window.id}`, `nvim ${nvimCliArg}`);
+    await mux().sendText(`@${window.id}`, `${await vimCommand()} ${nvimCliArg}`);
     await mux().sendText(`@${window.id}`, "\r");
     return { windowIndex: null };
   }
@@ -233,7 +267,7 @@ export async function openFileInWindow(target: string, filePath: string, line?: 
   // moved; the client opens a tab for the new window from the returned index.
   const created = await mux().createWindow(session, {
     cwd: window.cwd,
-    command: `nvim ${nvimCliArg}`,
+    command: `${await vimCommand()} ${nvimCliArg}`,
     background: true,
   });
   return { windowIndex: created.index };
@@ -310,7 +344,7 @@ export async function openDiffInWindow(
   const originalPath = temps[0];
   const modifiedPath = req.modified.path ?? temps[1];
   const lockRight = req.modified.path ? "" : " | 2wincmd w | setlocal readonly nomodifiable";
-  const nvimCmd = `nvim -d -c ${shellQuote(
+  const nvimCmd = `${await vimCommand()} -d -c ${shellQuote(
     `1wincmd w | setlocal readonly nomodifiable${lockRight} | 2wincmd w`,
   )} ${shellQuote(originalPath)} ${shellQuote(modifiedPath)}`;
   return spawnEditorWindow(session, window.cwd, nvimCmd);
@@ -330,7 +364,7 @@ export async function openMergeInWindow(
   // The base isn't in the layout, but written out it's one :diffthis away.
   if (req.base) sides.push({ name: tempSideName(req.base.label, req.path), content: req.base.content });
   const [oursPath, theirsPath] = await materializeEditorTemp(sides);
-  const nvimCmd = `nvim -d -c ${shellQuote(
+  const nvimCmd = `${await vimCommand()} -d -c ${shellQuote(
     "1wincmd w | setlocal readonly nomodifiable | 3wincmd w | setlocal readonly nomodifiable | 2wincmd w",
   )} ${shellQuote(oursPath)} ${shellQuote(req.path)} ${shellQuote(theirsPath)}`;
   return spawnEditorWindow(session, window.cwd, nvimCmd);

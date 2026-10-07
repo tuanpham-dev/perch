@@ -12,8 +12,10 @@
 import { access, constants } from "node:fs/promises";
 import path from "node:path";
 
-export async function isOnPath(bin: string): Promise<boolean> {
-  const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+// `extraDirs` are searched after PATH: places a binary is commonly installed
+// that a GUI-launched process's PATH lacks (see editor.ts).
+export async function isOnPath(bin: string, extraDirs: readonly string[] = []): Promise<boolean> {
+  const dirs = [...(process.env.PATH ?? "").split(path.delimiter).filter(Boolean), ...extraDirs];
   const names = candidateNames(bin);
   for (const dir of dirs) {
     for (const name of names) {
