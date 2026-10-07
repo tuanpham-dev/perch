@@ -37,8 +37,10 @@ export interface WindowControlsOverlayState {
   windowButtons: ButtonLayout | null;
 }
 
-// One drawn window button's width.
-export const WINDOW_BUTTON_WIDTH = 46;
+// One drawn window button's width: Windows' own caption buttons are 46px
+// wide, while GNOME/Adwaita's sit much tighter, so 46px reads as too wide on
+// Linux.
+export const WINDOW_BUTTON_WIDTH = { windows: 46, linux: 32 } as const;
 // The desktop app's own title bar on Windows and Linux, where nothing else
 // dictates its height (the PWA's comes from the browser, macOS's from where
 // its traffic lights sit).
@@ -77,8 +79,9 @@ function read(): WindowControlsOverlayState {
       return { visible: true, rect: leftControlsRect(), emulated: null, focused, windowButtons: null };
     }
     const buttons = desktop.info.buttonLayout;
-    const start = buttons.left.length * WINDOW_BUTTON_WIDTH;
-    const end = buttons.right.length * WINDOW_BUTTON_WIDTH;
+    const buttonWidth = WINDOW_BUTTON_WIDTH[desktop.info.platform];
+    const start = buttons.left.length * buttonWidth;
+    const end = buttons.right.length * buttonWidth;
     const rect = { x: start, y: 0, width: window.innerWidth - start - end, height: DESKTOP_TITLEBAR_HEIGHT };
     return { visible: true, rect, emulated: null, focused, windowButtons: buttons };
   }
