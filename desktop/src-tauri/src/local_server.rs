@@ -340,7 +340,7 @@ fn short_state_dir() -> PathBuf {
 }
 
 #[cfg(unix)]
-fn detach(cmd: &mut Command) {
+pub fn detach(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
     unsafe {
         cmd.pre_exec(|| {
@@ -351,7 +351,7 @@ fn detach(cmd: &mut Command) {
 }
 
 #[cfg(windows)]
-fn detach(cmd: &mut Command) {
+pub fn detach(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
     use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
     cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB);

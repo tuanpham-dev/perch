@@ -235,11 +235,44 @@ pub fn command_installed() -> bool {
 
 /// The executable the launcher should run: the AppImage itself when running
 /// from one (its mount point changes every run).
-fn app_executable() -> Result<PathBuf, String> {
+pub fn app_executable() -> Result<PathBuf, String> {
     if let Ok(appimage) = std::env::var("APPIMAGE") {
         return Ok(PathBuf::from(appimage));
     }
     std::env::current_exe().map_err(|e| e.to_string())
+}
+
+/// Started from a terminal to open a window: run the app on in the
+/// background and give the shell its prompt back, rather than tying the app
+/// to the terminal (closing it, or Ctrl-C, would quit the app). Returns
+/// whether it did, in which case this process should exit.
+#[cfg(all(unix, not(debug_assertions)))]
+pub fn detach_from_terminal(args: &[String]) -> bool {
+    use std::io::IsTerminal;
+    const DETACHED: &str = "PERCH_DESKTOP_DETACHED";
+    if std::env::var_os(DETACHED).is_some() || !std::io::stdin().is_terminal() {
+        return false;
+    }
+    let Ok(exe) = app_executable() else { return false };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args)
+        .env(DETACHED, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    crate::local_server::detach(&mut cmd);
+    cmd.spawn().is_ok()
+}
+
+/// The Windows launcher. A batch file waits for whatever it runs, a window
+/// included, so opening one goes through `start` and gives the prompt back;
+/// the headless commands run in place, for their output and exit code.
+fn windows_script(exe: &str) -> String {
+    let headless = ["start", "stop", "status", "--help", "-h"]
+        .iter()
+        .map(|arg| format!("if /i \"%~1\"==\"{arg}\" goto wait\r\n"))
+        .collect::<String>();
+    format!("@echo off\r\nrem {MARKER}\r\n{headless}start \"\" \"{exe}\" %*\r\nexit /b\r\n:wait\r\n\"{exe}\" %*\r\n")
 }
 
 /// Writes the launcher script. Returns a note for the user when its folder
@@ -252,7 +285,7 @@ pub fn install_command() -> Result<Option<String>, String> {
     let exe = app_executable()?;
     std::fs::create_dir_all(command_dir()).map_err(|e| e.to_string())?;
     if cfg!(windows) {
-        std::fs::write(&path, format!("@echo off\r\nrem {MARKER}\r\n\"{}\" %*\r\n", exe.display())).map_err(|e| e.to_string())?;
+        std::fs::write(&path, windows_script(&exe.display().to_string())).map_err(|e| e.to_string())?;
         add_to_user_path(&command_dir())?;
         return Ok(Some("Open a new terminal to use perch-desktop.".into()));
     }
@@ -309,6 +342,15 @@ mod tests {
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn windows_script_starts_windows_and_waits_for_commands() {
+        let script = windows_script(r"C:\Program Files\Perch\Perch.exe");
+        assert!(script.contains(&format!("rem {MARKER}")));
+        assert!(script.contains("if /i \"%~1\"==\"status\" goto wait\r\n"));
+        assert!(script.contains("start \"\" \"C:\\Program Files\\Perch\\Perch.exe\" %*\r\nexit /b"));
+        assert!(script.ends_with(":wait\r\n\"C:\\Program Files\\Perch\\Perch.exe\" %*\r\n"));
     }
 
     #[test]

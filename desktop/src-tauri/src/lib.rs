@@ -72,6 +72,11 @@ pub fn run() {
         cli::Parsed::Gui(link) => link,
         other => std::process::exit(cli::run_headless(&other, &local)),
     };
+    // Not a debug build: `tauri dev` runs it from a terminal and must keep it.
+    #[cfg(all(unix, not(debug_assertions)))]
+    if cli::detach_from_terminal(&args) {
+        return;
+    }
 
     let state = AppState {
         servers: servers::Servers::load(paths::config_dir().join("servers.json")),
