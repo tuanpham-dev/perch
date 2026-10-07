@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FRAME_OUTPUT, FRAME_INPUT, FrameReader, encodeControl, encodeFrame } from '../src/protocol/frames.ts';
 import { sleep, waitFor, waitForMatch } from './wait.ts';
+import { killDaemons as killTestDaemons } from './procs.ts';
 
 const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const DAEMON = fileURLToPath(new URL('../src/daemon/index.ts', import.meta.url));
@@ -32,14 +33,7 @@ function daemonPid(env: Record<string, string>): number {
   return Number(readFileSync(join(env.PERCH_STATE_DIR, 'daemon.pid'), 'utf8').trim());
 }
 function killDaemons(env: Record<string, string>): void {
-  for (const d of readdirSync('/proc')) {
-    if (!/^\d+$/.test(d)) continue;
-    try {
-      const argv = readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0');
-      const e2 = readFileSync(`/proc/${d}/environ`, 'utf8');
-      if (argv[1] === DAEMON && e2.includes(`PERCH_STATE_DIR=${env.PERCH_STATE_DIR}`)) process.kill(Number(d), 'SIGKILL');
-    } catch { /* gone */ }
-  }
+  killTestDaemons(DAEMON, env.PERCH_STATE_DIR!);
 }
 
 class Client {

@@ -1,13 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { killDaemons as killTestDaemons } from './procs.ts';
 
 const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const DAEMON = fileURLToPath(new URL('../src/daemon/index.ts', import.meta.url));
+// The kernel reports a process's cwd with symlinks resolved, and on macOS /etc
+// is a symlink to /private/etc. Expect the resolved path (plain /etc on Linux).
+const ETC = realpathSync('/etc');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function makeEnv(): { env: Record<string, string>; dir: string } {
@@ -21,14 +25,7 @@ function sp(env: Record<string, string>, ...args: string[]): string {
   return execFileSync(process.execPath, [CLI, ...args], { env }).toString();
 }
 function killDaemons(env: Record<string, string>): void {
-  for (const d of readdirSync('/proc')) {
-    if (!/^\d+$/.test(d)) continue;
-    try {
-      const argv = readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0');
-      const e2 = readFileSync(`/proc/${d}/environ`, 'utf8');
-      if (argv[1] === DAEMON && e2.includes(`PERCH_STATE_DIR=${env.PERCH_STATE_DIR}`)) process.kill(Number(d), 'SIGKILL');
-    } catch { /* gone */ }
-  }
+  killTestDaemons(DAEMON, env.PERCH_STATE_DIR!);
 }
 
 type SessionRow = { name: string; cwd: string; foregroundCommand?: string; lastOutputAt: number };
@@ -42,7 +39,7 @@ test('session.list carries the current window cwd, foreground command, and activ
     const rows = JSON.parse(sp(env, 'ls', '-j')) as SessionRow[];
     const row = rows.find((r) => r.name === 'enrich');
     assert.ok(row, 'session present');
-    assert.equal(row!.cwd, '/etc', 'current window cwd surfaced on the session row');
+    assert.equal(row!.cwd, ETC, 'current window cwd surfaced on the session row');
     assert.match(row!.foregroundCommand ?? '', /sh$/, 'idle shell as foreground command');
     assert.ok(row!.lastOutputAt > 0, 'lastOutputAt populated');
   } finally {

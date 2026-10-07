@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { connect } from 'node:net';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { waitForMatch } from './wait.ts';
+import { killDaemons as killTestDaemons } from './procs.ts';
 import { FRAME_OUTPUT, FrameReader, encodeControl } from '../src/protocol/frames.ts';
 
 // The daemon answers capability queries from its own copy of the terminal.
@@ -26,14 +27,7 @@ function sp(env: Record<string, string>, ...args: string[]): string {
   return execFileSync(process.execPath, [CLI, ...args], { env }).toString();
 }
 function killDaemons(env: Record<string, string>): void {
-  for (const d of readdirSync('/proc')) {
-    if (!/^\d+$/.test(d)) continue;
-    try {
-      const argv = readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0');
-      const e2 = readFileSync(`/proc/${d}/environ`, 'utf8');
-      if (argv[1] === DAEMON && e2.includes(`PERCH_STATE_DIR=${env.PERCH_STATE_DIR}`)) process.kill(Number(d), 'SIGKILL');
-    } catch { /* gone */ }
-  }
+  killTestDaemons(DAEMON, env.PERCH_STATE_DIR!);
 }
 
 test('a cursor-position query is answered with no viewer attached', async () => {

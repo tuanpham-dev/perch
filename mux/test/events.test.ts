@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sleep, waitFor } from './wait.ts';
+import { killDaemons as killTestDaemons } from './procs.ts';
 import type { ServerEvent, WindowInfo } from '../src/protocol/messages.ts';
 
 const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
@@ -16,14 +17,7 @@ function sp(env: Record<string, string>, ...args: string[]): string {
 }
 
 function killDaemons(env: Record<string, string>): void {
-  for (const d of readdirSync('/proc')) {
-    if (!/^\d+$/.test(d)) continue;
-    try {
-      const argv = readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0');
-      const e2 = readFileSync(`/proc/${d}/environ`, 'utf8');
-      if (argv[1] === DAEMON && e2.includes(`PERCH_STATE_DIR=${env.PERCH_STATE_DIR}`)) process.kill(Number(d), 'SIGKILL');
-    } catch { /* gone */ }
-  }
+  killTestDaemons(DAEMON, env.PERCH_STATE_DIR!);
 }
 
 test('a listener hears structural changes and bells from windows nobody is viewing', async () => {

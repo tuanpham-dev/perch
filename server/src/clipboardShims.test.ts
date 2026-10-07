@@ -11,8 +11,21 @@ const hasScript = posix && spawnSync("sh", ["-c", "command -v script"]).status =
 
 // Runs `command` on a real pty (script(1)), so the shim's /dev/tty exists, and
 // returns everything the terminal received.
+//
+// util-linux script (Linux) takes the command as `-c <string>`; BSD script
+// (macOS) takes it as trailing argv and has no -c. BSD script also refuses a
+// socket for stdin (tcgetattr fails), which is what node's `input` gives it,
+// so its stdin is /dev/null instead. At that EOF it sends ^D to the pty, which
+// the tty echoes as "^D\b\b" ahead of the output: no OSC 52 in it, so the
+// assertions below are unaffected.
 function onPty(command: string, env: NodeJS.ProcessEnv): string {
-  return execFileSync("script", ["-q", "-c", command, "/dev/null"], { env, input: "" }).toString("latin1");
+  if (process.platform === "linux") {
+    return execFileSync("script", ["-q", "-c", command, "/dev/null"], { env, input: "" }).toString("latin1");
+  }
+  return execFileSync("script", ["-q", "/dev/null", "sh", "-c", command], {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  }).toString("latin1");
 }
 
 const OSC52 = (text: string) => `\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`;

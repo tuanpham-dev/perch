@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { killDaemons as killTestDaemons } from './procs.ts';
 import {
   FRAME_CONTROL, FRAME_OUTPUT, FRAME_INPUT,
   FrameReader, encodeControl, encodeFrame,
@@ -29,14 +30,7 @@ function socketPathOf(env: Record<string, string>): string {
   return join(env.PERCH_STATE_DIR, 'daemon.sock');
 }
 function killDaemons(env: Record<string, string>): void {
-  for (const d of readdirSync('/proc')) {
-    if (!/^\d+$/.test(d)) continue;
-    try {
-      const argv = readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0');
-      const e2 = readFileSync(`/proc/${d}/environ`, 'utf8');
-      if (argv[1] === DAEMON && e2.includes(`PERCH_STATE_DIR=${env.PERCH_STATE_DIR}`)) process.kill(Number(d), 'SIGKILL');
-    } catch { /* gone */ }
-  }
+  killTestDaemons(DAEMON, env.PERCH_STATE_DIR!);
 }
 
 /** A test client that speaks the framed socket protocol and accumulates output. */

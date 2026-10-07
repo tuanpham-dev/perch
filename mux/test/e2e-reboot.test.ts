@@ -1,15 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const DAEMON = fileURLToPath(new URL('../src/daemon/index.ts', import.meta.url));
+// The kernel reports a process's cwd with symlinks resolved, and on macOS /etc
+// is a symlink to /private/etc. Expect the resolved path (plain /etc on Linux).
+const ETC = realpathSync('/etc');
 
 import { waitFor, waitForMatch } from './wait.ts';
+import { killDaemons as killTestDaemons } from './procs.ts';
 
 // Short base dir: unix socket paths are capped near 108 bytes, and a mkdtemp
 // under $TMPDIR plus "/daemon.sock" must stay under that.
@@ -30,17 +34,7 @@ function daemonPid(env: Record<string, string>): number {
 }
 
 function killDaemons(env: Record<string, string>): void {
-  // Match only daemons for THIS state dir, via their live cwd-independent argv.
-  for (const d of readdirSync('/proc')) {
-    if (!/^\d+$/.test(d)) continue;
-    try {
-      const argv = readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0');
-      const env2 = readFileSync(`/proc/${d}/environ`, 'utf8');
-      if (argv[1] === DAEMON && env2.includes(`PERCH_STATE_DIR=${env.PERCH_STATE_DIR}`)) {
-        process.kill(Number(d), 'SIGKILL');
-      }
-    } catch { /* vanished or unreadable */ }
-  }
+  killTestDaemons(DAEMON, env.PERCH_STATE_DIR!);
 }
 
 test('sessions, layout, cwd and scrollback survive a hard daemon kill', async () => {
@@ -66,12 +60,17 @@ test('sessions, layout, cwd and scrollback survive a hard daemon kill', async ()
       const state = JSON.parse(readFileSync(join(env.PERCH_STATE_DIR, 'state.json'), 'utf8')) as {
         sessions: { windows: { cwd: string }[] }[];
       };
-      return state.sessions[0]?.windows[1]?.cwd === '/etc';
+      return state.sessions[0]?.windows[1]?.cwd === ETC;
     });
 
     await waitForMatch('the typed output to appear', () => sp(env, 'capture', 'work:0', '-S', '50'), /LIVE-MARK-ALPHA/);
 
     const idsBefore = (JSON.parse(sp(env, 'window', 'ls', '-t', 'work', '-j')) as { windowId: string }[]).map((w) => w.windowId);
+    // A hard kill loses whatever the debounced snapshot hasn't written yet, by
+    // design. Seeing the mark on the live screen says nothing about disk, so
+    // wait for window 0's raw sidecar to hold it before pulling the plug.
+    await waitFor("window 0's saved scrollback to hold the typed output", () =>
+      readFileSync(join(env.PERCH_STATE_DIR, 'scrollback', `${idsBefore[0]}.raw`), 'latin1').includes('LIVE-MARK-ALPHA'));
 
     // Hard kill: the processes die but the on-disk snapshot remains (a reboot).
     const before = daemonPid(env);
@@ -88,7 +87,7 @@ test('sessions, layout, cwd and scrollback survive a hard daemon kill', async ()
     assert.deepEqual(windows.map((w) => w.windowId), idsBefore, 'restored windows keep their ids');
     assert.equal(windows.length, 2, 'both windows restored');
     assert.equal(windows[1]!.name, 'logs', 'window names restored');
-    assert.equal(windows[1]!.cwd, '/etc', 'restored shell resumes at the saved cwd');
+    assert.equal(windows[1]!.cwd, ETC, 'restored shell resumes at the saved cwd');
 
     // Pre-kill scrollback replays, and the declared command re-ran on restore.
     const cap0 = sp(env, 'capture', 'work:0', '-S', '80');
