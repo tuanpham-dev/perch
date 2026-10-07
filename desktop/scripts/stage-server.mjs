@@ -18,7 +18,7 @@
 //   node desktop/scripts/stage-server.mjs [--skip-build]
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -181,6 +181,11 @@ function prune() {
         if (!/\.(node|exe|dll)$/.test(name) && name !== "spawn-helper") rmSync(join(release, name), { recursive: true, force: true });
       }
     }
+  }
+  // node-pty's tarball ships spawn-helper without its execute bit, and
+  // without it no terminal starts on macOS ("posix_spawnp failed.").
+  for (const helper of [join(prebuilds, here, "spawn-helper"), join(build, "Release", "spawn-helper")]) {
+    if (existsSync(helper)) chmodSync(helper, 0o755);
   }
 }
 

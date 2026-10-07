@@ -5,6 +5,7 @@ import net from 'node:net';
 import { loadConfig, type Config } from '../util/config.ts';
 import { daemonEntryPath, ensureStateDirs, logPath, pidPath, socketPath } from '../util/paths.ts';
 import { platform } from '../platform/index.ts';
+import { ensureSpawnHelperExecutable } from '../util/pty-helper.ts';
 import { DaemonServer } from './server.ts';
 import { Snapshotter } from './persistence.ts';
 import { restoreSessions } from './restore.ts';
@@ -48,6 +49,7 @@ if (existsSync(socketPath()) && await probeSocket(300)) {
   process.exit(0);
 }
 platform.clearStaleAddress(socketPath());
+ensureSpawnHelperExecutable(log);
 
 let config: Config = loadConfig({}, log);
 let shuttingDown = false;
