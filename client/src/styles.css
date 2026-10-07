@@ -3101,6 +3101,10 @@ body.scrollbar-dragging {
   padding: 20px 28px 40px;
 }
 
+.settings-content .dialog-input {
+  max-width: 100%;
+}
+
 /* Phone-width Settings: the fixed-width side nav would squeeze the content
    to nothing, so it becomes a horizontally scrollable strip on top and the
    content takes the full width below. KeyboardShortcutsView reuses
@@ -3553,6 +3557,8 @@ body.scrollbar-dragging {
 
 .settings-select {
   width: 320px;
+  /* A narrow window (or the side nav beside it) leaves less than that. */
+  max-width: 100%;
   /* Native selects hug their dropdown arrow to the border edge regardless of
      padding, so the arrow is drawn manually here to give it breathing room
      from the edge. */
