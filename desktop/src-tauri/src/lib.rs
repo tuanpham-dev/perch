@@ -64,7 +64,7 @@ pub fn run() {
         return spike::run(context, url);
     }
 
-    let cwd = std::env::current_dir().unwrap_or_default();
+    let cwd = cli::shell_cwd();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let link = match cli::parse(&args, &cwd) {
         cli::Parsed::Gui(link) => link,

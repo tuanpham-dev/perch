@@ -90,10 +90,13 @@ pub fn parse(args: &[String], cwd: &Path) -> Parsed {
 }
 
 fn resolve_local(target: &str, cwd: &Path) -> Option<(String, Option<u32>)> {
+    // The path as the shell sees it, symlinks kept: resolving them would
+    // name a folder the Perch window already has open by another path, and
+    // it would open as a second project.
     let abs = |p: &str| {
         let p = crate::paths::expand_home(p);
-        let p = if p.is_absolute() { p } else { cwd.join(p) };
-        std::fs::canonicalize(p).ok()
+        let p = normalize(&if p.is_absolute() { p } else { cwd.join(p) });
+        p.exists().then_some(p)
     };
     if let Some(p) = abs(target) {
         return Some((display(&p), None));
@@ -104,9 +107,42 @@ fn resolve_local(target: &str, cwd: &Path) -> Option<(String, Option<u32>)> {
 }
 
 fn display(p: &Path) -> String {
-    let s = p.to_string_lossy();
-    // canonicalize gives Windows' verbatim form (\\?\C:\...); Perch wants C:\...
-    s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+    p.to_string_lossy().into_owned()
+}
+
+/// Drops `.` and folds `..` into its parent, the way a shell's `cd` does,
+/// without touching the filesystem (so symlinks stay as written).
+fn normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in p.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// The working directory as the shell sees it: $PWD keeps the symlinks a
+/// user cd'ed through, where the OS's own answer has them resolved. Only
+/// trusted while it still names the same directory.
+pub fn shell_cwd() -> PathBuf {
+    let real = std::env::current_dir().unwrap_or_default();
+    match std::env::var_os("PWD").map(PathBuf::from) {
+        Some(pwd) if pwd.is_absolute() && same_dir(&pwd, &real) => pwd,
+        _ => real,
+    }
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// Runs a command that needs no window. Returns the exit code.
@@ -293,15 +329,32 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("perch-cli-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
-        let real = std::fs::canonicalize(&dir).unwrap();
         let expect = |p: Option<&str>, line: Option<u32>, action: Option<&str>| {
             Parsed::Gui(Some(deeplink::build(None, p, line, action)))
         };
-        let file = display(&real.join("a.txt"));
+        let file = display(&dir.join("a.txt"));
         assert_eq!(parse(&args(&["a.txt:12", "editor"]), &dir), expect(Some(&file), Some(12), Some("editor")));
-        assert_eq!(parse(&args(&["."]), &dir), expect(Some(&display(&real)), None, None));
+        assert_eq!(parse(&args(&["."]), &dir), expect(Some(&display(&dir)), None, None));
+        assert_eq!(parse(&args(&["./sub/../a.txt"]), &dir), expect(Some(&file), None, None));
         assert!(matches!(parse(&args(&["nope.txt"]), &dir), Parsed::Error(_)));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // A folder reached through a symlink keeps that path, so it matches the
+    // project the window opened by the same path.
+    #[cfg(unix)]
+    #[test]
+    fn keeps_symlinked_paths() {
+        let root = std::env::temp_dir().join(format!("perch-cli-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("real/src")).unwrap();
+        std::fs::write(root.join("real/src/main.rs"), "x").unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+        let link = root.join("link");
+        assert_eq!(
+            parse(&args(&["src/main.rs:3"]), &link),
+            Parsed::Gui(Some(deeplink::build(None, Some(&display(&link.join("src/main.rs"))), Some(3), None)))
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
