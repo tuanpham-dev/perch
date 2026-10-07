@@ -1,4 +1,5 @@
 import { useCallback, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { desktop, fileManagerName } from "../desktop";
 import * as api from "../api";
 import { copyText } from "../clipboard";
 import {
@@ -437,6 +438,19 @@ export function useFileActions(
         },
         { label: "Download", onClick: () => downloadFileEntry(entryPath) },
       );
+      // The desktop app's own server lives on this machine, so its files can
+      // also go to the OS (plans/desktop-app.md T8). No other server's page
+      // gets these: the app refuses the calls for it anyway.
+      if (desktop?.info.isLocal) {
+        const bridge = desktop;
+        items.push({
+          label: `Reveal in ${fileManagerName(bridge.info.platform)}`,
+          onClick: () => void bridge.revealPath(entryPath).catch(() => {}),
+        });
+        if (!isDir) {
+          items.push({ label: "Open with Default App", onClick: () => void bridge.openWithDefault(entryPath).catch(() => {}) });
+        }
+      }
       // Images/media/PDFs open in their viewer by default (see
       // openFileOrViewer) — editorFallback is the escape hatch to edit e.g.
       // an SVG's source in nvim; media/PDF opt out of it (nvim on binary

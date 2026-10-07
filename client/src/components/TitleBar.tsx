@@ -1,7 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { formatBinding, type Keybinding } from "../keybindings";
 import type { TitlebarAreaRect } from "../hooks/useWindowControlsOverlay";
+import { desktop } from "../desktop";
 import Icon from "./Icon";
+import WindowControls from "./WindowControls";
 
 // The app's own title bar, drawn in the strip the browser leaves beside its
 // window controls once the installed app's title bar is hidden (see
@@ -14,6 +16,13 @@ import Icon from "./Icon";
 // groups beside it clear of the window controls, so the three drop into a
 // plain row between the controls instead.
 const MIN_CENTERED_WIDTH = 120;
+// How far the mouse must travel after pressing on empty title bar space
+// before the desktop app's window starts to move. Starting on the press
+// itself would let the window manager's drag grab swallow a double-click's
+// second press (plans/desktop-app.spike.md), so double-click to maximize
+// would never arrive.
+const DRAG_THRESHOLD = 3;
+
 // Space between each button group and the command center, matching the
 // .titlebar-group-start/-end offsets in styles.css.
 const GROUP_GAP_START = 4;
@@ -23,6 +32,8 @@ interface Props {
   rect: TitlebarAreaRect;
   emulated: "left" | "right" | null;
   focused: boolean;
+  // Draw the desktop app's own minimize/maximize/close at the right end.
+  desktopControls?: boolean;
   title: string;
   commandCenterLabel: string;
   commandCenterCommand: string;
@@ -49,6 +60,7 @@ export default function TitleBar({
   rect,
   emulated,
   focused,
+  desktopControls = false,
   title,
   commandCenterLabel,
   commandCenterCommand,
@@ -99,6 +111,36 @@ export default function TitleBar({
 
   const inline = centerMax < MIN_CENTERED_WIDTH;
 
+  // The desktop app's window has no browser-drawn drag region, so empty
+  // title bar space moves the window itself: armed on a press, started once
+  // the mouse moves, and a double-click toggles maximize. The moves are
+  // watched on the whole window, since a quick drag leaves the thin bar
+  // before its first move event arrives.
+  const onEmptySpace = (target: EventTarget) => !(target as Element).closest?.("button");
+  const desktopDrag = desktop
+    ? {
+        onMouseDown: (e: React.MouseEvent) => {
+          if (e.button !== 0 || !onEmptySpace(e.target)) return;
+          const from = { x: e.clientX, y: e.clientY };
+          const stop = () => {
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", stop);
+          };
+          const onMove = (m: MouseEvent) => {
+            if ((m.buttons & 1) === 0) return stop();
+            if (Math.abs(m.clientX - from.x) + Math.abs(m.clientY - from.y) < DRAG_THRESHOLD) return;
+            stop();
+            void desktop!.startDragging();
+          };
+          window.addEventListener("mousemove", onMove);
+          window.addEventListener("mouseup", stop);
+        },
+        onDoubleClick: (e: React.MouseEvent) => {
+          if (onEmptySpace(e.target)) void desktop!.toggleMaximize();
+        },
+      }
+    : {};
+
   return (
     <header
       className={`titlebar${focused ? "" : " inactive"}${inline ? " cc-inline" : ""}`}
@@ -110,8 +152,10 @@ export default function TitleBar({
           "--cc-max": `${centerMax}px`,
         } as React.CSSProperties
       }
+      {...desktopDrag}
     >
       {emulated && <div className="titlebar-emulated-controls" data-side={emulated} />}
+      {desktopControls && desktop && <WindowControls bridge={desktop} />}
       {minimal ? (
         <div className="titlebar-center">
           <span className="titlebar-title-static titlebar-command-center-label" title={title}>

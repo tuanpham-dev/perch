@@ -14,6 +14,26 @@ delete process.env.PERCH_CONFIG_DIR;
 
 const { EXTENSION_RATE_LIMIT_MS, notifyExtension, resetExtensionNotifyCooldowns, shouldNotifyExtension } =
   await import("./push.js");
+const { subscribeOpenUrl } = await import("./openUrl.js");
+
+// A stand-in SSE response that records every frame written to it.
+function fakeStream(): { frames: string[]; close: () => void } {
+  const frames: string[] = [];
+  let onClose = () => {};
+  const res = {
+    writeHead: () => res,
+    write: (chunk: string) => {
+      frames.push(chunk);
+      return true;
+    },
+    on: (event: string, cb: () => void) => {
+      if (event === "close") onClose = cb;
+      return res;
+    },
+  };
+  subscribeOpenUrl(res as never);
+  return { frames, close: () => onClose() };
+}
 
 afterAll(async () => {
   await rm(configHome, { recursive: true, force: true });
@@ -46,5 +66,21 @@ describe("notifyExtension", () => {
   it("resolves without creating push.json when push was never set up", async () => {
     await expect(notifyExtension("w3", "title", "body")).resolves.toBeUndefined();
     expect(existsSync(path.join(configHome, "perch", "push.json"))).toBe(false);
+  });
+});
+
+describe("notify alerts on the open-url stream", () => {
+  it("broadcasts an extension alert even with no push.json, once per cooldown", async () => {
+    const stream = fakeStream();
+    try {
+      await notifyExtension("w4", "Claude", "needs input");
+      await notifyExtension("w4", "Claude", "needs input again");
+      const alerts = stream.frames.filter((f) => f.startsWith("event: notify\n"));
+      expect(alerts).toHaveLength(1);
+      expect(JSON.parse(alerts[0]!.split("data: ")[1]!)).toEqual({ title: "Claude", body: "needs input", windowId: "w4" });
+      expect(existsSync(path.join(configHome, "perch", "push.json"))).toBe(false);
+    } finally {
+      stream.close();
+    }
   });
 });

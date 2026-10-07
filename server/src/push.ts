@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import webpush from "web-push";
 import { configDir } from "./configDir.js";
+import { broadcastAlert } from "./openUrl.js";
 
 // VAPID keys + push subscriptions, stored beside settings.json in the same
 // config dir (settingsStore.ts's convention) — a separate file rather than
@@ -89,12 +90,14 @@ export async function removeSubscription(endpoint: string): Promise<void> {
 const RATE_LIMIT_MS = 30_000;
 const lastNotifiedAt = new Map<string, number>();
 
-export async function notifyBell(pane: string): Promise<void> {
+export async function notifyBell(pane: string, windowId?: string): Promise<void> {
   const now = Date.now();
   const last = lastNotifiedAt.get(pane) ?? 0;
   if (now - last < RATE_LIMIT_MS) return;
   lastNotifiedAt.set(pane, now);
-  await sendToAll(JSON.stringify({ title: "perch", body: `${pane} is waiting for input`, pane }));
+  const body = `${pane} is waiting for input`;
+  broadcastAlert({ title: "perch", body, windowId });
+  await sendToAll(JSON.stringify({ title: "perch", body, pane }));
 }
 
 // Finished-command notifications (plans/warp-features.md Phase 2), fed by
@@ -124,13 +127,10 @@ export async function notifyCommandDone(
   lastCommandDoneAt.set(pane, now);
   const shortCommand = command.length > 60 ? `${command.slice(0, 59)}…` : command;
   const status = exitCode === 0 ? "finished" : `failed (exit ${exitCode})`;
-  await sendToAll(
-    JSON.stringify({
-      title: "perch",
-      body: `${shortCommand} ${status} after ${humanDuration(durationMs)} in ${sessionName}`,
-      pane,
-    }),
-  );
+  const body = `${shortCommand} ${status} after ${humanDuration(durationMs)} in ${sessionName}`;
+  // `pane` here is the shell's PERCH_WINDOW: a window id already.
+  broadcastAlert({ title: "perch", body, windowId: pane });
+  await sendToAll(JSON.stringify({ title: "perch", body, pane }));
 }
 
 // Extension-initiated notifications (host.notifications.push). A shorter
@@ -158,6 +158,7 @@ export function resetExtensionNotifyCooldowns(): void {
 // No file, no subscriptions, or a send failure all resolve quietly.
 export async function notifyExtension(windowId: string, title: string, body: string): Promise<void> {
   if (!shouldNotifyExtension(windowId, Date.now())) return;
+  broadcastAlert({ title, body, windowId });
   if (!cached) {
     try {
       const parsed: unknown = JSON.parse(await readFile(pushPath, "utf8"));

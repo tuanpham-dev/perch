@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { desktop } from "../desktop";
 
 // Window Controls Overlay: an installed desktop PWA whose user hid the
 // browser's title bar (manifest display_override, see vite.config.ts). The
@@ -11,6 +12,11 @@ import { useEffect, useState } from "react";
 // Emulation, for QA in a browser that can't install the app: ?wco=right
 // (Windows-like controls) or ?wco=left (macOS-like), same URL-flag convention
 // as inputDebug.ts's ?inputdebug.
+//
+// The desktop app (desktop.ts) takes the same two shapes for real: its
+// frameless window keeps macOS's traffic lights at the left, and on Windows
+// and Linux the title bar draws its own controls at the right
+// (desktopControls). See plans/desktop-app.md T7.
 
 export interface TitlebarAreaRect {
   x: number;
@@ -25,6 +31,9 @@ export interface WindowControlsOverlayState {
   emulated: "left" | "right" | null;
   // Whether the window has focus - a native title bar dims when it doesn't.
   focused: boolean;
+  // The desktop app on Windows/Linux: the title bar draws minimize, maximize
+  // and close itself, in the strip right of `rect`.
+  desktopControls: boolean;
 }
 
 // Not in every TS DOM lib yet.
@@ -43,20 +52,34 @@ function overlay(): WindowControlsOverlay | null {
   return (navigator as Navigator & { windowControlsOverlay?: WindowControlsOverlay }).windowControlsOverlay ?? null;
 }
 
+// The two shapes: controls at the right (Windows-like, 138px for three
+// buttons) or traffic lights at the left (macOS).
+function rightControlsRect(): TitlebarAreaRect {
+  return { x: 0, y: 0, width: window.innerWidth - 138, height: 33 };
+}
+
+function leftControlsRect(): TitlebarAreaRect {
+  return { x: 78, y: 0, width: window.innerWidth - 78, height: 28 };
+}
+
 function read(): WindowControlsOverlayState {
   const focused = document.hasFocus();
+  if (desktop) {
+    const mac = desktop.info.platform === "macos";
+    return { visible: true, rect: mac ? leftControlsRect() : rightControlsRect(), emulated: null, focused, desktopControls: !mac };
+  }
   if (EMULATED === "right") {
-    return { visible: true, rect: { x: 0, y: 0, width: window.innerWidth - 138, height: 33 }, emulated: EMULATED, focused };
+    return { visible: true, rect: rightControlsRect(), emulated: EMULATED, focused, desktopControls: false };
   }
   if (EMULATED === "left") {
-    return { visible: true, rect: { x: 78, y: 0, width: window.innerWidth - 78, height: 28 }, emulated: EMULATED, focused };
+    return { visible: true, rect: leftControlsRect(), emulated: EMULATED, focused, desktopControls: false };
   }
   const wco = overlay();
   if (!wco?.visible) {
-    return { visible: false, rect: { x: 0, y: 0, width: 0, height: 0 }, emulated: null, focused };
+    return { visible: false, rect: { x: 0, y: 0, width: 0, height: 0 }, emulated: null, focused, desktopControls: false };
   }
   const r = wco.getTitlebarAreaRect();
-  return { visible: true, rect: { x: r.x, y: r.y, width: r.width, height: r.height }, emulated: null, focused };
+  return { visible: true, rect: { x: r.x, y: r.y, width: r.width, height: r.height }, emulated: null, focused, desktopControls: false };
 }
 
 function same(a: WindowControlsOverlayState, b: WindowControlsOverlayState): boolean {
@@ -64,6 +87,7 @@ function same(a: WindowControlsOverlayState, b: WindowControlsOverlayState): boo
     a.visible === b.visible &&
     a.emulated === b.emulated &&
     a.focused === b.focused &&
+    a.desktopControls === b.desktopControls &&
     a.rect.x === b.rect.x &&
     a.rect.y === b.rect.y &&
     a.rect.width === b.rect.width &&

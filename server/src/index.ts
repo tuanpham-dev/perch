@@ -387,7 +387,7 @@ getMultiplexer().onEvent((event) => {
   if (event.event === "sessions-changed") resumeRestoredAgents();
   if (event.event !== "bell") return;
   windowAddress(event.windowId)
-    .then((addr) => (addr ? notifyBell(`${addr.session}:${addr.index}`) : undefined))
+    .then((addr) => (addr ? notifyBell(`${addr.session}:${addr.index}`, event.windowId) : undefined))
     .catch(() => {});
 });
 loadEnabledServerHooks()

@@ -1,4 +1,5 @@
 import type {
+  OpenTargetPayload,
   ExtensionInfo,
   FsFilesListing,
   FsGitRoot,
@@ -984,4 +985,14 @@ export function unsubscribePush(endpoint: string): Promise<void> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ endpoint }),
   });
+}
+
+// What a path means to this server - file or folder, its project, a line -
+// for the desktop app's perch:// links and `perch-desktop` (server
+// openTarget.ts). Rejects with a 404 for a path that doesn't exist.
+export function resolveOpenTarget(path: string, line?: number, action?: "editor" | "preview"): Promise<OpenTargetPayload> {
+  const query = new URLSearchParams({ path });
+  if (line !== undefined) query.set("line", String(line));
+  if (action) query.set("action", action);
+  return request(`/api/open-target/resolve?${query}`);
 }

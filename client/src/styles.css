@@ -310,6 +310,49 @@ textarea {
   width: var(--tb-end);
 }
 
+/* The desktop app's own window controls (WindowControls.tsx), on Windows
+   and Linux, in the same strip the emulation outlines. Close turns red on
+   hover, as it does on Windows. */
+.window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: var(--tb-end);
+  display: flex;
+}
+
+.window-control {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+}
+
+.window-control:hover {
+  background: var(--hover);
+}
+
+.window-control-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.window-control:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.titlebar.inactive .window-control {
+  opacity: 0.6;
+}
+
 /* ---- Status bar ---- */
 
 .status-bar {

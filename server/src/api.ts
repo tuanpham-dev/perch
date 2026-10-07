@@ -68,6 +68,7 @@ import {
 } from "./extensions.js";
 import { hasReceivedEvents, paneHistory, recordEnd, recordStart } from "./commandEvents.js";
 import { broadcastOpenTarget, broadcastOpenUrl, subscribeOpenUrl } from "./openUrl.js";
+import { parseOpenTargetParams, resolveOpenTarget } from "./openTarget.js";
 import { getTunnelablePorts } from "./ports.js";
 import { tunnelStatus } from "./wsTunnel.js";
 import { addSubscription, getVapidPublicKey, removeSubscription } from "./push.js";
@@ -1523,8 +1524,6 @@ api.get("/open-url/events", (_req, res) => {
 // stream instead of the unnamed open-url messages, so existing subscribers
 // (the shim's popup-open path) are unaffected.
 
-const MAX_OPEN_TARGET_PATH_LENGTH = 4096;
-
 api.post("/open-target", urlencoded({ extended: false }), async (req, res) => {
   if (!isLoopbackAddress(req.socket.remoteAddress)) {
     res.status(403).json({ error: "forbidden" });
@@ -1534,45 +1533,35 @@ api.post("/open-target", urlencoded({ extended: false }), async (req, res) => {
     res.status(403).json({ error: "missing header" });
     return;
   }
-  const body = req.body as Record<string, unknown> | undefined;
-  const rawPath = body?.path;
-  if (typeof rawPath !== "string" || !rawPath || rawPath.length > MAX_OPEN_TARGET_PATH_LENGTH) {
-    res.status(400).json({ error: "path is required" });
+  const params = parseOpenTargetParams(req.body as Record<string, unknown> | undefined);
+  if ("error" in params) {
+    res.status(400).json(params);
     return;
   }
-  let line: number | undefined;
-  if (body?.line !== undefined) {
-    const n = Number(body.line);
-    if (!Number.isInteger(n) || n < 1) {
-      res.status(400).json({ error: "line must be a positive integer" });
-      return;
-    }
-    line = n;
-  }
-  let action: "editor" | "preview" | undefined;
-  if (body?.action !== undefined) {
-    if (body.action !== "editor" && body.action !== "preview") {
-      res.status(400).json({ error: "action must be editor or preview" });
-      return;
-    }
-    action = body.action;
-  }
-  const target = expandHome(rawPath);
-  if (!(await exists(target))) {
+  const payload = await resolveOpenTarget(params);
+  if (!payload) {
     res.status(400).json({ error: "path does not exist" });
     return;
   }
-  const dir = await isDirectory(target);
-  const kind = dir ? "dir" : "file";
-  const projectCwd = dir ? target : ((await getGitRoot(path.dirname(target))) ?? path.dirname(target));
-  const delivered = broadcastOpenTarget({
-    kind,
-    path: shortenHome(target),
-    projectCwd: shortenHome(projectCwd),
-    line,
-    action,
-  });
-  res.json({ delivered });
+  res.json({ delivered: broadcastOpenTarget(payload) });
+});
+
+// The same resolution for the desktop app (plans/desktop-app.md T5): a
+// `perch://` link or `perch-desktop` names a path, the app hands it to this
+// server's page, and the page asks here what it is before opening it. Gated
+// like any other /api route, since the page itself calls it.
+api.get("/open-target/resolve", async (req, res) => {
+  const params = parseOpenTargetParams(req.query as Record<string, unknown>);
+  if ("error" in params) {
+    res.status(400).json(params);
+    return;
+  }
+  const payload = await resolveOpenTarget(params);
+  if (!payload) {
+    res.status(404).json({ error: "path does not exist" });
+    return;
+  }
+  res.json(payload);
 });
 
 // Agent hook state, for Settings → AI Providers: what core would install, what is

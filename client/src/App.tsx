@@ -62,6 +62,7 @@ import { useWorktrees } from "./hooks/useWorktrees";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { useNavigationHistory } from "./hooks/useNavigationHistory";
 import { useWindowControlsOverlay } from "./hooks/useWindowControlsOverlay";
+import { desktop, installDesktopHooks } from "./desktop";
 import { useTabGroups } from "./hooks/useTabGroups";
 import { useTabs } from "./hooks/useTabs";
 import { useGitRootDir } from "./hooks/useGitRootDir";
@@ -170,7 +171,10 @@ export default function App() {
       const target = rewriteLocalUrl(payload.url, window.location.origin, proxyDomain, payload.serverPort);
       if (!target) return;
       const opened = window.open(target, "_blank", "noopener,noreferrer");
-      if (!opened) setOpenUrlBanner(target);
+      // In the desktop app the app routes every window.open itself (a
+      // browser for other sites, its own window for this one), and the page
+      // gets null back either way: nothing was blocked.
+      if (!opened && !desktop) setOpenUrlBanner(target);
     };
     // In-app navigation, not a popup — every connected tab handles it (no
     // document.hasFocus() gate); openProject/openWindowTab are idempotent,
@@ -1454,6 +1458,39 @@ export default function App() {
   );
   openTargetRef.current = handleOpenTarget;
 
+  // The desktop app's way in (plans/desktop-app.md T8): a perch:// link or
+  // `perch-desktop` opening a path, and a notification click switching to
+  // its terminal. Installed once, reading through refs; the main window
+  // only, like the open-target stream above.
+  const openWindowTabRef = useRef(openWindowTab);
+  openWindowTabRef.current = openWindowTab;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  useEffect(() => {
+    if (IS_DETACHED) return;
+    installDesktopHooks({
+      openPath: (path, line, action) => {
+        api.resolveOpenTarget(path, line, action).then((payload) => openTargetRef.current(payload), showError);
+      },
+      focusTerminal: (windowId) => {
+        // A window the app just opened may not have its session list yet:
+        // look again for a few seconds before giving up.
+        const deadline = Date.now() + 5000;
+        const attempt = () => {
+          for (const session of sessionsRef.current) {
+            const win = session.windows.find((w) => w.id === windowId);
+            if (win) {
+              void openWindowTabRef.current(session.name, win.index);
+              return;
+            }
+          }
+          if (Date.now() < deadline) setTimeout(attempt, 250);
+        };
+        attempt();
+      },
+    });
+  }, [showError]);
+
   // code-server-style deep links: `?folder=<path>` opens a project,
   // `?file=<path>[&line=N][&action=editor|preview]` opens a file — the
   // no-connected-client fallback `perch open` prints. Runs once, after
@@ -2192,7 +2229,12 @@ export default function App() {
   // (plans/pwa-custom-title-bar.md). Never on a phone: the overlay is a
   // desktop-only browser feature, and the check keeps emulation honest.
   const windowControlsOverlay = useWindowControlsOverlay();
-  const showTitleBar = windowControlsOverlay.visible && settings.customTitleBar && !mobilePointer;
+  const showTitleBar = windowControlsOverlay.visible && settings.customTitleBar && (!mobilePointer || desktop !== null);
+  // The desktop app's window is frameless while this title bar is up; with it
+  // turned off, the OS draws its own again (plans/desktop-app.md T7).
+  useEffect(() => {
+    void desktop?.setDecorations(!settings.customTitleBar).catch(() => {});
+  }, [settings.customTitleBar]);
 
   // The Manage menu, shared by the sidebar's gear button and (on a phone,
   // where that button is behind a closed drawer) the status bar's own. Built
@@ -2407,6 +2449,30 @@ export default function App() {
     [projectListProps, projects],
   );
 
+  // In the desktop app's own local server window, Open Folder is the OS's
+  // folder picker instead of FolderPickerDialog (plans/desktop-app.md T8):
+  // same modes, same follow-up as the dialog's onPick below. The ref keeps it
+  // to one native dialog when StrictMode runs the effect twice.
+  const nativePickerOpen = useRef(false);
+  useEffect(() => {
+    if (folderPickerMode === null || !desktop?.info.isLocal || nativePickerOpen.current) return;
+    const mode = folderPickerMode;
+    nativePickerOpen.current = true;
+    desktop
+      .pickFolder(settings.defaultProjectsFolder || "~")
+      .then((path) => {
+        if (!path) return;
+        if (mode === "panelTerminal") void openPanelTerminalInProject(path);
+        else void openProject(path);
+      }, showError)
+      .finally(() => {
+        nativePickerOpen.current = false;
+        setFolderPickerMode(null);
+      });
+    // Runs once per open: the mode is what starts it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderPickerMode]);
+
   return (
     <div className={`app${panelMaximized && panel.visible ? " panel-maximized" : ""}`}>
       {showTitleBar && (
@@ -2414,6 +2480,7 @@ export default function App() {
           rect={windowControlsOverlay.rect}
           emulated={windowControlsOverlay.emulated}
           focused={windowControlsOverlay.focused}
+          desktopControls={windowControlsOverlay.desktopControls}
           title={windowTitle}
           commandCenterLabel={settings.commandCenterAction === "commandPalette" ? "Command Palette" : "Quick Switcher"}
           commandCenterCommand={
@@ -2931,7 +2998,7 @@ export default function App() {
       {menu && (
         <ContextMenu menu={menu} onClose={() => setMenu(null)} resolvedBindings={resolvedBindings} />
       )}
-      {folderPickerMode !== null && (
+      {folderPickerMode !== null && !desktop?.info.isLocal && (
         <FolderPickerDialog
           initialPath={settings.defaultProjectsFolder || "~"}
           onPick={(path) => {

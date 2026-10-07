@@ -147,3 +147,22 @@ export function broadcastOpenTarget(payload: OpenTargetPayload): number {
   for (const res of subscribers) res.write(frame);
   return subscribers.size;
 }
+
+// Desktop-app alerts (plans/desktop-app.md T4): every notification the server
+// would push also goes out as a named `notify` event on this same stream, so
+// a client with no push service (the desktop app's background listener, an
+// embedded webview) still hears it. Sent whether or not any browser ever
+// subscribed to Web Push. Browser tabs ignore it: EventSource only dispatches
+// a named event to a listener registered for that name.
+export interface AlertPayload {
+  title: string;
+  body: string;
+  // The terminal window the alert is about, when there is one, so a click
+  // can switch to its tab.
+  windowId?: string;
+}
+
+export function broadcastAlert(payload: AlertPayload): void {
+  const frame = `event: notify\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of subscribers) res.write(frame);
+}
