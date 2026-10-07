@@ -72,7 +72,10 @@ input {
   padding: 8px 10px;
   background: var(--panel);
 }
-.error pre { flex: 1; margin: 0; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; user-select: text; max-height: 160px; overflow: auto; }
+.error-text { flex: 1; min-width: 0; user-select: text; }
+.error-text p { margin: 0; white-space: pre-wrap; }
+/* The server's log, when a start failed: printed as it was written. */
+.error-text pre { margin: 6px 0 0; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; max-height: 160px; overflow: auto; }
 .servers { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
 .server { display: grid; grid-template-columns: 10px 1fr auto auto; gap: 10px; align-items: center; padding: 9px 12px; position: relative; }
 .server + .server { border-top: 1px solid var(--border); }
@@ -100,6 +103,7 @@ input {
 .menu button { background: transparent; color: var(--fg); text-align: left; border: none; padding: 5px 10px; }
 .menu button:hover { background: var(--hover); }
 .menu button.danger { color: var(--bad); }
+.menu button.danger.confirm { background: var(--bad); color: #fff; font-weight: 600; }
 .edit { grid-column: 2 / -1; display: flex; gap: 6px; }
 .edit input { flex: 1; }
 .local { margin-top: auto; display: flex; align-items: center; gap: 10px; color: var(--muted); padding-top: 4px; }

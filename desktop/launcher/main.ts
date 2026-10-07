@@ -61,11 +61,30 @@ function ago(ms: number): string {
 let state: LauncherState = { servers: [], local: { state: "stopped" } };
 let openMenu: string | null = null;
 let editing: { id: string; field: "name" | "url" } | null = null;
+// The server whose Remove was clicked once: the second click removes it.
+let confirmingRemove: string | null = null;
 let busy = false;
 
 function showError(message: string) {
-  $<HTMLPreElement>("error-text").textContent = message;
+  // A failed local start appends the server's log after a blank line
+  // (windows.rs describe_local_failure): the message reads as prose, the
+  // log as the log it is.
+  const [text, ...rest] = message.split("\n\n");
+  const p = document.createElement("p");
+  p.textContent = text;
+  const parts: HTMLElement[] = [p];
+  if (rest.length > 0) {
+    const log = document.createElement("pre");
+    log.textContent = rest.join("\n\n");
+    parts.push(log);
+  }
+  $("error-text").replaceChildren(...parts);
   $("error").hidden = false;
+}
+
+// A form that went through: whatever it complained about before is moot.
+function clearError() {
+  $("error").hidden = true;
 }
 
 async function run<T>(cmd: string, args?: Record<string, unknown>): Promise<T | undefined> {
@@ -149,6 +168,8 @@ function button(label: string, onClick: () => void, cls = "ghost"): HTMLButtonEl
 }
 
 function render() {
+  // A confirmation lasts only while its menu stays open.
+  if (confirmingRemove !== openMenu) confirmingRemove = null;
   list.replaceChildren(...state.servers.map(row));
   renderFooter();
 }
@@ -229,12 +250,24 @@ function menu(s: Server): HTMLElement {
     }),
   );
   if (s.kind === "remote") {
-    const remove = button("Remove", async () => {
+    const confirming = confirmingRemove === s.id;
+    // Removing also signs the app out of the server: ask once more.
+    const remove = button(confirming ? `Remove "${s.name}"` : "Remove...", async () => {
+      if (!confirming) {
+        confirmingRemove = s.id;
+        render();
+        return;
+      }
       close();
+      confirmingRemove = null;
       await run("remove_server", { id: s.id });
       await refresh();
     });
     remove.classList.add("danger");
+    if (confirming) {
+      remove.classList.add("confirm");
+      queueMicrotask(() => remove.focus());
+    }
     m.append(remove);
   }
   for (const b of m.querySelectorAll("button")) b.setAttribute("role", "menuitem");
@@ -256,6 +289,7 @@ function editor(s: Server, field: "name" | "url"): HTMLElement {
     // A unit command resolves to null; `run` gives undefined on an error,
     // which leaves the form open with the message above it.
     if ((await run("update_server", { id: s.id, [field]: input.value })) !== undefined) {
+      clearError();
       editing = null;
       await refresh();
     }
@@ -317,6 +351,7 @@ addForm.addEventListener("submit", async (e) => {
     url: $<HTMLInputElement>("add-url").value,
   });
   if (added) {
+    clearError();
     addForm.reset();
     addForm.hidden = true;
     await refresh();
