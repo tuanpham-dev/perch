@@ -60,7 +60,9 @@ function ago(ms: number): string {
 
 let state: LauncherState = { servers: [], local: { state: "stopped" } };
 let openMenu: string | null = null;
-let editing: { id: string; field: "name" | "url" } | null = null;
+// What's typed so far and where the caret is live here, not just in the
+// input: the list is rebuilt every few seconds (the timer at the bottom).
+let editing: { id: string; field: "name" | "url"; draft?: string; caret?: [number, number] } | null = null;
 // The server whose Remove was clicked once: the second click removes it.
 let confirmingRemove: string | null = null;
 let busy = false;
@@ -278,7 +280,14 @@ function editor(s: Server, field: "name" | "url"): HTMLElement {
   const form = document.createElement("form");
   form.className = "edit";
   const input = document.createElement("input");
-  input.value = field === "name" ? s.name : s.url;
+  const edit = editing;
+  input.value = edit?.draft ?? (field === "name" ? s.name : s.url);
+  const keep = () => {
+    if (editing !== edit || !edit) return;
+    edit.draft = input.value;
+    edit.caret = [input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length];
+  };
+  for (const type of ["input", "keyup", "mouseup", "select"]) input.addEventListener(type, keep);
   input.setAttribute("aria-label", field === "name" ? "Server name" : "Server address");
   const done = () => {
     editing = null;
@@ -298,7 +307,10 @@ function editor(s: Server, field: "name" | "url"): HTMLElement {
     if (e.key === "Escape") done();
   });
   form.append(input, button("Save", () => form.requestSubmit(), ""), button("Cancel", done));
-  queueMicrotask(() => input.focus());
+  queueMicrotask(() => {
+    input.focus();
+    if (edit?.caret) input.setSelectionRange(...edit.caret);
+  });
   return form;
 }
 
