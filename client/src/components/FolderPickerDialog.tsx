@@ -126,6 +126,26 @@ export default function FolderPickerDialog({ initialPath, onPick, onCancel }: Pr
     setSelectedIndex(match === -1 ? null : match + parentOffset);
   };
 
+  // Opens what the field says: the listed folder, or a path typed (or
+  // pasted) since, once the server confirms it's a folder. Enter in the
+  // field browses into a path instead; this button is the way to open it.
+  const openFolder = () => {
+    const typed = inputValue.trim();
+    if (listedPath !== null && (typed === listedPath || !typed)) {
+      onPick(listedPath);
+      return;
+    }
+    const seq = ++requestSeq.current;
+    api
+      .listDir(typed)
+      .then((listing) => {
+        if (seq === requestSeq.current) onPick(listing.path);
+      })
+      .catch((err: Error) => {
+        if (seq === requestSeq.current) setError(err.message);
+      });
+  };
+
   const submitNewFolder = () => {
     const name = newFolderName.trim();
     if (!name || listedPath === null) return;
@@ -237,8 +257,8 @@ export default function FolderPickerDialog({ initialPath, onPick, onCancel }: Pr
           </button>
           <button
             className="dialog-button primary"
-            disabled={error !== null || listedPath === null}
-            onClick={() => listedPath !== null && onPick(listedPath)}
+            disabled={!inputValue.trim()}
+            onClick={openFolder}
           >
             Open Folder
           </button>
