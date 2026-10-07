@@ -1855,7 +1855,11 @@ body.resizing-row {
 
 /* ---- Main / tabs ---- */
 
-.main {
+/* `main.main`, not `.main`: extensions bring their own markup, and a bare
+   class this common styles theirs too — Monaco's suggestion rows have a
+   <div class="main">, which this turned into a column, pushing every label
+   out of its row. */
+main.main {
   flex: 1;
   display: flex;
   flex-direction: column;
