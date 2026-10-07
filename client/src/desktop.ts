@@ -45,7 +45,12 @@ export function parseButtonLayout(layout: string | undefined): ButtonLayout {
   const [before, after = ""] = layout.split(":");
   const pick = (side: string) =>
     side.split(",").map((b) => b.trim()).filter((b): b is WindowButton => BUTTONS.includes(b as WindowButton));
-  return { left: pick(before), right: pick(after) };
+  const left = pick(before);
+  const right = pick(after);
+  // A layout with no buttons at all would leave the frameless window with
+  // no way to close it but the keyboard: draw the usual three instead.
+  if (left.length === 0 && right.length === 0) return { left: [], right: [...BUTTONS] };
+  return { left, right };
 }
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;

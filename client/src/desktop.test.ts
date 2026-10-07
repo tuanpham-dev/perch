@@ -50,7 +50,9 @@ describe("desktop bridge", () => {
     expect(parseButtonLayout("appmenu:close")).toEqual({ left: [], right: ["close"] });
     expect(parseButtonLayout("icon:minimize,spacer,maximize,close")).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
     expect(parseButtonLayout("close:menu")).toEqual({ left: ["close"], right: [] });
-    expect(parseButtonLayout("")).toEqual({ left: [], right: [] });
+    // No buttons at all: the window would have no way to close.
+    expect(parseButtonLayout("")).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
+    expect(parseButtonLayout("appmenu:")).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
     expect(parseButtonLayout(undefined)).toEqual({ left: [], right: ["minimize", "maximize", "close"] });
   });
 
