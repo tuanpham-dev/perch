@@ -44,6 +44,11 @@ export default function FolderPickerDialog({ initialPath, onPick, onCancel }: Pr
   // Guards against an out-of-order response landing after a faster, newer
   // one (typing a new path while a slow listing is still in flight).
   const requestSeq = useRef(0);
+  // Typed into the field since the current listing was asked for: that
+  // listing then fills in the folder list but leaves the field alone -
+  // the first one (of ~) landing after a quick paste replaced the path
+  // with ~, and Open Folder opened home.
+  const typedSinceRequest = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -61,13 +66,14 @@ export default function FolderPickerDialog({ initialPath, onPick, onCancel }: Pr
 
   useEffect(() => {
     const seq = ++requestSeq.current;
+    typedSinceRequest.current = false;
     api
       .listDir(requestPath)
       .then((listing) => {
         if (seq !== requestSeq.current) return;
         setDirs(listing.entries.filter((e) => e.dir).map((e) => e.name));
         setListedPath(listing.path);
-        setInputValue(listing.path);
+        if (!typedSinceRequest.current) setInputValue(listing.path);
         setError(null);
         setSelectedIndex(null);
         setCreatingFolder(false);
@@ -103,6 +109,7 @@ export default function FolderPickerDialog({ initialPath, onPick, onCancel }: Pr
   };
 
   const handleInputChange = (value: string) => {
+    typedSinceRequest.current = true;
     setInputValue(value);
     if (value === listedPath) {
       setSelectedIndex(null);
