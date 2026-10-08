@@ -78,7 +78,8 @@ function settingsChannel(): Channel {
   let dir = process.env.PERCH_CONFIG_DIR;
   if (!dir && existsSync(ENV_FILE)) {
     const line = readFileSync(ENV_FILE, 'utf8').split('\n').filter((l) => l.startsWith('PERCH_CONFIG_DIR=')).at(-1);
-    dir = line?.slice('PERCH_CONFIG_DIR='.length).replace(/^["']|["']$/g, '').trim() || undefined;
+    // trim first: a CRLF file leaves a \r after the closing quote.
+    dir = line?.slice('PERCH_CONFIG_DIR='.length).trim().replace(/^["']|["']$/g, '') || undefined;
   }
   dir ??= process.platform === 'win32'
     ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'perch')

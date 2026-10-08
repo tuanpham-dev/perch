@@ -328,9 +328,15 @@ export async function cmdUpdate(args: string[] = []): Promise<void> {
   }
   // Releases by default, main with --main (plans/app-versioning.md).
   if (!moveCheckout(args)) return;
-  // ci, not install: install rewrites package-lock.json, which then shows up
-  // as a local change that the next update asks to discard.
-  if (inherit('npm', ['ci'], REPO_DIR) !== 0) die('npm ci failed');
+  // --no-save: a plain install can rewrite package-lock.json, which then shows
+  // up as a local change that the next update asks to discard. Not ci: ci
+  // deletes node_modules first, and on Windows the terminal daemon, which
+  // keeps running through an update, holds node-pty's addon open there.
+  if (inherit('npm', ['install', '--no-save'], REPO_DIR) !== 0) {
+    die(process.platform === 'win32'
+      ? `npm install failed - if a file was in use, stop the terminal daemon (perch daemon stop; sessions come back) and run perch update again`
+      : 'npm install failed');
+  }
   if (inherit('npm', ['run', 'build'], REPO_DIR) !== 0) die('npm run build failed');
   ok('updated');
 
