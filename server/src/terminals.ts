@@ -313,20 +313,26 @@ export async function findWindow(windowId: string): Promise<WindowLocation | nul
 export interface WindowPidMaps {
   // A window's shell pid → owning session, for walking a port owner's ppid chain.
   byPid: Map<number, string>;
+  // A window's shell pid → that window's id, so a port can name its terminal.
+  windowByPid: Map<number, string>;
   // Window id → owning session, for the PERCH_WINDOW environ fallback.
   byWindowId: Map<string, string>;
 }
 
 export async function listAllWindowPids(): Promise<WindowPidMaps> {
   const byPid = new Map<number, string>();
+  const windowByPid = new Map<number, string>();
   const byWindowId = new Map<string, string>();
   for (const s of await rawSessions()) {
     for (const w of s.windows) {
-      if (w.pid > 1) byPid.set(w.pid, s.name);
+      if (w.pid > 1) {
+        byPid.set(w.pid, s.name);
+        windowByPid.set(w.pid, w.id);
+      }
       byWindowId.set(w.id, s.name);
     }
   }
-  return { byPid, byWindowId };
+  return { byPid, windowByPid, byWindowId };
 }
 
 // A window-id target's session and index, for callers that still speak

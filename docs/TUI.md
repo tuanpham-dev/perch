@@ -61,6 +61,7 @@ when that server has `AUTH_TOKEN` set; without `--token` it uses the
 | `x` | Kill the selected terminal, or the whole project session. Asks first: only `y` kills |
 | `o` | Open a project (see below) |
 | `p` | Pin or unpin the selected project |
+| `t` | Ports: the port-forwarding command and the server's listening ports (see below) |
 | `/` | Filter by name, command or path. `Enter` keeps the filter, `Esc` clears it |
 | `?` | Show the keys |
 | `q` or `Ctrl-C` | Quit |
@@ -139,6 +140,67 @@ Opening a folder attaches you to the session already running there, or
 starts one in that folder, named after it. Either way the folder goes to the
 top of recents, the same list as the web app's recent-projects button. A path
 that isn't a folder shows an error, and the picker stays open.
+
+## Ports
+
+`t` opens the Ports box. At the top is the command that forwards every port
+listening on the server to the machine you run it on (the same tunnel as the
+web PORTS panel's copy button):
+
+```bash
+curl -s <server>/tunnel.mjs | node --input-type=module - --url <server> --all
+```
+
+`--all` follows ports as they come and go, so a dev server you start later
+shows up as `localhost:<port>` on your machine within seconds. On a server
+with `AUTH_TOKEN`, the command carries the token as an `x-auth-token` header;
+it shows as `••••` until you press `s`. The command uses the address the TUI
+connected to, so if you run the TUI on the server itself it says
+`127.0.0.1`: change that to the server's address before running it elsewhere.
+
+Once a tunnel started from that command connects, the box says so, and each
+port it has forwarded is marked "forwarded" with its link changed to
+`http://localhost:<port>/`, which works without going through Perch. The
+command carries a `--client <id>` that this TUI made up for itself (kept in
+Perch's state folder, so it survives restarts); only a tunnel started with
+that id counts, the same way the web PORTS panel tells its own tunnels apart.
+
+Below the command are the ports listening on the server, with the process,
+the project it runs in, and its address. A port whose terminal has closed is
+marked "no terminal". The list refreshes every 2 seconds. The selected port's
+URL (`http://localhost:<port>/` when forwarded, else through Perch:
+`<server>/proxy/<port>/`, or `<port>.<domain>` with a proxy domain) is shown as a link you can Ctrl/Cmd-click in terminals that
+support links.
+
+| Key | What it does |
+|---|---|
+| `↑` `↓` | Pick a port |
+| `Enter` | Go to the terminal running it. Detaching brings you back to the box |
+| `o` | Open the port's URL in a browser (see below) |
+| `u` | Copy the port's URL |
+| `x` | Stop the process holding the port (asks first) |
+| `c` | Copy the tunnel command |
+| `s` | Show or hide the token |
+| `t` or `Esc` | Close the box |
+
+Copying asks your terminal to put the text on your clipboard (OSC 52). That
+works in Perch's web terminal and most modern terminals, also over SSH, but
+some terminals don't allow it, and the TUI can't tell. If nothing lands on
+your clipboard, select the text in the box with the mouse.
+
+`o` opens the URL in a browser, when the TUI can reach one in front of you:
+
+- **On your own desktop** (macOS, Windows, or Linux with a display), in your
+  default browser: `open` on macOS, `rundll32 url.dll,FileProtocolHandler` on
+  Windows, `xdg-open` on Linux.
+- **Inside a Perch terminal**, in the Perch browser tab you're typing in, the
+  same way any program there opening a link does.
+- **Without a display** (over SSH, or in code-server's terminal) there is no
+  browser it can reach, so it says so: Ctrl/Cmd-click the link instead, or
+  press `u` and paste the URL.
+
+The ports list comes from the Ports extension; without it, the box shows only
+the command.
 
 ## Pins and the web app
 

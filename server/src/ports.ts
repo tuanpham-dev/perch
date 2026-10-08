@@ -14,6 +14,9 @@ export interface ListeningPort {
   // being started from when `orphan` is set. Empty only for a port the
   // "user" scope swept in, which no terminal ever started.
   session: string;
+  // The id of the terminal window the process runs in, when it still runs in
+  // one - lets a client go straight to that terminal. Absent for orphans.
+  window?: string;
   // The process outlived the terminal that started it (or was never started
   // by one): still yours, still listening, but no live pane owns it.
   orphan?: boolean;
@@ -179,20 +182,24 @@ function computeOwnAncestors(procMap: Map<number, ProcInfo>, panePids: Map<numbe
 // "own": the chain hit perch's own ancestry — hard-excluded, no
 // fallback. "unknown": the chain dead-ended (reparented orphan, exited
 // parent) — eligible for the PERCH_WINDOW environ fallback below.
-type Attribution = { session: string } | "own" | "unknown";
+type Attribution = { session: string; window?: string } | "own" | "unknown";
 
 // Walks a port's owning pid up its parent chain looking for a terminal window.
-function attributeToSession(
+export function attributeToSession(
   pid: number,
   procMap: Map<number, ProcInfo>,
   panePids: Map<number, string>,
   ownAncestors: Set<number>,
+  paneWindows: Map<number, string> = new Map(),
 ): Attribution {
   let cur = pid;
   for (let hop = 0; hop < MAX_ANCESTRY_HOPS; hop++) {
     if (ownAncestors.has(cur)) return "own";
     const session = panePids.get(cur);
-    if (session) return { session };
+    if (session) {
+      const window = paneWindows.get(cur);
+      return window ? { session, window } : { session };
+    }
     if (cur <= 1) return "unknown";
     const info = procMap.get(cur);
     if (!info) return "unknown";
@@ -287,16 +294,17 @@ async function scanTerminalPorts(): Promise<ListeningPort[]> {
   const attributed = await Promise.all(
     ports.map(async (port): Promise<ListeningPort | null> => {
       if (port.pid === undefined) return null;
-      const result = attributeToSession(port.pid, procMap, panes.byPid, ownAncestors);
+      const result = attributeToSession(port.pid, procMap, panes.byPid, ownAncestors, panes.windowByPid);
       if (result === "own") return null;
-      if (result !== "unknown") return withProcessName(port, { session: result.session });
+      if (result !== "unknown") return withProcessName(port, result);
       // The chain dead-ended: a process reparented to init when whatever
       // started it exited. Its own environ still says where it came from.
       const origin = await readTerminalOrigin(port.pid);
-      const live = origin?.windowId ? panes.byWindowId.get(origin.windowId) : undefined;
+      const windowId = origin?.windowId;
+      const live = windowId ? panes.byWindowId.get(windowId) : undefined;
       // That window is still open — an ordinary attribution, not an orphan,
       // and the one case every scope agrees on.
-      if (live) return withProcessName(port, { session: live });
+      if (live && windowId) return withProcessName(port, { session: live, window: windowId });
       if (scope === "open") return null;
       if (origin) return withProcessName(port, { session: origin.session ?? "", orphan: true });
       return scope === "user" ? withProcessName(port, { session: "", orphan: true }) : null;

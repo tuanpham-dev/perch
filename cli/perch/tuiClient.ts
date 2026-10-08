@@ -3,6 +3,10 @@
 // folder listing for path completion, and the attach WebSocket's URL. Unlike
 // apiClient.ts it never exits the process on a failure; the TUI shows the
 // error in its status line and carries on.
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { stateDir } from '../../mux/src/util/paths.ts';
 import { sanitizeProjects, type Project, type Session } from './tuiModel.ts';
 
 export class ApiError extends Error {
@@ -12,6 +16,18 @@ export class ApiError extends Error {
     this.status = status;
     this.name = 'ApiError';
   }
+}
+
+/** One listening port, as the Ports extension's list route returns it. */
+export interface ListeningPort {
+  port: number;
+  address: string;
+  process?: string;
+  pid?: number;
+  session: string;
+  /** The terminal window the process runs in (newer servers only). */
+  window?: string;
+  orphan?: boolean;
 }
 
 export interface DirEntry {
@@ -108,6 +124,39 @@ export class PerchClient {
   }
 
   /**
+   * The server's listening ports, from the bundled Ports extension; null
+   * when the server doesn't have it (the route is missing or disabled).
+   */
+  async ports(): Promise<ListeningPort[] | null> {
+    try {
+      return await this.#request<ListeningPort[]>('GET', '/ext/perch.ports/list');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /** Ends the process holding `port` (SIGTERM, SIGKILL after a grace period). */
+  killPort(port: number): Promise<void> {
+    return this.#request('POST', `/ext/perch.ports/kill/${port}`);
+  }
+
+  /**
+   * Whether a tunnel started with `client` in its command is connected, and
+   * which ports it has bound on the machine it runs on.
+   */
+  async tunnelStatus(client: string): Promise<{ connected: boolean; ports: number[] }> {
+    const r = await this.#request<{ connected?: boolean; ports?: number[] }>('GET', `/tunnel-status?client=${encodeURIComponent(client)}`);
+    return { connected: r?.connected === true, ports: Array.isArray(r?.ports) ? r.ports : [] };
+  }
+
+  /** The proxy domain ports are served under, or null for the /proxy/ path. */
+  async proxyDomain(): Promise<string | null> {
+    const r = await this.#request<{ domain?: string | null }>('GET', '/proxy-config');
+    return r?.domain || null;
+  }
+
+  /**
    * The attach socket for a session name (follows its current window) or a
    * "@<window id>" (pinned to that window). The token rides in the query,
    * which the upgrade handler accepts alongside the header.
@@ -121,4 +170,27 @@ export class PerchClient {
     if (this.token) url.searchParams.set('token', this.token);
     return url.toString();
   }
+}
+
+/**
+ * This machine's id for pairing tunnels with the TUI (the tunnel CLI's
+ * --client). Kept in a file so a tunnel started from an earlier run's command
+ * still counts after the TUI restarts; made up and saved on first use. If
+ * the file can't be written, the id lasts as long as this run.
+ */
+export function tunnelClientId(file = join(stateDir(), 'tui-tunnel-client')): string {
+  try {
+    const stored = readFileSync(file, 'utf8').trim();
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(stored)) return stored;
+  } catch {
+    // Not made yet.
+  }
+  const id = randomBytes(16).toString('hex');
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${id}\n`, { mode: 0o600 });
+  } catch {
+    // Read-only state folder: this run's id only.
+  }
+  return id;
 }

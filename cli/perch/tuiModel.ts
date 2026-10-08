@@ -260,3 +260,103 @@ export function pickerItems(
   }
   return items;
 }
+
+// ---- the Ports box ----------------------------------------------------------
+
+/** Single-quoted for a POSIX shell, inner quotes escaped. */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+const MASK = '••••';
+
+/**
+ * The command that forwards every port listening on the server to the
+ * machine it runs on: the tunnel script streamed from the server into node,
+ * with the token as a header when the server has one. `mask` hides the
+ * token for display; a copy always gets the real one.
+ */
+export function tunnelCommand(baseUrl: string, token: string, mask: boolean, client = ''): string {
+  const url = baseUrl.replace(/\/+$/, '');
+  const header = token ? shellQuote(`x-auth-token: ${mask ? MASK : token}`) : '';
+  const curl = `curl -s ${header ? `-H ${header} ` : ''}${url}/tunnel.mjs`;
+  // --client pairs the tunnel with this TUI, so the server can say which
+  // ports it has forwarded (and only to this TUI, like the web panel).
+  const node = `node --input-type=module - --url ${url} ${header ? `--header ${header} ` : ''}${client ? `--client ${client} ` : ''}--all`;
+  return `${curl} | ${node}`;
+}
+
+/**
+ * Where a port's app is reachable through the server: its own subdomain when
+ * a proxy domain is configured, else the server's /proxy/<port>/ path. The
+ * same rule as the web PORTS panel.
+ */
+export function portUrl(port: number, baseUrl: string, proxyDomain: string | null, forwarded = false): string {
+  // Forwarded to this machine by a tunnel: reachable directly, which beats the proxy.
+  if (forwarded) return `http://localhost:${port}/`;
+  const url = new URL(baseUrl);
+  if (proxyDomain) return `${url.protocol}//${port}.${proxyDomain}/`;
+  return `${url.origin}/proxy/${port}/`;
+}
+
+/** Asks the terminal to put `text` on the clipboard (OSC 52). */
+export function osc52(text: string): string {
+  return `\x1b]52;c;${Buffer.from(text, 'utf8').toString('base64')}\x07`;
+}
+
+/** `text` as a hyperlink to `url` in terminals that support OSC 8. */
+export function osc8(url: string, text: string): string {
+  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
+
+/** Wraps at spaces to `width` columns; a word longer than that is split. */
+export function wrapWords(text: string, width: number): string[] {
+  if (width <= 0) return [text];
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    let w = word;
+    const candidate = line ? `${line} ${w}` : w;
+    if (Array.from(candidate).length <= width) {
+      line = candidate;
+      continue;
+    }
+    if (line) lines.push(line);
+    while (Array.from(w).length > width) {
+      lines.push(Array.from(w).slice(0, width).join(''));
+      w = Array.from(w).slice(width).join('');
+    }
+    line = w;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/** The system command that opens `url` in the default browser. */
+export function openCommand(platform: NodeJS.Platform, url: string): { cmd: string; args: string[] } {
+  if (platform === 'darwin') return { cmd: 'open', args: [url] };
+  // Not `cmd /c start`: cmd would split the URL at every "&".
+  if (platform === 'win32') return { cmd: 'rundll32', args: ['url.dll,FileProtocolHandler', url] };
+  return { cmd: 'xdg-open', args: [url] };
+}
+
+export type OpenMethod = 'system' | 'none';
+
+/**
+ * Whether the TUI can show a URL in a browser the person is looking at.
+ * - Inside a Perch terminal: yes, through the system opener, whose xdg-open
+ *   there is Perch's stand-in that hands the URL to the Perch browser tab
+ *   being typed into.
+ * - On a desktop (macOS, Windows, a Linux display) and not over SSH: yes.
+ * - Otherwise (over SSH, in code-server's terminal) no browser on this
+ *   machine is the one in front of you. Perch's bridge to its browser tabs
+ *   doesn't help either: a tab acts only while focused, and it isn't while
+ *   you type here.
+ */
+export function openMethod(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): OpenMethod {
+  if (env.PERCH_WINDOW) return 'system';
+  const overSsh = Boolean(env.SSH_CONNECTION || env.SSH_TTY);
+  const display = platform === 'darwin' || platform === 'win32' || Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
+  return display && !overSsh ? 'system' : 'none';
+}
+

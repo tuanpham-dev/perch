@@ -2,12 +2,15 @@
 // with the keys to attach, add, rename, kill, open and pin. The whole frame
 // is redrawn on every change (it is a few KB at most), line by line from the
 // top, so there is no screen state to keep in sync.
+import { spawn } from 'node:child_process';
 import { runAttach, type AttachEnd } from './tuiAttach.ts';
-import { ApiError, type DirEntry, type PerchClient } from './tuiClient.ts';
+import { ApiError, tunnelClientId, type DirEntry, type ListeningPort, type PerchClient } from './tuiClient.ts';
 import { keyLabel } from './tuiDetach.ts';
 import { parseKeys, type Key } from './tuiKeys.ts';
 import {
-  attachChoice, buildRows, bumpRecent, completePath, completionDir, findRowIndex, fit, pickerItems, projectName, scrollTop,
+  attachChoice, buildRows, bumpRecent, completePath, completionDir, findRowIndex, fit, openCommand, openMethod, osc52, osc8,
+  pickerItems, portUrl, projectName,
+  scrollTop, tunnelCommand, wrapWords,
   sessionNameForProject, togglePin, type PickerItem, type Project, type ProjectRow, type Row, type Session,
 } from './tuiModel.ts';
 
@@ -30,7 +33,21 @@ type Mode =
   | { kind: 'filter' }
   | { kind: 'help' }
   | { kind: 'prompt'; label: string; text: string; submit: (text: string) => Promise<void> }
-  | { kind: 'confirm'; question: string; yes: () => Promise<void> }
+  | { kind: 'confirm'; question: string; yes: () => Promise<void>; back?: Mode }
+  | {
+      kind: 'ports';
+      /** Sorted by port; undefined until the first answer, null with no Ports extension. */
+      ports: ListeningPort[] | null | undefined;
+      /** The selected listener's portKey (stable across refreshes), or ''. */
+      selected: string;
+      top: number;
+      reveal: boolean;
+      domain: string | null;
+      error: string;
+      /** Whether this TUI's tunnel (its --client id) is connected, and the ports it has bound. */
+      tunnel: boolean;
+      forwarded: Set<number>;
+    }
   | {
       kind: 'picker';
       text: string;
@@ -47,6 +64,11 @@ type Mode =
     };
 
 type Picker = Extract<Mode, { kind: 'picker' }>;
+type Ports = Extract<Mode, { kind: 'ports' }>;
+// One port can have several listeners (IPv4 and IPv6, say): the selection names one.
+const portKey = (p: ListeningPort) => `${p.port} ${p.address}`;
+
+type BoxLine = { text: string; selected?: boolean; dim?: boolean; link?: string };
 
 const HELP_LINES = [
   ['↑ ↓  j k', 'Move'],
@@ -57,6 +79,7 @@ const HELP_LINES = [
   ['x', 'Kill the terminal or project session'],
   ['o', 'Open a project by path or from recents'],
   ['p', 'Pin / unpin the project'],
+  ['t', 'Ports: tunnel command and listening ports'],
   ['/', 'Filter (Esc clears)'],
   ['g G', 'First / last row'],
   ['q  Ctrl-C', 'Quit'],
@@ -84,6 +107,9 @@ export class TuiApp {
   #busy = false;
   #poll: NodeJS.Timeout | undefined;
   #statusTimer: NodeJS.Timeout | undefined;
+  #portsPoll: NodeJS.Timeout | undefined;
+  // This machine's tunnel pairing id, read (or made) on first use of the Ports box.
+  #tunnelClient: string | undefined;
   #quit: (() => void) | undefined;
 
   constructor(client: PerchClient, detachKey: string, initial: { sessions: Session[]; projects: Project[] }) {
@@ -106,6 +132,7 @@ export class TuiApp {
       this.#quit = () => {
         clearInterval(this.#poll);
         clearTimeout(this.#statusTimer);
+        clearInterval(this.#portsPoll);
         stdin.off('data', this.#onData);
         stdout.off('resize', this.#onResize);
         resolve();
@@ -405,6 +432,151 @@ export class TuiApp {
     }
   }
 
+  // ---- the Ports box -------------------------------------------------------
+
+  #openPorts(): void {
+    const mode: Ports = {
+      kind: 'ports', ports: undefined, selected: '', top: 0, reveal: false, domain: null, error: '', tunnel: false, forwarded: new Set(),
+    };
+    this.#mode = mode;
+    void this.#loadPorts(mode);
+    this.#client.proxyDomain().then(
+      (domain) => {
+        mode.domain = domain;
+        if (this.#portsShowing(mode)) this.#render();
+      },
+      () => { /* the /proxy/ path is the fallback */ },
+    );
+    clearInterval(this.#portsPoll);
+    this.#portsPoll = setInterval(() => {
+      if (!this.#portsShowing(mode)) {
+        clearInterval(this.#portsPoll);
+        return;
+      }
+      if (!this.#attached) void this.#loadPorts(mode);
+    }, POLL_MS);
+  }
+
+  /** The box is up: on its own, or behind its kill question. */
+  #portsShowing(mode: Ports): boolean {
+    const m = this.#mode;
+    return m === mode || (m.kind === 'confirm' && m.back === mode);
+  }
+
+  async #loadPorts(mode: Ports): Promise<void> {
+    // A failed status read means "no tunnel", not an error worth showing.
+    const status = this.#client.tunnelStatus(this.#tunnel()).catch(() => ({ connected: false, ports: [] as number[] }));
+    try {
+      const list = await this.#client.ports();
+      const tunnel = await status;
+      mode.tunnel = tunnel.connected;
+      mode.forwarded = new Set(tunnel.ports);
+      mode.ports = list ? [...list].sort((a, b) => a.port - b.port) : null;
+      mode.error = '';
+      // Stay on the same port; else the first one.
+      if (mode.ports && !mode.ports.some((p) => portKey(p) === mode.selected)) mode.selected = mode.ports[0] ? portKey(mode.ports[0]) : '';
+    } catch (err) {
+      mode.error = err instanceof Error ? err.message : String(err);
+    }
+    if (this.#portsShowing(mode) && !this.#attached) this.#render();
+  }
+
+  #tunnel(): string {
+    this.#tunnelClient ??= tunnelClientId();
+    return this.#tunnelClient;
+  }
+
+  /** The port's link: localhost once this TUI's tunnel has forwarded it, else through Perch. */
+  #portLink(mode: Ports, port: number): string {
+    return portUrl(port, this.#client.baseUrl, mode.domain, mode.forwarded.has(port));
+  }
+
+  #selectedPort(mode: Ports): ListeningPort | undefined {
+    return mode.ports?.find((p) => portKey(p) === mode.selected);
+  }
+
+  #copy(text: string, what: string): void {
+    process.stdout.write(osc52(text));
+    this.#setStatus(`${what} sent to clipboard (if your terminal allows it)`);
+  }
+
+  #portsKey(mode: Ports, key: Key): void {
+    const ch = key.name === 'char' ? key.ch : undefined;
+    const list = mode.ports ?? [];
+    const at = list.findIndex((p) => portKey(p) === mode.selected);
+    const move = (delta: number) => {
+      if (list.length === 0) return;
+      mode.selected = portKey(list[Math.max(0, Math.min(list.length - 1, (at < 0 ? 0 : at) + delta))]!);
+    };
+    if (key.name === 'escape' || key.name === 'ctrl-c' || ch === 't') {
+      clearInterval(this.#portsPoll);
+      this.#mode = { kind: 'list' };
+    } else if (key.name === 'up' || ch === 'k') move(-1);
+    else if (key.name === 'down' || ch === 'j') move(1);
+    else if (key.name === 'pageup') move(-10);
+    else if (key.name === 'pagedown') move(10);
+    else if (ch === 's' && this.#client.token) mode.reveal = !mode.reveal;
+    else if (ch === 'c') this.#copy(tunnelCommand(this.#client.baseUrl, this.#client.token, false, this.#tunnel()), 'Command');
+    else if (ch === 'u') {
+      const p = this.#selectedPort(mode);
+      if (p) this.#copy(this.#portLink(mode, p.port), 'URL');
+    } else if (ch === 'o') {
+      const p = this.#selectedPort(mode);
+      if (p) this.#openInBrowser(this.#portLink(mode, p.port));
+    } else if (ch === 'x') this.#killPort(mode);
+    else if (key.name === 'enter') this.#goToPort(mode);
+  }
+
+  // Opens the URL in a browser you can see, when there is one this machine
+  // can reach (see openMethod).
+  #openInBrowser(url: string): void {
+    if (openMethod(process.platform, process.env) === 'none') {
+      return this.#setStatus("Can't open a browser from here (no display) - Ctrl/Cmd-click the link, or press u to copy it");
+    }
+    const { cmd, args } = openCommand(process.platform, url);
+    try {
+      const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
+      child.on('error', () => {
+        this.#setStatus(`Couldn't open a browser (${cmd} not found) - press u to copy the URL`);
+        this.#render();
+      });
+      child.unref();
+      this.#setStatus(`Opening ${url}`);
+    } catch {
+      this.#setStatus(`Couldn't open a browser - press u to copy the URL`);
+    }
+  }
+
+  #killPort(mode: Ports): void {
+    const p = this.#selectedPort(mode);
+    if (!p) return;
+    if (p.pid === undefined) return this.#setStatus(`Can't kill: no process found for port ${p.port}`);
+    this.#mode = {
+      kind: 'confirm',
+      question: `Kill ${p.process ?? 'the process'} (pid ${p.pid}) on port ${p.port}? [y/N] `,
+      back: mode,
+      yes: async () => {
+        await this.#client.killPort(p.port);
+        this.#setStatus(`Stopping ${p.process ?? 'the process'} on port ${p.port}`);
+        await this.#loadPorts(mode);
+      },
+    };
+  }
+
+  // Attaches to the terminal running the port's process. The mode stays on
+  // this box, so detaching comes back to it.
+  #goToPort(mode: Ports): void {
+    const p = this.#selectedPort(mode);
+    if (!p) return;
+    if (p.orphan || !p.session) return this.#setStatus(`Port ${p.port} has no terminal - its process outlived it`);
+    if (p.window && p.window === this.#self) {
+      return this.#setStatus('That port runs in the terminal perch tui is running in');
+    }
+    // An older server names only the session: follow its current window.
+    const target = p.window ? `@${p.window}` : p.session;
+    void this.#act(() => this.#attach(target));
+  }
+
   // ---- input -----------------------------------------------------------------
 
   #onResize = () => {
@@ -437,9 +609,11 @@ export class TuiApp {
       case 'prompt':
         return this.#promptKey(mode, key);
       case 'confirm':
-        this.#mode = { kind: 'list' };
+        this.#mode = mode.back ?? { kind: 'list' };
         if (key.name === 'char' && key.ch?.toLowerCase() === 'y') void this.#act(mode.yes);
         return;
+      case 'ports':
+        return this.#portsKey(mode, key);
       case 'picker':
         return this.#pickerKey(mode, key);
       case 'list':
@@ -471,6 +645,7 @@ export class TuiApp {
       case 'x': return this.#kill();
       case 'p': return void this.#pin();
       case 'o': return this.#openPicker();
+      case 't': return this.#openPorts();
     }
   }
 
@@ -637,7 +812,7 @@ export class TuiApp {
     if (this.#offline) return `${style.bold}${fit(" Can't reach the server, retrying...", cols)}`;
     const detach = keyLabel(this.#detachKey);
     const filter = this.#filter ? `filter: ${this.#filter} (Esc clears) · ` : '';
-    return `${style.dim}${fit(` ${filter}⏎ attach  n new  r rename  x kill  o open  p pin  / filter  q quit · detach: ${detach} ×2`, cols)}`;
+    return `${style.dim}${fit(` ${filter}⏎ attach  n new  r rename  x kill  o open  p pin  t ports  / filter  q quit · detach: ${detach} ×2`, cols)}`;
   }
 
   /**
@@ -645,8 +820,8 @@ export class TuiApp {
    * projects and the folders under the typed path, each group under a
    * heading. The list scrolls so the selection stays inside the box.
    */
-  #pickerLines(mode: Picker, rows: number): { text: string; selected?: boolean; dim?: boolean }[] {
-    const lines: { text: string; selected?: boolean; dim?: boolean }[] = [
+  #pickerLines(mode: Picker, rows: number): BoxLine[] {
+    const lines: BoxLine[] = [
       { text: `Path: ${mode.text}▏`, selected: mode.selected === -1 },
       mode.error
         ? { text: `! ${mode.error}` }
@@ -677,12 +852,71 @@ export class TuiApp {
     return [...lines, ...body.slice(mode.top, mode.top + room)];
   }
 
-  /** A centered box drawn over the list for help and the open-project picker. */
+  /**
+   * The Ports box: the tunnel command wrapped to the box, then (with the
+   * Ports extension) the listening ports, the selected port's URL as a link,
+   * and the per-port keys. The table scrolls to keep the selection visible.
+   */
+  #portsLines(mode: Ports, inner: number, rows: number): BoxLine[] {
+    const token = this.#client.token;
+    const command = tunnelCommand(this.#client.baseUrl, token, !mode.reveal, this.#tunnel());
+    const extension = mode.ports !== null;
+    const commandKeys = ['c copy', token ? (mode.reveal ? 's hide token' : 's show token') : '', extension ? '' : 'Esc close']
+      .filter(Boolean).join(' · ');
+    const lines: BoxLine[] = [
+      { text: 'Forward every port to your machine - run this there:' },
+      ...wrapWords(command, inner).map((text) => ({ text })),
+      { text: commandKeys, dim: true },
+    ];
+    if (mode.tunnel) {
+      const n = mode.forwarded.size;
+      lines.push({ text: `Tunnel connected - ${n} port${n === 1 ? '' : 's'} forwarded to localhost on its machine` });
+    }
+    if (mode.error) lines.push({ text: `! ${mode.error}` });
+    const ports = mode.ports;
+    if (ports === null) return lines;
+
+    lines.push({ text: '' }, { text: `${'PORT'.padEnd(6)} ${'PROCESS'.padEnd(12)} ${'PROJECT'.padEnd(16)} ADDRESS`, dim: true });
+    const tail: BoxLine[] = [{ text: '' }];
+    const selected = this.#selectedPort(mode);
+    if (selected) {
+      const url = this.#portLink(mode, selected.port);
+      tail.push({ text: url, link: url });
+    }
+    tail.push({ text: '⏎ go to terminal · o open · u copy URL · x kill · Esc close', dim: true });
+
+    const body: BoxLine[] = [];
+    if (ports === undefined) body.push({ text: 'Loading ports...', dim: true });
+    else if (ports.length === 0) body.push({ text: 'No ports listening', dim: true });
+    else {
+      for (const p of ports) {
+        const where = [mode.forwarded.has(p.port) ? 'forwarded' : '', p.orphan || !p.session ? 'no terminal' : ''].filter(Boolean).join(', ');
+        body.push({
+          text: `${String(p.port).padEnd(6)} ${fit(p.process ?? '', 12)} ${fit(p.session || '-', 16)} ${fit(p.address, 15)} ${where}`,
+          selected: portKey(p) === mode.selected,
+        });
+      }
+    }
+    // Rows left inside the box: the screen less its margin, the borders and the other lines.
+    const room = Math.max(3, rows - 4 - lines.length - tail.length);
+    const at = ports?.findIndex((p) => portKey(p) === mode.selected) ?? -1;
+    mode.top = at < 0 ? 0 : scrollTop(mode.top, at, room, body.length);
+    return [...lines, ...body.slice(mode.top, mode.top + room), ...tail];
+  }
+
+  /** A centered box drawn over the list: help, Open project, Ports. */
   #overlay(cols: number, rows: number): string {
     const mode = this.#mode;
     let title: string;
-    let lines: { text: string; selected?: boolean; dim?: boolean }[];
-    if (mode.kind === 'help') {
+    let lines: BoxLine[];
+    let maxWidth = 72;
+    // A kill question keeps the Ports box it came from on screen.
+    const shown = mode.kind === 'confirm' && mode.back ? mode.back : mode;
+    if (shown.kind === 'ports') {
+      title = 'Ports';
+      maxWidth = 100;
+      lines = this.#portsLines(shown, Math.min(cols - 4, maxWidth) - 4, rows);
+    } else if (mode.kind === 'help') {
       title = 'Keys';
       lines = HELP_LINES.map(([k, d]) => ({ text: `${k!.padEnd(11)} ${d}` }));
       lines.push({ text: '' }, { text: `Attached: ${keyLabel(this.#detachKey)} twice returns here`, dim: true });
@@ -693,7 +927,7 @@ export class TuiApp {
     } else {
       return '';
     }
-    const width = Math.min(cols - 4, 72);
+    const width = Math.min(cols - 4, maxWidth);
     const inner = width - 4;
     const x = Math.floor((cols - width) / 2) + 1;
     const height = Math.min(lines.length + 2, rows - 2);
@@ -703,7 +937,8 @@ export class TuiApp {
     let out = `${at(y++)}${style.reset}┌─${label}${'─'.repeat(Math.max(0, width - 3 - label.length))}┐`;
     for (const l of lines.slice(0, height - 2)) {
       const text = fit(l.text, inner);
-      const body = l.selected ? `${style.inverse}${text}${style.reset}` : l.dim ? `${style.dim}${text}${style.reset}` : text;
+      const styled = l.selected ? `${style.inverse}${text}${style.reset}` : l.dim ? `${style.dim}${text}${style.reset}` : text;
+      const body = l.link ? osc8(l.link, styled) : styled;
       out += `${at(y++)}│ ${body} │`;
     }
     out += `${at(y)}└${'─'.repeat(width - 2)}┘`;

@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attachChoice, buildRows, bumpRecent, completePath, completionDir, findRowIndex, fit, pickerItems, projectName, sanitizeProjects,
+  attachChoice, buildRows, bumpRecent, completePath, completionDir, findRowIndex, fit, osc52, osc8, pickerItems, portUrl, projectName, sanitizeProjects,
+  openCommand, openMethod, tunnelCommand, wrapWords,
   scrollTop, sessionNameForProject, togglePin, type Project, type Session,
 } from './tuiModel.ts';
 
@@ -148,4 +149,51 @@ test('pickerItems: recents, then the folders under the typed path', () => {
   assert.deepEqual(pickerItems('~/works/.', recents, listing).map((i) => i.label), ['.cache/']);
   // A listing for some other folder is ignored until the right one arrives.
   assert.deepEqual(pickerItems('/srv/', recents, listing).map((i) => i.kind), ['recent']);
+});
+
+test('tunnel command, with and without a token, masked for display', () => {
+  assert.equal(
+    tunnelCommand('http://127.0.0.1:3003/', '', false),
+    'curl -s http://127.0.0.1:3003/tunnel.mjs | node --input-type=module - --url http://127.0.0.1:3003 --all',
+  );
+  assert.equal(
+    tunnelCommand('https://h', "s3c'ret", false),
+    `curl -s -H 'x-auth-token: s3c'\\''ret' https://h/tunnel.mjs | node --input-type=module - --url https://h --header 'x-auth-token: s3c'\\''ret' --all`,
+  );
+  const masked = tunnelCommand('https://h', 'secret', true);
+  assert.ok(!masked.includes('secret'));
+  assert.equal(masked.split('••••').length, 3);
+  assert.ok(tunnelCommand('http://h', '', false, 'abc123').endsWith('--url http://h --client abc123 --all'));
+});
+
+test('port URLs follow the proxy rule', () => {
+  assert.equal(portUrl(3000, 'http://127.0.0.1:3003', null), 'http://127.0.0.1:3003/proxy/3000/');
+  assert.equal(portUrl(3000, 'https://perch.example.com', 'example.com'), 'https://3000.example.com/');
+  assert.equal(portUrl(3000, 'https://perch.example.com', 'example.com', true), 'http://localhost:3000/');
+});
+
+test('clipboard and hyperlink escapes', () => {
+  assert.equal(osc52('hi'), '\x1b]52;c;aGk=\x07');
+  assert.equal(osc8('http://x/', 'x'), '\x1b]8;;http://x/\x1b\\x\x1b]8;;\x1b\\');
+});
+
+test('wrapWords wraps at spaces and splits long words', () => {
+  assert.deepEqual(wrapWords('aa bb cc', 5), ['aa bb', 'cc']);
+  assert.deepEqual(wrapWords('abcdefgh ij', 3), ['abc', 'def', 'gh', 'ij']);
+});
+
+test('opening a URL: the command per platform', () => {
+  assert.deepEqual(openCommand('darwin', 'http://x/?a=1&b=2'), { cmd: 'open', args: ['http://x/?a=1&b=2'] });
+  assert.deepEqual(openCommand('win32', 'http://x/'), { cmd: 'rundll32', args: ['url.dll,FileProtocolHandler', 'http://x/'] });
+  assert.deepEqual(openCommand('linux', 'http://x/'), { cmd: 'xdg-open', args: ['http://x/'] });
+});
+
+test('opening a URL: only where a browser in front of you can be reached', () => {
+  assert.equal(openMethod('darwin', {}), 'system');
+  assert.equal(openMethod('win32', {}), 'system');
+  assert.equal(openMethod('linux', { DISPLAY: ':0' }), 'system');
+  assert.equal(openMethod('linux', { PERCH_WINDOW: 'w' }), 'system');
+  // No display (code-server, a headless server), or a desktop reached over SSH.
+  assert.equal(openMethod('linux', {}), 'none');
+  assert.equal(openMethod('darwin', { SSH_CONNECTION: '1 2 3 4' }), 'none');
 });

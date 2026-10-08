@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLsofListeners, parseNetTcpCsv } from "./ports.js";
+import { attributeToSession, parseLsofListeners, parseNetTcpCsv } from "./ports.js";
 import { parsePsOutput } from "./processes.js";
 
 describe("process and port listings on macOS and Windows", () => {
@@ -25,5 +25,30 @@ describe("process and port listings on macOS and Windows", () => {
       { port: 3000, address: "0.0.0.0", pid: 5120, process: "node" },
       { port: 445, address: "::", pid: 4, process: undefined },
     ]);
+  });
+});
+
+describe("attributing a port to its terminal", () => {
+  // 900 is a window's shell; 950 a dev server it started; 960 that server's worker.
+  const procMap = new Map([
+    [900, { ppid: 1, comm: "zsh" }],
+    [950, { ppid: 900, comm: "node" }],
+    [960, { ppid: 950, comm: "node" }],
+    [970, { ppid: 1, comm: "orphan" }],
+  ]);
+  const panePids = new Map([[900, "app"]]);
+  const paneWindows = new Map([[900, "win-1"]]);
+
+  it("names the session and the window whose shell started the process", () => {
+    expect(attributeToSession(960, procMap, panePids, new Set(), paneWindows)).toEqual({ session: "app", window: "win-1" });
+  });
+
+  it("still names the session when the window is not known", () => {
+    expect(attributeToSession(950, procMap, panePids, new Set())).toEqual({ session: "app" });
+  });
+
+  it("reports perch's own processes and dead-ended chains as before", () => {
+    expect(attributeToSession(950, procMap, panePids, new Set([950]), paneWindows)).toBe("own");
+    expect(attributeToSession(970, procMap, panePids, new Set(), paneWindows)).toBe("unknown");
   });
 });
