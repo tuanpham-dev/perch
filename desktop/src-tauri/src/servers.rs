@@ -238,10 +238,22 @@ pub fn normalize_url(raw: &str) -> Result<String, String> {
 
 // The PORT column of `perch instances`, when the installed CLI is on PATH.
 fn perch_instance_ports() -> Vec<u16> {
-    let Ok(out) = std::process::Command::new("perch").arg("instances").output() else {
+    let Ok(out) = perch_instances_output() else {
         return Vec::new();
     };
     parse_instance_ports(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(not(windows))]
+fn perch_instances_output() -> std::io::Result<std::process::Output> {
+    std::process::Command::new("perch").arg("instances").output()
+}
+
+// The installed CLI is bin\perch.cmd, a batch file: CreateProcess can't run
+// it by name, only cmd.exe can.
+#[cfg(windows)]
+fn perch_instances_output() -> std::io::Result<std::process::Output> {
+    crate::local_server::hidden_command("cmd").args(["/C", "perch", "instances"]).output()
 }
 
 fn parse_instance_ports(text: &str) -> Vec<u16> {

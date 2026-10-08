@@ -9,4 +9,6 @@ if (major < 23) {
   console.error(`Perch needs Node.js 23 or newer (found ${process.version}) - install it from https://nodejs.org`);
   process.exit(1);
 }
-import(require("node:path").join(__dirname, "..", "cli", "perch", "main.ts"));
+// As a file URL: on Windows a bare "C:\..." path is read as a URL with scheme "c:"
+// and refused (ERR_UNSUPPORTED_ESM_URL_SCHEME).
+import(require("node:url").pathToFileURL(require("node:path").join(__dirname, "..", "cli", "perch", "main.ts")).href);

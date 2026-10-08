@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { REPO_DIR } from './paths.ts';
 import { inherit, output, succeeds, which } from './run.ts';
 import type { ServiceManager } from './serviceManager.ts';
@@ -14,12 +14,26 @@ const unitDest = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.con
 
 const systemctl = (...args: string[]) => inherit('systemctl', ['--user', ...args]);
 
+/**
+ * The unit as installed: the template plus the PATH of the shell that ran
+ * `perch enable`, with this node's own folder first. A systemd user session
+ * starts with a bare PATH, so a Node installed under $HOME (nvm, a tarball)
+ * isn't on it and `bin/perch`'s `#!/usr/bin/env node` fails with "env:
+ * 'node': No such file or directory" in a restart loop. launchd gets the
+ * same treatment (launchd.ts). `%` is systemd's specifier escape.
+ */
+export function renderUnit(template: string, nodeDir: string, path: string | undefined): string {
+  const dirs = [...new Set([nodeDir, ...(path ?? '').split(':')].filter(Boolean))];
+  const line = `Environment="PATH=${dirs.join(':').replaceAll('%', '%%')}"`;
+  return template.replace(/^\[Service\]\r?\n/m, (m) => `${m}${line}\n`);
+}
+
 export const systemd: ServiceManager = {
   kind: 'systemd',
   available: () => which('systemctl') !== null && succeeds('systemctl', ['--user', 'list-units']),
   installed: () => existsSync(unitDest()),
   install: () => {
-    const source = readFileSync(unitSource(), 'utf8');
+    const source = renderUnit(readFileSync(unitSource(), 'utf8'), dirname(process.execPath), process.env.PATH);
     const dest = unitDest();
     if (existsSync(dest) && readFileSync(dest, 'utf8') === source) return;
     mkdirSync(join(dest, '..'), { recursive: true });

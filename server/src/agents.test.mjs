@@ -22,12 +22,19 @@ import { after, before, test } from "node:test";
 const home = await mkdtemp(path.join(tmpdir(), "agents-test-"));
 // Both read at import time by agents.ts (the shim path) and by settingsStore.
 process.env.HOME = home;
+// os.homedir() reads USERPROFILE on Windows, and the config dir would come
+// from APPDATA there: pin both, or the tests write into the real home.
+process.env.USERPROFILE = home;
 process.env.XDG_CONFIG_HOME = path.join(home, ".config");
+process.env.PERCH_CONFIG_DIR = path.join(home, ".config", "perch");
 // settingsStore puts the document under <XDG_CONFIG_HOME>/perch/, not
 // directly in it.
 const SETTINGS = path.join(process.env.XDG_CONFIG_HOME, "perch", "settings.json");
 await mkdir(path.dirname(SETTINGS), { recursive: true });
 const writeSettings = (settings) => writeFile(SETTINGS, JSON.stringify({ settings }));
+// Core's entries name the shim path, which agents.ts quotes on Windows
+// (shimInCommand), so a plain startsWith would miss them there.
+const isCoreCommand = (command) => command.startsWith(agentHookShimPath) || command.startsWith(`"${agentHookShimPath}"`);
 await writeSettings({});
 
 const agents = await import("./agents.ts");
@@ -125,7 +132,7 @@ test("merges into a foreign file and leaves every foreign entry alone", async ()
   const sessionStart = doc.hooks.SessionStart;
   assert.equal(sessionStart.length, 2, "the hand-written entry must survive beside core's");
   assert.equal(sessionStart[0].hooks[0].command, "/usr/bin/mine --hand-written");
-  assert.ok(sessionStart[1].hooks[0].command.startsWith(agentHookShimPath));
+  assert.ok(isCoreCommand(sessionStart[1].hooks[0].command));
   // An event core was not asked to install is untouched, matcher and all.
   assert.deepEqual(doc.hooks.PreToolUse, [
     { matcher: "Bash", hooks: [{ type: "command", command: "/usr/bin/theirs" }] },
@@ -147,7 +154,7 @@ test("installing twice replaces core's entry rather than stacking a second", asy
   await installHooks(agent(hooks), EVENTS);
   await installHooks(agent(hooks), EVENTS);
   const doc = await readDoc(hooks.file);
-  const core = doc.hooks.Stop.filter((e) => e.hooks[0].command.startsWith(agentHookShimPath));
+  const core = doc.hooks.Stop.filter((e) => isCoreCommand(e.hooks[0].command));
   assert.equal(core.length, 1);
 });
 
@@ -158,7 +165,7 @@ test("the matcher goes only on the events that accept one", async () => {
   });
   await installHooks(agent(hooks), ["tool-start", "stop"]);
   const doc = await readDoc(hooks.file);
-  const ours = (event) => doc.hooks[event].find((e) => e.hooks[0].command.startsWith(agentHookShimPath));
+  const ours = (event) => doc.hooks[event].find((e) => isCoreCommand(e.hooks[0].command));
   assert.equal(ours("PreToolUse").matcher, "*");
   assert.equal("matcher" in ours("Stop"), false);
 });
@@ -198,7 +205,7 @@ test("writes a flat wrapper, and refuses to overwrite someone else's", async () 
   // Flat: the event's value IS the handler list, with no inner "hooks".
   assert.ok(Array.isArray(doc["perch"].Stop));
   assert.equal(doc["perch"].Stop[0].hooks, undefined);
-  assert.ok(doc["perch"].Stop[0].command.startsWith(agentHookShimPath));
+  assert.ok(isCoreCommand(doc["perch"].Stop[0].command));
 
   // A wrapper under core's own name that is not core's is refused outright.
   await seed(hooks.file, { "perch": { enabled: true, Stop: [{ type: "command", command: "/usr/bin/not-ours" }] } });

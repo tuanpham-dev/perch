@@ -1,5 +1,5 @@
 import http from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,7 +16,10 @@ describe("proxying a dev server that checks Host", () => {
   let proxy: http.Server;
 
   beforeAll(async () => {
-    dir = mkdtempSync(path.join(tmpdir(), "proxy-vite-"));
+    // The real path: Vite checks requests against the realpath of its root,
+    // and a Windows temp dir comes back as a short name (TUANPH~1) that only
+    // the native realpath expands.
+    dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), "proxy-vite-")));
     writeFileSync(path.join(dir, "index.html"), "<!doctype html><title>proxied</title><p>hello from vite</p>");
     vite = await createServer({ root: dir, configFile: false, logLevel: "silent", server: { port: 0, host: "127.0.0.1" } });
     await vite.listen();

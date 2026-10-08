@@ -24,6 +24,18 @@ const isLink = (p: string) => {
     return false;
   }
 };
+// A carried-over entry: a symlink (or junction) to the main worktree's, or,
+// on a Windows account that can't make symlinks, the hard link gitWorktrees.ts
+// falls back to for a file.
+const carried = (wt: string, repo: string, p: string): boolean => {
+  const dest = path.join(wt, p);
+  // The native realpath: the plain one leaves a Windows 8.3 short name
+  // (TUANPH~1) as it finds it, and the two sides arrive in different forms.
+  if (isLink(dest)) return fs.realpathSync.native(dest) === fs.realpathSync.native(path.join(repo, p));
+  if (process.platform !== "win32") return false;
+  const st = fs.statSync(dest);
+  return st.isFile() && st.nlink > 1;
+};
 
 describe("normalizing the carry-over list", () => {
   it("trims, strips ./ and trailing slashes, dedupes, and refuses paths leaving the repo", () => {
@@ -67,8 +79,7 @@ describe("carrying ignored paths into a new worktree", () => {
       carryOver: [".env", "node_modules", ".backups", "client/node_modules", "build/cache", "README.md", "missing"],
     });
     for (const p of [".env", "node_modules", ".backups", "client/node_modules", "build/cache"]) {
-      expect(isLink(path.join(wt, p)), p).toBe(true);
-      expect(fs.readlinkSync(path.join(wt, p))).toBe(path.join(repo, p));
+      expect(carried(wt, repo, p), p).toBe(true);
     }
     expect(fs.readFileSync(path.join(wt, "client/node_modules/y.js"), "utf8")).toBe("x");
     expect(isLink(path.join(wt, "README.md"))).toBe(false);
@@ -80,7 +91,7 @@ describe("carrying ignored paths into a new worktree", () => {
 
   it("reads the list from the settings when the caller passes none", async () => {
     const { path: wt } = await createWorktree({ cwd: repo, branch: "from-settings", mode: "new" });
-    expect(isLink(path.join(wt, ".env"))).toBe(true);
+    expect(carried(wt, repo, ".env")).toBe(true);
     expect(fs.existsSync(path.join(wt, "node_modules"))).toBe(false);
   });
 

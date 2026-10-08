@@ -71,7 +71,19 @@ pub fn update_server(
     url: Option<String>,
     notify: Option<bool>,
 ) -> Result<(), String> {
+    let before = state.servers.get(&id, state.local.port()).map(|s| s.url);
     state.servers.update(&id, name.as_deref(), url.as_deref(), notify)?;
+    let after = state.servers.get(&id, state.local.port()).map(|s| s.url);
+    // A window shows the address it was opened on, and Open would only
+    // focus it: a changed address closes the server's windows, so the next
+    // Open builds one on the new address (with a capability to match).
+    if before != after {
+        for (label, w) in app.webview_windows() {
+            if windows::server_id_of(&label) == Some(id.as_str()) {
+                let _ = w.destroy();
+            }
+        }
+    }
     changed(&app);
     Ok(())
 }

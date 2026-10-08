@@ -201,7 +201,10 @@ function commitId() {
 async function main() {
   if (!skipBuild) {
     log("building the client and extensions");
-    run("npm", ["run", "build"], { cwd: repo, shell: process.platform === "win32" });
+    // npm is npm.cmd on Windows, which only cmd.exe runs (and Node deprecates
+    // `shell: true` with an argument list).
+    if (process.platform === "win32") run("cmd", ["/c", "npm", "run", "build"], { cwd: repo });
+    else run("npm", ["run", "build"], { cwd: repo });
   }
   const node = await nodeRuntime();
   log(`staging into ${out}`);

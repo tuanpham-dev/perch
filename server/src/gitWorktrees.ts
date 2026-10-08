@@ -324,6 +324,28 @@ async function ignoredPaths(repo: string, paths: string[]): Promise<Set<string> 
 // Best effort throughout: a path that is tracked, missing in the repo, or
 // already present in the worktree is skipped, and a link that can't be made
 // is logged, never thrown - the checkout already exists and must open.
+//
+// A symlink, except on Windows, where making one needs Developer Mode or a
+// privilege most accounts lack: there a folder gets a junction and a file,
+// when the symlink is refused, a hard link - both share the main worktree's
+// copy just as a symlink would.
+function link(source: string, dest: string, isDir: boolean): void {
+  if (process.platform !== "win32") {
+    fs.symlinkSync(source, dest, isDir ? "dir" : "file");
+    return;
+  }
+  if (isDir) {
+    fs.symlinkSync(source, dest, "junction");
+    return;
+  }
+  try {
+    fs.symlinkSync(source, dest, "file");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EPERM") throw err;
+    fs.linkSync(source, dest);
+  }
+}
+
 export async function carryOverIgnored(repo: string, target: string, paths: string[]): Promise<void> {
   if (paths.length === 0) return;
   const ignored = await ignoredPaths(repo, paths);
@@ -347,7 +369,7 @@ export async function carryOverIgnored(repo: string, target: string, paths: stri
         // Nothing there yet - the only case that gets a link.
       }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.symlinkSync(source, dest, isDir ? "dir" : "file");
+      link(source, dest, isDir);
       linked.push(p);
     } catch (err) {
       console.warn(`worktree carry-over skipped ${p}:`, err instanceof Error ? err.message : err);

@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FRAME_OUTPUT, FrameReader, encodeControl, encodeFrame, FRAME_INPUT } from '../src/protocol/frames.ts';
 import { waitForMatch } from './wait.ts';
 import { killDaemons as killTestDaemons } from './procs.ts';
@@ -13,8 +14,8 @@ import { killDaemons as killTestDaemons } from './procs.ts';
 // from tmux here: browser panes re-render on demand, so an idle phone must not
 // shrink the desktop the user is actually working in).
 
-const CLI = new URL('../src/cli.ts', import.meta.url).pathname;
-const DAEMON = new URL('../src/daemon/index.ts', import.meta.url).pathname;
+const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+const DAEMON = fileURLToPath(new URL('../src/daemon/index.ts', import.meta.url));
 
 function makeEnv(): { env: Record<string, string>; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), 'mux-act-'));

@@ -15,14 +15,16 @@ your `PATH`. To run straight from a clone instead, see
 curl -fsSL https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.sh | bash
 ```
 
-Clones the repo to `~/.local/share/perch`, builds it, and symlinks a `perch` command into `~/.local/bin`. It also installs and starts a user service, so it survives logout and starts on boot: a systemd user unit (`~/.config/systemd/user/perch.service`, with linger enabled) on Linux, a launchd agent (`~/Library/LaunchAgents/dev.perch.plist`) on macOS. No `sudo`, nothing written outside `$HOME`. Re-running the same command later updates an existing install instead of failing.
+Clones the repo to `~/.local/share/perch`, builds it, and symlinks a `perch` command into `~/.local/bin`. It also installs and starts a user service, so it survives logout and starts on boot: a systemd user unit (`~/.config/systemd/user/perch.service`, with linger enabled) on Linux, carrying the `PATH` of the shell that ran the installer so a Node installed under your home (nvm, a tarball) is found, a launchd agent (`~/Library/LaunchAgents/dev.perch.plist`) on macOS. No `sudo`, nothing written outside `$HOME`. Re-running the same command later updates an existing install instead of failing.
 
 The installer checks for Node 23+, `git`, and a C/C++ toolchain up front and exits with distro-specific hints if anything's missing, rather than trying to install them itself.
 
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.ps1 
+To run the Linux server inside WSL instead, use `install.sh` in your distro; Windows reaches it at `http://localhost:3001` and the desktop app lists it as Installed. WSL2 stops the distro a few seconds after its last `wsl.exe` session ends, taking the service with it, so keep a session open (for example `wsl.exe -e sleep infinity` in the background) or set `vmIdleTimeout` in `.wslconfig`.
+| iex
 ```
 
 Clones to `%LOCALAPPDATA%\perch\app`, builds it, adds its `bin` folder to your user `PATH`, and adds a Task Scheduler task that starts Perch when you sign in (hidden, logging to `%LOCALAPPDATA%\perch\perch.log`). Needs Node 23+ and Git for Windows; no administrator rights. Terminals run PowerShell 7 (`pwsh`) when it's installed, else Windows PowerShell; pick another shell in Settings → Terminal Backend. Command history and prompt jumps work in those terminals out of the box (the shell integration is loaded automatically). Search works without ripgrep, but installing it (`winget install BurntSushi.ripgrep.MSVC`) makes it faster and adds full glob support.
@@ -51,7 +53,7 @@ The app opens on a list of servers. Each one opens in its own window, which reme
 
 - **Local** - the server bundled with the app, on `127.0.0.1:3101` (or the next free port). It starts the first time you open it and keeps running after you quit the app, so its terminals survive just as they do for an installed Perch. Its settings, extensions and terminals are kept apart from any installed Perch, under the app's data folder (`~/.local/share/dev.perch.desktop/perch` on Linux, `~/Library/Application Support/dev.perch.desktop/perch` on macOS, `%APPDATA%\dev.perch.desktop\perch` on Windows).
 - **Installed** - a Perch already running on this machine (from `install.sh` or `install.ps1`), listed while it answers.
-- **Remote servers** you add with **+ Add server**: a name and an address, such as `https://perch.example.com`. A server with `AUTH_TOKEN` shows its sign-in page once; the window keeps the sign-in after that.
+- **Remote servers** you add with **+ Add server**: a name and an address, such as `https://perch.example.com`. A server with `AUTH_TOKEN` shows its sign-in page once; the window keeps the sign-in after that. Editing a server's address closes its window; the next Open uses the new address.
 
 Inside a server window, Perch looks as it does in a browser, with its own title bar in place of the OS one (Settings → UI → Use custom title bar turns that off). Links to other sites open in your browser. The Local window can also do a few things a browser can't: **Reveal in Finder / File Explorer / Files** and **Open with Default App** in the FILES menu, and the OS folder picker for Open Folder. Remote servers never get those.
 
@@ -74,7 +76,7 @@ On Linux and macOS it goes in `~/.local/bin`; the app tells you if that folder i
 ### Known limitations
 
 - **Linux:** H.264 video in the media viewer needs `gstreamer1.0-libav` (the `.deb` installs it; install it yourself for the AppImage). On Fedora it comes from RPM Fusion (`gstreamer1-libav`), so the `.rpm` can't install it for you. Dragging files in from a file manager hasn't been confirmed yet. Typing through an input method (IME) needs `GTK_IM_MODULE` set the way your desktop normally sets it.
-- **macOS and Windows** builds haven't been tested on real machines yet. Clicking a notification may only bring the app forward there, without switching to the terminal it's about.
+- **macOS** builds haven't been tested on a real machine yet. On macOS and Windows, clicking a notification may only bring the app forward, without switching to the terminal it's about.
 
 ### The `perch` command
 

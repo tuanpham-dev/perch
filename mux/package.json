@@ -20,7 +20,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test --test-concurrency=1 'test/*.test.ts'"
+    "test": "node test/run.mjs"
   },
   "dependencies": {
     "@xterm/addon-serialize": "^0.14.0",

@@ -1,7 +1,8 @@
 // The extension notification seam's one non-obvious guarantee: a per-window
 // cooldown, and that asking to notify never creates push.json on a machine
-// where no browser ever subscribed. XDG_CONFIG_HOME points at a temp dir
-// before import, because configDir resolves once at module scope.
+// where no browser ever subscribed. PERCH_CONFIG_DIR points at a temp dir
+// before import, because configDir resolves once at module scope (and
+// XDG_CONFIG_HOME would mean nothing on Windows).
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -9,8 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const configHome = await mkdtemp(path.join(tmpdir(), "perch-push-test-"));
-process.env.XDG_CONFIG_HOME = configHome;
-delete process.env.PERCH_CONFIG_DIR;
+process.env.PERCH_CONFIG_DIR = path.join(configHome, "perch");
 
 const { EXTENSION_RATE_LIMIT_MS, notifyExtension, resetExtensionNotifyCooldowns, shouldNotifyExtension } =
   await import("./push.js");

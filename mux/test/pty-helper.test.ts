@@ -6,9 +6,10 @@ import path from 'node:path';
 import { ensureExecutable, spawnHelperCandidates } from '../src/util/pty-helper.ts';
 
 test('looks in the prebuild for this platform, then a local build', () => {
+  // Joined with the platform's separator, so the same expectation holds on Windows.
   assert.deepEqual(spawnHelperCandidates('/pty', 'darwin', 'arm64'), [
-    '/pty/prebuilds/darwin-arm64/spawn-helper',
-    '/pty/build/Release/spawn-helper',
+    path.join('/pty', 'prebuilds', 'darwin-arm64', 'spawn-helper'),
+    path.join('/pty', 'build', 'Release', 'spawn-helper'),
   ]);
 });
 

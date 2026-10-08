@@ -20,12 +20,13 @@ export function pipeName(user: string, stateDir: string): string {
   return `\\\\.\\pipe\\perch-${hash}`;
 }
 
-export interface ProcEntry { pid: number; ppid: number; name: string }
+export interface ProcEntry { pid: number; ppid: number; name: string; created?: string }
 
 /**
  * Parses `Get-CimInstance Win32_Process | ConvertTo-Csv` output with the
- * columns ProcessId, ParentProcessId, Name. Names lose their ".exe" so they
- * match what a POSIX system reports ("pwsh", "nvim", "claude").
+ * columns ProcessId, ParentProcessId, Name and, when the query provides it,
+ * Created (ISO 8601). Names lose their ".exe" so they match what a POSIX
+ * system reports ("pwsh", "nvim", "claude").
  */
 export function parseProcessCsv(csv: string): ProcEntry[] {
   const out: ProcEntry[] = [];
@@ -35,13 +36,16 @@ export function parseProcessCsv(csv: string): ProcEntry[] {
   const pidAt = header.indexOf('processid');
   const ppidAt = header.indexOf('parentprocessid');
   const nameAt = header.indexOf('name');
+  const createdAt = header.indexOf('created');
   if (pidAt < 0 || ppidAt < 0 || nameAt < 0) return out;
   for (const line of lines.slice(1)) {
     const cells = splitCsvLine(line);
     const pid = Number(cells[pidAt]);
     const ppid = Number(cells[ppidAt]);
     const name = (cells[nameAt] ?? '').replace(/\.exe$/i, '');
-    if (Number.isInteger(pid) && Number.isInteger(ppid)) out.push({ pid, ppid, name });
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+    const created = createdAt >= 0 ? cells[createdAt] : undefined;
+    out.push(created ? { pid, ppid, name, created } : { pid, ppid, name });
   }
   return out;
 }
@@ -67,9 +71,15 @@ function splitCsvLine(line: string): string[] {
 // Console hosts ConPTY starts beside a shell: never "what's running".
 const CONSOLE_HOSTS = new Set(['conhost', 'openconsole']);
 
+// Windows reuses pids: a process whose parent died can later report a
+// ParentProcessId that now belongs to one of our shells, and would pass as
+// that shell's child (an orphaned daemon once named a fresh terminal "node").
+// A real child was started after its parent.
 export function childrenOf(entries: readonly ProcEntry[], pid: number): number[] {
+  const parent = entries.find((e) => e.pid === pid);
   return entries
     .filter((e) => e.ppid === pid && !CONSOLE_HOSTS.has(e.name.toLowerCase()))
+    .filter((e) => !(parent?.created && e.created) || e.created >= parent.created)
     .map((e) => e.pid)
     .sort((a, b) => a - b);
 }
@@ -99,7 +109,7 @@ const SNAPSHOT_MS = 1_000;
 const HELPER_IDLE_MS = 30_000;
 const HELPER_TIMEOUT_MS = 5_000;
 const SNAPSHOT_END = '--perch-snapshot-end--';
-const PROCESS_QUERY = 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Csv -NoTypeInformation';
+const PROCESS_QUERY = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,@{n='Created';e={if($_.CreationDate){$_.CreationDate.ToString('o')}else{''}}} | ConvertTo-Csv -NoTypeInformation";
 
 type HelperProcess = {
   stdin: { write(data: string): unknown; end(): unknown; on(event: 'error', cb: () => void): unknown };

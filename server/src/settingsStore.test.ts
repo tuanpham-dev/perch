@@ -1,16 +1,17 @@
 // Covers the one thing the settings document guarantees that isn't obvious
 // from its schema: SERVER_OWNED_KEYS (aiSecrets, extensionSecrets) are
 // server-owned — a client-supplied document can neither read them back nor
-// write them, however it's shaped. XDG_CONFIG_HOME is redirected to a temp
-// dir before the module is imported, because settingsStore resolves its
-// config path once at module scope.
+// write them, however it's shaped. PERCH_CONFIG_DIR is pointed at a temp dir
+// before the module is imported, because settingsStore resolves its config
+// path once at module scope (XDG_CONFIG_HOME would do nothing on Windows,
+// and the tests would write into the real %APPDATA%\perch).
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const configHome = await mkdtemp(path.join(tmpdir(), "perch-settings-test-"));
-process.env.XDG_CONFIG_HOME = configHome;
+process.env.PERCH_CONFIG_DIR = path.join(configHome, "perch");
 
 const {
   clearExtensionSecrets,

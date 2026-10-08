@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { groupWrappedRows, paneAtCell, resolveLinkPath, type ResolveDeps } from "./pathLinks.js";
 
@@ -10,38 +11,47 @@ function deps(files: string[], roots: Record<string, string | null>): ResolveDep
 }
 
 describe("resolveLinkPath", () => {
-  const cwd = "/repo/client/src";
-  const roots = { [cwd]: "/repo" };
+  // Absolute paths in the OS's own form ("/repo/..." here, "C:\repo\..." on
+  // Windows): resolveLinkPath joins with the platform's path module, so the
+  // expectations have to as well.
+  const abs = (...parts: string[]) => path.resolve(path.sep, ...parts);
+  const repo = abs("repo");
+  const cwd = abs("repo", "client", "src");
+  const roots = { [cwd]: repo };
 
   it("prefers the pane cwd over the repo root", async () => {
-    const d = deps(["/repo/client/src/README.md", "/repo/README.md"], roots);
-    expect(await resolveLinkPath("README.md", cwd, d)).toBe("/repo/client/src/README.md");
+    const d = deps([abs("repo", "client", "src", "README.md"), abs("repo", "README.md")], roots);
+    expect(await resolveLinkPath("README.md", cwd, d)).toBe(abs("repo", "client", "src", "README.md"));
   });
 
   it("falls back to the repo root", async () => {
-    const d = deps(["/repo/plans/abc.md"], roots);
-    expect(await resolveLinkPath("plans/abc.md", cwd, d)).toBe("/repo/plans/abc.md");
+    const d = deps([abs("repo", "plans", "abc.md")], roots);
+    expect(await resolveLinkPath("plans/abc.md", cwd, d)).toBe(abs("repo", "plans", "abc.md"));
   });
 
   it("returns null outside a repo when the cwd misses", async () => {
-    const d = deps(["/repo/plans/abc.md"], {});
-    expect(await resolveLinkPath("plans/abc.md", "/tmp", d)).toBeNull();
+    const d = deps([abs("repo", "plans", "abc.md")], {});
+    expect(await resolveLinkPath("plans/abc.md", abs("tmp"), d)).toBeNull();
   });
 
   it("strips a diff prefix under the cwd and the root", async () => {
-    expect(await resolveLinkPath("a/x.ts", cwd, deps(["/repo/client/src/x.ts"], roots))).toBe("/repo/client/src/x.ts");
-    expect(await resolveLinkPath("b/server/api.ts", cwd, deps(["/repo/server/api.ts"], roots))).toBe("/repo/server/api.ts");
+    expect(await resolveLinkPath("a/x.ts", cwd, deps([abs("repo", "client", "src", "x.ts")], roots))).toBe(
+      abs("repo", "client", "src", "x.ts"),
+    );
+    expect(await resolveLinkPath("b/server/api.ts", cwd, deps([abs("repo", "server", "api.ts")], roots))).toBe(
+      abs("repo", "server", "api.ts"),
+    );
   });
 
   it("keeps a literal a/ directory ahead of stripping", async () => {
-    const d = deps(["/repo/a/x.ts", "/repo/x.ts"], { "/repo": "/repo" });
-    expect(await resolveLinkPath("a/x.ts", "/repo", d)).toBe("/repo/a/x.ts");
+    const d = deps([abs("repo", "a", "x.ts"), abs("repo", "x.ts")], { [repo]: repo });
+    expect(await resolveLinkPath("a/x.ts", repo, d)).toBe(abs("repo", "a", "x.ts"));
   });
 
   it("checks absolute paths as-is", async () => {
-    const d = deps(["/etc/hosts"], roots);
-    expect(await resolveLinkPath("/etc/hosts", cwd, d)).toBe("/etc/hosts");
-    expect(await resolveLinkPath("/etc/nope", cwd, d)).toBeNull();
+    const d = deps([abs("etc", "hosts")], roots);
+    expect(await resolveLinkPath(abs("etc", "hosts"), cwd, d)).toBe(abs("etc", "hosts"));
+    expect(await resolveLinkPath(abs("etc", "nope"), cwd, d)).toBeNull();
   });
 });
 

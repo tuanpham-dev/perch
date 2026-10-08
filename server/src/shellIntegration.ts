@@ -30,7 +30,10 @@ export const shellIntegrationPath = path.join(configDir, "shell-integration.sh")
 // "~/Library/Application Support", and an unquoted space splits the test.
 export function shellQuotedPath(p: string, home = homedir()): string {
   const escape = (s: string) => s.replace(/["$`\\]/g, "\\$&");
-  return p.startsWith(home + path.sep) ? `"$HOME${escape(p.slice(home.length))}"` : `"${escape(p)}"`;
+  // Either separator: the word is for a POSIX shell, so the path may be
+  // "/"-joined even where path.sep is "\\".
+  const underHome = p.startsWith(home + "/") || p.startsWith(home + "\\");
+  return underHome ? `"$HOME${escape(p.slice(home.length))}"` : `"${escape(p)}"`;
 }
 
 export const powershellIntegrationPath = path.join(configDir, "shell-integration.ps1");

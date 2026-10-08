@@ -13,7 +13,7 @@
     "dev": "concurrently -n ext,server,client -c yellow,blue,green \"node extensions/build.mjs --watch\" \"npm run dev -w server\" \"npm run dev -w client\"",
     "prebuild": "npm run build:extensions",
     "build": "npm run build -w client",
-    "test": "npm run test -w mux && node --test 'cli/perch/*.test.ts' && npm run test -w client && node --test extensions/*/*.test.mjs && node --import ./server/src/tsSpecifiers.mjs --test server/src/*.test.mjs && npm run test -w server",
+    "test": "npm run test -w mux && node --test cli/perch/*.test.ts && npm run test -w client && node --test extensions/*/*.test.mjs && node --import ./server/src/tsSpecifiers.mjs --test server/src/*.test.mjs && npm run test -w server",
     "start": "npm run start -w server",
     "build:extensions": "node extensions/build.mjs"
   },

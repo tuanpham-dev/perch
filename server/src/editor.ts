@@ -259,8 +259,10 @@ export async function openFileInWindow(target: string, filePath: string, line?: 
   }
 
   if (SHELL_COMMANDS.has(command)) {
-    // Ctrl-U clears anything half-typed at the prompt first.
-    await mux().sendText(`@${window.id}`, "\x15");
+    // Ctrl-U clears anything half-typed at the prompt first. PowerShell has
+    // no such binding by default and would type it as a literal character
+    // ahead of the command, so Windows sends the line as it is.
+    if (process.platform !== "win32") await mux().sendText(`@${window.id}`, "");
     await mux().sendText(`@${window.id}`, `${await vimCommand()} ${nvimCliArg}`);
     await mux().sendText(`@${window.id}`, "\r");
     return { windowIndex: null };

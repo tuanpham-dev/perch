@@ -26,6 +26,10 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    // `cargo build`/`cargo test` straight from a clone: tauri's codegen refuses
+    // a missing frontendDist, and only `tauri dev`/`tauri build` run the
+    // launcher build first (tauri.conf.json's before*Command).
+    let _ = std::fs::create_dir_all("../launcher/dist");
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
     )

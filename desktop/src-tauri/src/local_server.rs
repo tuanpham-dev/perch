@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::paths;
@@ -50,11 +51,20 @@ pub struct LocalServer {
     data: PathBuf,
     // The last pid is_ours confirmed.
     verified_pid: std::sync::Mutex<Option<u32>>,
+    // One start at a time: Open clicked twice, or a perch:// link arriving
+    // while the launcher starts it, would otherwise spawn two servers, the
+    // second dying on EADDRINUSE and leaving the state file naming it.
+    starting: Mutex<()>,
 }
 
 impl LocalServer {
     pub fn new(resource_dir: Option<PathBuf>) -> Self {
-        Self { bundle: paths::server_bundle_dir(resource_dir), data: paths::data_dir().join("perch"), verified_pid: Default::default() }
+        Self {
+            bundle: paths::server_bundle_dir(resource_dir),
+            data: paths::data_dir().join("perch"),
+            verified_pid: Default::default(),
+            starting: Mutex::new(()),
+        }
     }
 
     fn state_path(&self) -> PathBuf {
@@ -131,6 +141,7 @@ impl LocalServer {
     /// returns its port. Blocks while it starts, so call it off the main
     /// thread.
     pub fn ensure_running(&self) -> Result<u16, Status> {
+        let _one_at_a_time = self.starting.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let (shipped, bundle) = self.bundle_info().ok_or(Status::Missing)?;
         if let Some(state) = self.read_state() {
             if self.is_ours(state.pid) && probe::is_perch(state.port) {
@@ -202,8 +213,7 @@ impl LocalServer {
             .env("PERCH_CONFIG_DIR", &config_dir)
             .env("PERCH_STATE_DIR", &state_dir)
             .env("PERCH_LAUNCHER", "desktop");
-        detach(&mut cmd);
-        let mut child = cmd.spawn().map_err(|e| fail(format!("Couldn't start the bundled server: {e}")))?;
+        let mut child = spawn_detached(&mut cmd).map_err(|e| fail(format!("Couldn't start the bundled server: {e}")))?;
         let pid = child.id();
         // It runs on after the app quits; while the app is up, reap it when
         // it exits (Stop, a crash), or it lingers as a zombie that
@@ -384,6 +394,8 @@ fn short_state_dir() -> PathBuf {
     std::env::temp_dir().join("perch-desktop")
 }
 
+// Starts the server in a session/process group of its own, so it outlives
+// the app and whatever started the app.
 #[cfg(unix)]
 pub fn detach(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -395,11 +407,71 @@ pub fn detach(cmd: &mut Command) {
     }
 }
 
+/// `detach`, then spawn.
+#[cfg(unix)]
+pub fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    detach(cmd);
+    cmd.spawn()
+}
+
+#[cfg(windows)]
+const DETACHED_FLAGS: u32 = {
+    use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
+    CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+};
+
 #[cfg(windows)]
 pub fn detach(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
-    use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
-    cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB);
+    use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
+    // Windows hands a child every inheritable handle, not just the stdio
+    // set on it: a pipe the shell gave this process (`x=$(perch-desktop
+    // start)`, `| Out-String`) would stay open in the child for as long as
+    // it runs, and the shell would wait on it just as long.
+    keep_std_handles_private();
+    // Out of any job the app runs in (an installer, PowerShell's
+    // `Start-Process -Wait`), so closing that job can't take the child
+    // down with it.
+    cmd.creation_flags(DETACHED_FLAGS | CREATE_BREAKAWAY_FROM_JOB);
+}
+
+/// `detach`, then spawn - staying inside the job when it forbids leaving
+/// (ERROR_ACCESS_DENIED): starting there beats not starting at all.
+#[cfg(windows)]
+pub fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+    detach(cmd);
+    match cmd.spawn() {
+        Err(e) if e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => cmd.creation_flags(DETACHED_FLAGS).spawn(),
+        other => other,
+    }
+}
+
+// Marks this process's standard handles non-inheritable. The stdio a child
+// is given explicitly is duplicated inheritable by std regardless.
+#[cfg(windows)]
+fn keep_std_handles_private() {
+    use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        let handle = unsafe { GetStdHandle(id) };
+        if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+            unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) };
+        }
+    }
+}
+
+/// A console tool (tasklist, taskkill, cmd) run from the app: without
+/// CREATE_NO_WINDOW a release build, which has no console of its own, would
+/// get one opened for each call.
+#[cfg(windows)]
+pub fn hidden_command(program: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    let mut cmd = Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
 }
 
 #[cfg(unix)]
@@ -409,11 +481,19 @@ fn pid_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn pid_alive(pid: u32) -> bool {
-    Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+    hidden_command("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .map(|o| tasklist_has_pid(&String::from_utf8_lossy(&o.stdout), pid))
         .unwrap_or(false)
+}
+
+// Whether tasklist's CSV output (`"node.exe","1234","Console","1","12,345 K"`)
+// lists exactly this pid. A substring search would also match 12345, and
+// the "no tasks" notice when the pid's digits happen to appear in it.
+fn tasklist_has_pid(csv: &str, pid: u32) -> bool {
+    let wanted = format!("\"{pid}\"");
+    csv.lines().any(|line| line.split(',').nth(1) == Some(wanted.as_str()))
 }
 
 #[cfg(unix)]
@@ -447,10 +527,12 @@ fn terminate(pid: u32) -> Result<(), String> {
 
 #[cfg(windows)]
 fn terminate(pid: u32) -> Result<(), String> {
-    let ok = Command::new("taskkill")
+    // Its own "SUCCESS: The process ... has been terminated." would otherwise
+    // land in `perch-desktop stop`'s output.
+    let ok = hidden_command("taskkill")
         .args(["/PID", &pid.to_string(), "/F"])
-        .status()
-        .map(|s| s.success())
+        .output()
+        .map(|o| o.status.success())
         .unwrap_or(false);
     if ok { Ok(()) } else { Err(format!("Couldn't stop process {pid}.")) }
 }
@@ -463,7 +545,7 @@ mod tests {
     fn only_adopts_a_server_running_from_its_runtime_copies() {
         let me = std::process::id();
         let exe = std::env::current_exe().unwrap();
-        let elsewhere = LocalServer { bundle: None, data: PathBuf::from("/nonexistent/perch"), verified_pid: Default::default() };
+        let elsewhere = LocalServer { bundle: None, data: PathBuf::from("/nonexistent/perch"), verified_pid: Default::default(), starting: Mutex::new(()) };
         // A live process not running from <data>/runtime (this test), and a
         // pid nothing has.
         assert!(!elsewhere.is_ours(me));
@@ -514,7 +596,7 @@ mod tests {
         std::fs::create_dir_all(shipped.join("node").join("bin")).unwrap();
         std::fs::write(shipped.join("node").join("bin").join("node"), "bin").unwrap();
         std::fs::write(shipped.join("server-bundle.json"), r#"{"version":"0.1.0","commit":"c4"}"#).unwrap();
-        let server = LocalServer { bundle: Some(shipped.clone()), data: root.join("data"), verified_pid: Default::default() };
+        let server = LocalServer { bundle: Some(shipped.clone()), data: root.join("data"), verified_pid: Default::default(), starting: Mutex::new(()) };
         for old in ["c1", "c2", "c3"] {
             std::fs::create_dir_all(root.join("data").join("runtime").join(old)).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(20));
@@ -556,6 +638,16 @@ mod tests {
         let lines = all_command_lines().unwrap();
         let exe = std::env::current_exe().unwrap();
         assert!(lines.iter().any(|l| l.contains(&*exe.file_name().unwrap().to_string_lossy())));
+    }
+
+    #[test]
+    fn matches_a_pid_in_tasklist_output_exactly() {
+        let csv = "\"node.exe\",\"1234\",\"Console\",\"1\",\"12,345 K\"\r\n\"node.exe\",\"12345\",\"Console\",\"1\",\"9,000 K\"\r\n";
+        assert!(tasklist_has_pid(csv, 1234));
+        assert!(tasklist_has_pid(csv, 12345));
+        assert!(!tasklist_has_pid(csv, 123));
+        assert!(!tasklist_has_pid("INFO: No tasks are running which match the specified criteria.\r\n", 1234));
+        assert!(!tasklist_has_pid("", 1234));
     }
 
     #[test]

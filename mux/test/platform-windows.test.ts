@@ -12,25 +12,31 @@ test('a pipe name is stable per user and state dir, and differs between them', (
 });
 
 const CSV = [
-  '"ProcessId","ParentProcessId","Name"',
-  '"100","4","explorer.exe"',
-  '"200","100","pwsh.exe"',
-  '"201","100","conhost.exe"',
-  '"300","200","nvim.exe"',
-  '"301","200","OpenConsole.exe"',
-  '"302","200","node.exe"',
-  '"400","300","a ""quoted"", name.exe"',
+  '"ProcessId","ParentProcessId","Name","Created"',
+  '"100","4","explorer.exe","2026-10-07T10:00:00.0000000-04:00"',
+  '"200","100","pwsh.exe","2026-10-07T12:00:00.0000000-04:00"',
+  '"201","100","conhost.exe","2026-10-07T12:00:00.1000000-04:00"',
+  '"300","200","nvim.exe","2026-10-07T12:01:00.0000000-04:00"',
+  '"301","200","OpenConsole.exe","2026-10-07T12:00:00.2000000-04:00"',
+  '"302","200","node.exe","2026-10-07T12:02:00.0000000-04:00"',
+  '"400","300","a ""quoted"", name.exe","2026-10-07T12:03:00.0000000-04:00"',
+  // Started before pwsh 200 existed: its real parent died and 200 was reused.
+  '"500","200","node.exe","2026-10-07T09:00:00.0000000-04:00"',
 ].join('\r\n');
 
 test('parses the process list and drops .exe', () => {
   const entries = parseProcessCsv(CSV);
-  assert.equal(entries.length, 7);
-  assert.deepEqual(entries[1], { pid: 200, ppid: 100, name: 'pwsh' });
+  assert.equal(entries.length, 8);
+  assert.deepEqual(entries[1], { pid: 200, ppid: 100, name: 'pwsh', created: '2026-10-07T12:00:00.0000000-04:00' });
+  assert.deepEqual(parseProcessCsv('"ProcessId","ParentProcessId","Name"\r\n"1","0","x.exe"'), [{ pid: 1, ppid: 0, name: 'x' }], 'Created is optional');
   assert.equal(entries[6]!.name, 'a "quoted", name');
 });
 
-test("a shell's children leave out the console hosts", () => {
+test("a shell's children leave out the console hosts, and a stranger wearing a reused parent pid", () => {
   assert.deepEqual(childrenOf(parseProcessCsv(CSV), 200), [300, 302]);
+  // Without timestamps every ParentProcessId match counts, as before.
+  const bare = parseProcessCsv('"ProcessId","ParentProcessId","Name"\r\n"200","1","pwsh.exe"\r\n"500","200","node.exe"');
+  assert.deepEqual(childrenOf(bare, 200), [500]);
 });
 
 test('a list with unexpected columns yields nothing rather than garbage', () => {

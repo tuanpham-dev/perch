@@ -93,7 +93,33 @@ pub async fn pick_folder(app: AppHandle, webview: Webview, start: Option<String>
     let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder())
         .await
         .map_err(|e| e.to_string())?;
-    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
+    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| client_path(&p.to_string_lossy())))
+}
+
+/// A path as the page expects it: the server hands the client every path
+/// home-shortened and, on Windows, with forward slashes
+/// (server/src/files.ts shortenHome, clientPaths.ts), and the client names a
+/// project by what follows the last "/" and matches it to its session by
+/// that string. A native "C:\Users\me\app" would become a project called
+/// "C:\Users\me\app", which no session name may be, and a project at
+/// "C:/Users/me/app" would never match the session the server reports at
+/// "~/app".
+pub fn client_path(path: &str) -> String {
+    client_path_from(path, dirs::home_dir().as_deref())
+}
+
+fn client_path_from(path: &str, home: Option<&std::path::Path>) -> String {
+    let slashes = if cfg!(windows) { path.replace('\\', "/") } else { path.to_string() };
+    let Some(home) = home.map(|h| h.to_string_lossy().into_owned()) else { return slashes };
+    let home = if cfg!(windows) { home.replace('\\', "/") } else { home };
+    let home = home.trim_end_matches('/');
+    if slashes == home {
+        "~".to_string()
+    } else if let Some(rest) = slashes.strip_prefix(home).filter(|r| r.starts_with('/')) {
+        format!("~{rest}")
+    } else {
+        slashes
+    }
 }
 
 fn local_path(app: &AppHandle, webview: &Webview, raw: &str) -> Result<std::path::PathBuf, String> {
@@ -127,6 +153,23 @@ pub fn is_local_caller(label: &str, url: &Url, local_origin: Option<&str>) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picked_folders_reach_the_page_shortened_with_forward_slashes() {
+        use std::path::Path;
+        if cfg!(windows) {
+            let home = Some(Path::new(r"C:\Users\me"));
+            assert_eq!(client_path_from(r"C:\Users\me\my app", home), "~/my app");
+            assert_eq!(client_path_from(r"C:\Users\me", home), "~");
+            assert_eq!(client_path_from(r"C:\Users\meow\x", home), "C:/Users/meow/x");
+            assert_eq!(client_path_from(r"D:\data", home), "D:/data");
+        } else {
+            let home = Some(Path::new("/home/me"));
+            assert_eq!(client_path_from("/home/me/my app", home), "~/my app");
+            assert_eq!(client_path_from("/home/meow/x", home), "/home/meow/x");
+            assert_eq!(client_path_from("/opt/x", None), "/opt/x");
+        }
+    }
 
     #[test]
     fn only_the_local_window_on_the_local_origin_is_local() {

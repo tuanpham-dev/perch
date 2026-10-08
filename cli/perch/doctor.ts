@@ -66,6 +66,7 @@ export async function cmdDoctor(): Promise<void> {
   else warn(`not responding at ${appUrl()} - is it started?`);
   if ((process.env.PATH ?? '').split(delimiter).includes(BIN_DIR)) ok(`${BIN_DIR} is on PATH`);
   else if (which('perch')) ok('perch is on PATH');
+  else if (process.platform === 'win32') warn(`${BIN_DIR} is not on PATH - add it to your user PATH (Settings > System > About > Advanced system settings > Environment Variables), or re-run install.ps1`);
   else warn(`${BIN_DIR} is not on PATH - add it to your shell profile, e.g.: export PATH="${BIN_DIR}:$PATH"`);
 
   heading('Optional features');

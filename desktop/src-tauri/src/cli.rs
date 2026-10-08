@@ -260,8 +260,7 @@ pub fn detach_from_terminal(args: &[String]) -> bool {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    crate::local_server::detach(&mut cmd);
-    cmd.spawn().is_ok()
+    crate::local_server::spawn_detached(&mut cmd).is_ok()
 }
 
 /// The Windows launcher. A batch file waits for whatever it runs, a window

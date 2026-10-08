@@ -1,17 +1,24 @@
 // Small process helpers shared by the commands.
 import { spawnSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, extname } from 'node:path';
 
 /** Absolute path of a command on PATH, or null. */
 export function which(name: string): string | null {
+  // On Windows a command on PATH is "git.exe" or "claude.cmd": try each
+  // PATHEXT extension unless the name already carries one.
+  const names =
+    process.platform === 'win32' && !extname(name)
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((ext) => name + ext.toLowerCase())
+      : [name];
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     if (!dir) continue;
-    const candidate = join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch { /* keep looking */ }
+    for (const candidate of names.map((n) => join(dir, n))) {
+      try {
+        accessSync(candidate, constants.X_OK);
+        return candidate;
+      } catch { /* keep looking */ }
+    }
   }
   return null;
 }

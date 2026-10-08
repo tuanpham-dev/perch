@@ -1,14 +1,14 @@
 // What the server paints into the SPA shell and manifest from the client's
-// reported theme vars. XDG_CONFIG_HOME is redirected before the import,
-// because themePaint resolves its file path once at module scope.
+// reported theme vars. PERCH_CONFIG_DIR is redirected before the import,
+// because themePaint resolves its file path once at module scope (and
+// XDG_CONFIG_HOME would mean nothing on Windows).
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const configHome = await mkdtemp(path.join(tmpdir(), "perch-theme-paint-test-"));
-delete process.env.PERCH_CONFIG_DIR;
-process.env.XDG_CONFIG_HOME = configHome;
+process.env.PERCH_CONFIG_DIR = path.join(configHome, "perch");
 const { paintIndexHtml, paintManifest, readThemePaint, sanitizeThemePaint, writeThemePaint } = await import(
   "./themePaint.js"
 );

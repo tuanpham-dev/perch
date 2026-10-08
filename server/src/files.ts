@@ -17,9 +17,12 @@ export class ConflictError extends Error {
 const HOME = homedir();
 
 export function expandHome(p: string): string {
-  if (p === "~") return HOME;
-  if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(HOME, p.slice(2));
-  return p;
+  const expanded = p === "~" ? HOME : p.startsWith("~/") || p.startsWith("~\\") ? path.join(HOME, p.slice(2)) : p;
+  // Back in the OS's own form on Windows: the client sends forward slashes
+  // (clientPaths.ts), and shortenHome, the daemon's cwd and every path
+  // comparison here expect "C:\Users\me\app", not "C:/Users/me/app".
+  // Relative paths stay as written: a diff's "a/x.ts" is resolved by callers.
+  return process.platform === "win32" && path.isAbsolute(expanded) ? path.normalize(expanded) : expanded;
 }
 
 // Inverse of expandHome: collapses a leading $HOME to "~" so paths handed back
@@ -50,7 +53,11 @@ function git(args: string[], cwd: string): Promise<string> {
 // shortenHome as needed.
 export async function getGitRoot(dirPath: string): Promise<string | null> {
   try {
-    return (await git(["rev-parse", "--show-toplevel"], dirPath)).trim();
+    const root = (await git(["rev-parse", "--show-toplevel"], dirPath)).trim();
+    // git prints the root with forward slashes even on Windows, where the
+    // rest of the server compares paths in the OS's own form (shortenHome,
+    // a session's cwd): "C:/Users/me/app" would never match "C:\Users\me\app".
+    return process.platform === "win32" ? path.normalize(root) : root;
   } catch {
     return null;
   }

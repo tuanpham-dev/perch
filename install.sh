@@ -72,7 +72,12 @@ else
 fi
 
 heading "Done"
-PORT_LINE="$(sed -n 's/^PORT=//p' "$INSTALL_DIR/server/.env" 2>/dev/null | tail -n1 | tr -d '[:space:]')"
+# A fresh install has no server/.env yet: with pipefail, sed's "no such file"
+# would end the script here, before the address below is printed.
+PORT_LINE=""
+if [ -f "$INSTALL_DIR/server/.env" ]; then
+  PORT_LINE="$(sed -n 's/^PORT=//p' "$INSTALL_DIR/server/.env" | tail -n1 | tr -d '[:space:]')"
+fi
 echo "Perch is at http://127.0.0.1:${PORT_LINE:-3001}"
 echo "Config (PORT, AUTH_TOKEN, ALLOWED_HOSTS, NEW_SESSION_CWD) goes in $INSTALL_DIR/server/.env — see docs/INSTALL.md."
 case ":$PATH:" in
