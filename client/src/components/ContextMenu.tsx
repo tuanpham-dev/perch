@@ -195,6 +195,21 @@ export default function ContextMenu({ menu, onClose, resolvedBindings }: Props) 
     ignoreSelector: "[data-menu-trigger]",
   });
 
+  // Focus goes back where it was when the menu closes - the terminal a
+  // right-click came from, say - unless the chosen action moved it (a
+  // dialog, a new tab). Left on the page body, the next keystroke went
+  // nowhere, and Cmd+C copied nothing: in the desktop app's WebView it
+  // even emptied the clipboard.
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    const root = ref.current;
+    return () => {
+      const now = document.activeElement;
+      const lost = !now || now === document.body || (root?.contains(now) ?? false);
+      if (lost && before && before !== document.body && before.isConnected) before.focus({ preventScroll: true });
+    };
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
