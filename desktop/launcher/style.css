@@ -106,12 +106,27 @@ input {
 .menu button.danger.confirm { background: var(--bad); color: #fff; font-weight: 600; }
 .edit { grid-column: 2 / -1; display: flex; gap: 6px; }
 .edit input { flex: 1; }
-.local { margin-top: auto; display: flex; align-items: center; gap: 10px; color: var(--muted); padding-top: 4px; }
+/* The app's update and the footer: kept in view at the bottom of the window,
+   however long the list of servers above them grows. */
+.dock {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: -14px;
+  padding-bottom: 14px;
+  background: var(--bg);
+  /* Covers the gap above it too, so a scrolled list doesn't show through. */
+  box-shadow: 0 -12px 0 var(--bg);
+}
+.local { display: flex; align-items: center; gap: 10px; color: var(--muted); padding-top: 4px; }
 .local .grow { flex: 1; }
 .app-version { font-size: 12px; }
 /* The app's own update, above the footer: something to act on. */
 .update {
-  margin-top: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -121,7 +136,6 @@ input {
   border-radius: 6px;
 }
 .update .grow { flex: 1; min-width: 0; }
-.update:not([hidden]) + .local { margin-top: 0; }
 .update .warn { color: var(--bad); }
 .updates-panel {
   position: fixed;
