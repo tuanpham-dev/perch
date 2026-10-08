@@ -213,17 +213,24 @@ function searchWithRg(cwd, opts) {
 // containing ':' still parses correctly; the remaining "<lineno>:<text>" is
 // unambiguous since line numbers are always digits.
 
-function searchWithGrep(cwd, opts) {
+export function searchWithGrep(cwd, opts) {
   const { query, isRegex, caseSensitive, wholeWord, include, exclude, maxResults } = opts;
   const args = ["-r", "-n", "-I", "--null"];
   if (!caseSensitive) args.push("-i");
   if (wholeWord) args.push("-w");
   args.push(isRegex ? "-E" : "-F");
-  for (const g of include) args.push(`--include=${g}`);
+  // grep's --include/--exclude match a file's name and --exclude-dir a
+  // folder's, never a path, so "src/**", "src" or "docs/*.txt" matched
+  // nothing. Results are filtered by path below, the way the built-in
+  // engine does; a bare-name exclude still goes to grep too, so it skips
+  // walking an excluded folder (node_modules) at all.
   for (const g of exclude) {
+    if (g.includes("/")) continue;
     args.push(`--exclude=${g}`);
     args.push(`--exclude-dir=${g}`);
   }
+  const includeRes = include.map(globToRegExp);
+  const excludeRes = exclude.map(globToRegExp);
   args.push("--", query, ".");
 
   let jsRegex;
@@ -251,6 +258,8 @@ function searchWithGrep(cwd, opts) {
       const nulIdx = raw.indexOf("\0");
       if (nulIdx === -1) return;
       const file = raw.slice(0, nulIdx).replace(/^\.\//, "");
+      if (includeRes.length > 0 && !includeRes.some((re) => re.test(file))) return;
+      if (excludeRes.some((re) => re.test(file))) return;
       const rest = raw.slice(nulIdx + 1);
       const m = rest.match(/^(\d+):([\s\S]*)$/);
       if (!m) return;
@@ -304,7 +313,9 @@ const WALK_SKIP = new Set([".git", "node_modules"]);
 // A simple glob ("*.ts", "src/**", "dist") as a RegExp over forward-slash
 // relative paths. A pattern without "/" matches any path segment, the way
 // grep's --include/--exclude-dir read a bare name.
-export function globToRegExp(glob) {
+export function globToRegExp(pattern) {
+  // A trailing slash only says "this is a folder": "src/" reads as "src".
+  const glob = pattern.replace(/\/+$/, "") || pattern;
   let out = "";
   for (let i = 0; i < glob.length; i++) {
     const ch = glob[i];

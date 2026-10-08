@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { globToRegExp, searchWithBuiltin } from "./server.js";
+import { globToRegExp, searchWithBuiltin, searchWithGrep } from "./server.js";
 
 const base = { isRegex: false, caseSensitive: false, wholeWord: false, include: [], exclude: [], maxResults: 100, respectGitignore: true };
 
@@ -29,6 +29,8 @@ test("globs read the way grep's do", () => {
   assert.ok(globToRegExp("src/**").test("src/deep/x.js"));
   assert.ok(globToRegExp("dist").test("dist/out.js"));
   assert.ok(!globToRegExp("dist").test("distance.js"));
+  assert.ok(globToRegExp("src/").test("src/deep/x.js"));
+  assert.ok(globToRegExp("deep/").test("src/deep/x.js"));
 });
 
 test("outside a repository it walks the folder, skipping node_modules and binaries", async () => {
@@ -61,6 +63,23 @@ test("stops at the result limit", async () => {
     const { results, limitHit } = await searchWithBuiltin(dir, { ...base, query: "needle", maxResults: 1, respectGitignore: false });
     assert.equal(limitHit, true);
     assert.equal(results.flatMap((r) => r.matches).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the grep fallback takes path globs, not just file and folder names", async () => {
+  const dir = fixture();
+  try {
+    mkdirSync(path.join(dir, "docs"));
+    writeFileSync(path.join(dir, "docs", "a.txt"), "needle\n");
+    writeFileSync(path.join(dir, "docs", "b.md"), "needle\n");
+    const files = async (opts) => (await searchWithGrep(dir, { ...base, query: "needle", exclude: ["node_modules", "dist"], ...opts })).results.map((r) => r.file).sort();
+    assert.deepEqual(await files({ include: ["src/**"] }), ["src/app.ts", "src/deep/x.js"]);
+    assert.deepEqual(await files({ include: ["src"] }), ["src/app.ts", "src/deep/x.js"]);
+    assert.deepEqual(await files({ include: ["docs/*.txt"] }), ["docs/a.txt"]);
+    assert.deepEqual(await files({ exclude: ["node_modules", "dist", "src/"] }), ["docs/a.txt", "docs/b.md"]);
+    assert.deepEqual(await files({ include: ["*.js"] }), ["src/deep/x.js"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
