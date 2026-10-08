@@ -1258,9 +1258,13 @@ export function useTabs(
     const tab = tabsRef.current.find((t) => t.id === tabId);
     if (!tab || tab.groupId === targetGroupId) return;
     const sourceGroupId = tab.groupId;
-    const sourceEmptyAfterMove =
-      sourceGroupId !== undefined &&
-      tabsRef.current.filter((t) => t.groupId === sourceGroupId && t.id !== tabId).length === 0;
+    const sourceTabs = sourceGroupId === undefined ? [] : tabsRef.current.filter((t) => t.groupId === sourceGroupId);
+    const sourceEmptyAfterMove = sourceGroupId !== undefined && sourceTabs.length === 1;
+    // The tab the source pane shows instead, if the moved tab was the one it
+    // showed: its right neighbour, else its left - left pointing at the
+    // moved tab, the pane listed its other tabs but showed none of them.
+    const at = sourceTabs.findIndex((t) => t.id === tabId);
+    const sourceNext = (sourceTabs[at + 1] ?? sourceTabs[at - 1])?.id ?? null;
 
     setTabs((prev) => {
       const withoutDragged = prev.filter((t) => t.id !== tabId);
@@ -1287,6 +1291,8 @@ export function useTabs(
           delete groupActive[sourceGroupId];
         } else if (sourceEmptyAfterMove) {
           groupActive[sourceGroupId] = null;
+        } else if (groupActive[sourceGroupId] === tabId) {
+          groupActive[sourceGroupId] = sourceNext;
         }
       }
       return { tree, groupActive, activeGroupId: targetGroupId };
