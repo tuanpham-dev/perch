@@ -2504,9 +2504,12 @@ function CommitsPanel({ actionsTarget, showMenu }: PanelProps) {
               longPress={bindMenu((x, y) => showMenu?.(x, y, menuFor(commit)))}
             />
           ))}
-          <button className="git-commits-load-more" disabled={loading} onClick={loadMore}>
-            {loading ? "Loading…" : "Load More"}
-          </button>
+          {/* A page that came back short is the end of history: nothing more to load. */}
+          {commits.length >= limit && (
+            <button className="git-commits-load-more" disabled={loading} onClick={loadMore}>
+              {loading ? "Loading…" : "Load More"}
+            </button>
+          )}
         </div>
       )}
     </div>
