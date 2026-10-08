@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createDesktopBridge, desktop, fileManagerName, parseButtonLayout } from "./desktop";
+import { createDesktopBridge, desktop, fileManagerName, newWindowRoute, parseButtonLayout } from "./desktop";
 
 function stub(info: Record<string, unknown> = { platform: "linux", version: "0.1.0", isLocal: true }) {
   const invoke = vi.fn(async (cmd: string) => (cmd === "pick_folder" ? "/home/me/code" : cmd === "window_is_maximized" ? true : null));
@@ -89,5 +89,23 @@ describe("desktop bridge", () => {
     expect(fileManagerName("macos")).toBe("Finder");
     expect(fileManagerName("windows")).toBe("File Explorer");
     expect(fileManagerName("linux")).toBe("Files");
+  });
+});
+
+describe("newWindowRoute", () => {
+  const page = "http://127.0.0.1:3101";
+  it("sends another site's new-window links to the default browser", () => {
+    expect(newWindowRoute("https://example.com/", "_blank", page)).toBe("external");
+    expect(newWindowRoute("mailto:a@b.c", "_blank", page)).toBe("external");
+  });
+
+  it("opens this site's own in a window of its own", () => {
+    expect(newWindowRoute("http://127.0.0.1:3101/?file=x", "_blank", page)).toBe("popup");
+  });
+
+  it("leaves other links alone", () => {
+    expect(newWindowRoute("https://example.com/", "", page)).toBeNull();
+    expect(newWindowRoute("javascript:alert(1)", "_blank", page)).toBeNull();
+    expect(newWindowRoute("file:///etc/passwd", "_blank", page)).toBeNull();
   });
 });

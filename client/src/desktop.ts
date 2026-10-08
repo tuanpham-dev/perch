@@ -151,6 +151,45 @@ export const desktop: DesktopBridge | null = createDesktopBridge(
   typeof window === "undefined" ? undefined : (window as unknown as DesktopGlobals),
 );
 
+/**
+ * Where a click on a link meant for a new window should go in the desktop
+ * app: "external" (the default browser, or mail app) for another site,
+ * "popup" (this site in a window of its own) for this one; null to leave
+ * it alone.
+ */
+export function newWindowRoute(href: string, target: string, pageOrigin: string): "external" | "popup" | null {
+  if (target !== "_blank") return null;
+  let url: URL;
+  try {
+    url = new URL(href, pageOrigin);
+  } catch {
+    return null;
+  }
+  if (url.protocol === "mailto:") return "external";
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  return url.origin === pageOrigin ? "popup" : "external";
+}
+
+// The app's WebView never asks for a new window when a link with
+// target="_blank" is clicked - window.open() it does, a click it drops - so
+// every such link (a Markdown preview's external links, an extension's
+// "open in browser") did nothing. Clicks no handler has taken by the time
+// they reach the document are routed here instead.
+function routeNewWindowLinks(bridge: DesktopBridge): void {
+  document.addEventListener("click", (e) => {
+    if (e.defaultPrevented || e.button !== 0) return;
+    const anchor = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!anchor) return;
+    const route = newWindowRoute(anchor.href, anchor.target, location.origin);
+    if (!route) return;
+    e.preventDefault();
+    if (route === "external") void bridge.openExternal(anchor.href).catch(() => {});
+    else window.open(anchor.href, "_blank");
+  });
+}
+
+if (desktop && typeof document !== "undefined") routeNewWindowLinks(desktop);
+
 // What the app calls back into the page, by evaluating
 // `window.__perchDesktop?.<hook>(...)` once the page has loaded: a perch://
 // link or `perch-desktop` opening a path, and a notification click
