@@ -2810,10 +2810,26 @@ function ConflictView({ filePath, active, toolbarTarget, openInEditor, setDirty 
       .finally(() => setBusy(false));
   };
 
+  // Staging is what marks it resolved, so the file on disk is checked first:
+  // a view loaded before the markers came back (a fresh conflict, or
+  // `git checkout -m`, while this tab stayed open) showed "All conflicts
+  // resolved" and staged a file full of markers. Changed since this view
+  // loaded: say so and leave it unstaged; still holding markers: refuse.
   const markResolved = () => {
     setBusy(true);
     setError(null);
-    apiPost("/stage", { cwd: parsed.cwd, paths: [parsed.path] })
+    const params = new URLSearchParams({ cwd: parsed.cwd, path: parsed.path });
+    apiGetJson<ConflictFileResponse>(`/conflict?${params}`)
+      .then((fresh) => {
+        if (fresh.hash !== data?.hash) {
+          setStaleHash(fresh.hash);
+          throw new Error("The file changed on disk since this view loaded - reload it first.");
+        }
+        if (fresh.content != null && parseConflictSegments(fresh.content.split("\n")).some((s) => s.kind === "conflict")) {
+          throw new Error("The file still has conflict markers - resolve them first.");
+        }
+        return apiPost("/stage", { cwd: parsed.cwd, paths: [parsed.path] });
+      })
       .then(() => {
         refreshStatus();
         refreshFiles?.();
@@ -2879,9 +2895,15 @@ function ConflictView({ filePath, active, toolbarTarget, openInEditor, setDirty 
             </button>
             <button
               className="git-conflict-resolve-button"
-              disabled={busy || remaining > 0 || dirty}
+              disabled={busy || remaining > 0 || dirty || staleHash !== null}
               title={
-                remaining > 0 ? "Resolve all conflicts first" : dirty ? "Save your changes first" : "Stage this file"
+                remaining > 0
+                  ? "Resolve all conflicts first"
+                  : dirty
+                    ? "Save your changes first"
+                    : staleHash !== null
+                      ? "The file changed on disk - reload first"
+                      : "Stage this file"
               }
               onClick={markResolved}
             >
