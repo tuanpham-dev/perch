@@ -296,9 +296,16 @@ fn configure<'a>(
             let state = popup_app.state::<AppState>();
             let n = state.child_counter.fetch_add(1, Ordering::Relaxed);
             let label = format!("{}:{n}", label_for(&popup_entry.id));
-            let child = WebviewWindowBuilder::new(&popup_app, &label, WebviewUrl::External(u.clone()))
+            // A size the page asked for (window.open's width/height) is
+            // kept; without one WebKit made a 400x300 window, too small for
+            // what opens here - a forwarded dev server, a popped-out tab.
+            let sized = features.size().is_some();
+            let mut child = WebviewWindowBuilder::new(&popup_app, &label, WebviewUrl::External(u.clone()))
                 .title("Perch")
                 .window_features(features);
+            if !sized {
+                child = child.inner_size(1200.0, 800.0);
+            }
             let child = configure(&popup_app, child, &popup_entry, &popup_origin, popup_entry.kind == ServerKind::Local);
             match child.build() {
                 Ok(window) => NewWindowResponse::Create { window },
