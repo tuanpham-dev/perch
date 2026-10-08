@@ -5,6 +5,8 @@ import OutputView from "./components/OutputView";
 import ContextMenu from "./components/ContextMenu";
 import Dialog from "./components/Dialog";
 import FolderPickerDialog from "./components/FolderPickerDialog";
+import AboutDialog from "./components/AboutDialog";
+import { useUpdates } from "./hooks/useUpdates";
 import ExtensionPageView from "./components/ExtensionPageView";
 import Icon from "./components/Icon";
 import KeyboardShortcutsView from "./components/KeyboardShortcutsView";
@@ -341,6 +343,11 @@ export default function App() {
   // and the bottom panel's "New Project…" ("panelTerminal" mode: a pick
   // opens a panel terminal in the picked project instead).
   const [folderPickerMode, setFolderPickerMode] = useState<null | "project" | "panelTerminal">(null);
+
+  // Manage → About Perch, and the update status behind it and behind the
+  // "available" banner (plans/app-versioning.md). Re-read when the update
+  // settings change, so switching channel shows that channel's answer.
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   // The settings bundle waiting on its import preview. Held here, and
   // rendered at the app root below beside every other dialog, because
@@ -2240,6 +2247,12 @@ export default function App() {
   // The installed app's own title bar, once its browser title bar is hidden
   // (plans/pwa-custom-title-bar.md). Never on a phone: the overlay is a
   // desktop-only browser feature, and the check keeps emulation honest.
+  const updates = useUpdates(`${settings.updateChannel}:${settings.checkForUpdates}`);
+  const updateBanner =
+    updates.status?.available && updates.status.latest && updates.status.latest.version !== settings.dismissedUpdate
+      ? updates.status.latest
+      : null;
+
   const windowControlsOverlay = useWindowControlsOverlay();
   const showTitleBar = windowControlsOverlay.visible && settings.customTitleBar && (!mobilePointer || desktop !== null);
   // The desktop app's window is frameless while this title bar is up; with it
@@ -2349,6 +2362,8 @@ export default function App() {
             ? themeItems
             : [{ label: "No themes installed", disabled: true, onClick: () => {} }],
       },
+      { label: "", separator: true, onClick: () => {} },
+      { label: "About Perch", icon: "info", onClick: () => setAboutOpen(true) },
     ];
   }, [
     extSidebarPanels,
@@ -3096,6 +3111,31 @@ export default function App() {
         <div className="error-banner" onClick={() => setError(null)}>
           {error}
         </div>
+      )}
+      {updateBanner && (
+        <div className="update-banner" role="status">
+          <span>
+            Perch {updateBanner.version} is available. Update with <code>perch update</code>.
+          </span>
+          <a href={updateBanner.url} target="_blank" rel="noopener noreferrer">
+            Release notes
+          </a>
+          <button
+            className="open-url-banner-dismiss"
+            aria-label="Dismiss"
+            onClick={() => setSettings((prev) => ({ ...prev, dismissedUpdate: updateBanner.version }))}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+      )}
+      {aboutOpen && (
+        <AboutDialog
+          status={updates.status}
+          checking={updates.checking}
+          onCheck={() => void updates.check()}
+          onClose={() => setAboutOpen(false)}
+        />
       )}
       {openUrlBanner && (
         <div className="open-url-banner">

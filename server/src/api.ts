@@ -69,6 +69,7 @@ import {
 import { hasReceivedEvents, paneHistory, recordEnd, recordStart } from "./commandEvents.js";
 import { broadcastOpenTarget, broadcastOpenUrl, subscribeOpenUrl } from "./openUrl.js";
 import { parseOpenTargetParams, resolveOpenTarget } from "./openTarget.js";
+import { checkIfChannelChanged, checkNow, updateStatus } from "./updates.js";
 import { getTunnelablePorts } from "./ports.js";
 import { tunnelStatus } from "./wsTunnel.js";
 import { addSubscription, getVapidPublicKey, removeSubscription } from "./push.js";
@@ -1530,6 +1531,19 @@ api.get("/open-url/events", (_req, res) => {
 // browser — but broadcasts a named `open-target` event on the same SSE
 // stream instead of the unnamed open-url messages, so existing subscribers
 // (the shim's popup-open path) are unaffected.
+
+// Is there a newer Perch? (plans/app-versioning.md). The server asks GitHub,
+// on its own schedule or when "Check for updates" is clicked; the page only
+// reads the remembered answer.
+api.get("/updates", (_req, res) => {
+  checkIfChannelChanged();
+  res.json(updateStatus());
+});
+
+api.post("/updates/check", async (_req, res) => {
+  await checkNow();
+  res.json(updateStatus());
+});
 
 api.post("/open-target", urlencoded({ extended: false }), async (req, res) => {
   if (!isLoopbackAddress(req.socket.remoteAddress)) {

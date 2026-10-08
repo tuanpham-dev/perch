@@ -127,6 +127,13 @@ impl LocalServer {
         ours
     }
 
+    /// Whether this app's server is running a version other than the one
+    /// this app ships (the app was updated since it started).
+    pub fn outdated(&self) -> bool {
+        let (Some(state), Some((_, bundle))) = (self.read_state(), self.bundle_info()) else { return false };
+        state.commit != bundle.commit && self.is_ours(state.pid) && probe::is_perch(state.port)
+    }
+
     pub fn status(&self) -> Status {
         if let Some(port) = self.port() {
             return Status::Running { port };

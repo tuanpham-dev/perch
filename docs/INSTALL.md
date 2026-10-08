@@ -22,18 +22,43 @@ The installer checks for Node 23+, `git`, and a C/C++ toolchain up front and exi
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.ps1 
-To run the Linux server inside WSL instead, use `install.sh` in your distro; Windows reaches it at `http://localhost:3001` and the desktop app lists it as Installed. WSL2 stops the distro a few seconds after its last `wsl.exe` session ends, taking the service with it, so keep a session open (for example `wsl.exe -e sleep infinity` in the background) or set `vmIdleTimeout` in `.wslconfig`.
-| iex
+irm https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.ps1 | iex
 ```
 
 Clones to `%LOCALAPPDATA%\perch\app`, builds it, adds its `bin` folder to your user `PATH`, and adds a Task Scheduler task that starts Perch when you sign in (hidden, logging to `%LOCALAPPDATA%\perch\perch.log`). Needs Node 23+ and Git for Windows; no administrator rights. Terminals run PowerShell 7 (`pwsh`) when it's installed, else Windows PowerShell; pick another shell in Settings → Terminal Backend. Command history and prompt jumps work in those terminals out of the box (the shell integration is loaded automatically). Search works without ripgrep, but installing it (`winget install BurntSushi.ripgrep.MSVC`) makes it faster and adds full glob support.
+
+To run the Linux server inside WSL instead, use `install.sh` in your distro; Windows reaches it at `http://localhost:3001` and the desktop app lists it as Installed. WSL2 stops the distro a few seconds after its last `wsl.exe` session ends, taking the service with it, so keep a session open (for example `wsl.exe -e sleep infinity` in the background) or set `vmIdleTimeout` in `.wslconfig`.
+
+### Versions and updates
+
+Perch has one version number for the server, the web app and the desktop app (`0.2.0`, or `0.3.0-rc.1` for a pre-release). The installers install the latest **Stable** release, not whatever is on `main`. To pick something else, set a variable before running the same command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.sh | PERCH_CHANNEL=beta bash   # newest release, pre-releases included
+curl -fsSL https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.sh | PERCH_REF=main bash       # the main branch
+```
+
+On Windows, set `$env:PERCH_CHANNEL = 'beta'` or `$env:PERCH_REF = 'main'` first. If the repository has no release yet, the installer falls back to `main` and says so.
+
+`perch update` moves an install to the latest release on its channel, then reinstalls, rebuilds and restarts it (your terminals keep running). It says what it does: `updating 0.1.0 -> 0.2.0`, or `already on 0.2.0, the latest stable release`. The channel is the one picked in **Settings → About**, Stable unless you change it.
+
+- `perch update --main` follows `main` instead, and later plain `perch update`s keep following it, until `perch update --release` switches back to releases.
+- `--beta` or `--stable` overrides the channel for one update.
+- It never moves an install backwards. An install that's ahead of the latest release (on `main`, or on a pre-release after switching back to Stable) stays where it is until a newer release arrives, and says how to switch with `--main` / `--release`.
+
+To see what you're running, use `perch --version` (also `perch version`, `perch status` and `perch doctor`), **Manage → About Perch**, or **Settings → About**. The server checks GitHub for a newer release every 6 hours. When there is one, the page shows a notice with the update command, which you can dismiss until a still newer version appears. Turn the check off with **Automatically check for updates** in Settings → About; **Check for updates** there still checks once. Beta channel includes pre-releases in the check.
+
+Every server also answers `GET /version.json` without signing in, with only its version, commit and the oldest desktop app it supports:
+
+```json
+{ "version": "0.2.0", "commit": "3e0ad42", "minDesktopVersion": "0.1.0" }
+```
 
 ## Desktop app
 
 Perch also comes as a desktop app for macOS, Windows and Linux. It opens any Perch server in its own window, and it carries a Perch server of its own, so it works with no Node, toolchain or `install.sh` on the machine.
 
-Download it from the [Releases page](https://github.com/tuanpham-dev/perch/releases) (the `desktop-v*` releases):
+Download it from the [Releases page](https://github.com/tuanpham-dev/perch/releases); every release (`v0.2.0` and so on) carries the app for each platform:
 
 | Platform | File |
 |---|---|
@@ -56,6 +81,17 @@ The app opens on a list of servers. Each one opens in its own window, which reme
 - **Remote servers** you add with **+ Add server**: a name and an address, such as `https://perch.example.com`. A server with `AUTH_TOKEN` shows its sign-in page once; the window keeps the sign-in after that. Editing a server's address closes its window; the next Open uses the new address.
 
 Inside a server window, Perch looks as it does in a browser, with its own title bar in place of the OS one (Settings → UI → Use custom title bar turns that off). On macOS the title bar keeps the usual traffic lights, and Cmd+W closes the current tab rather than the window. On Windows the minimize, maximize and close buttons sit at the right; on Linux they follow your desktop's button layout setting (GNOME Tweaks, KDE's window decorations and the like), and move when you change it. Links to other sites open in your browser. The Local window can also do a few things a browser can't: **Reveal in Finder / File Explorer / Files** and **Open with Default App** in the FILES menu, and the OS folder picker for Open Folder. Remote servers never get those.
+
+### App updates
+
+The app checks for a newer version of itself at launch and every 6 hours. It has its own switches for this, apart from any server's Settings: **Updates** at the bottom of the launcher, and **Updates** in the tray menu, hold **Automatically check for updates**, the **Stable** / **Beta** channel and **Check for updates now**. The launcher's footer shows the app's version.
+
+- **macOS, Windows and the AppImage** download a new version in the background. The launcher and the tray then show "Perch X.Y.Z is ready - Restart to update". Restarting installs it and reopens the server windows you had open. The Local server restarts on the new version too, and its terminals keep running. On Windows the installer runs briefly before the app comes back.
+- **The `.deb` and `.rpm`** belong to your package manager, so the app doesn't replace itself. It shows "Perch X.Y.Z is available" with a **Download** button that opens the release page. Install the new package the same way as the first one.
+
+Updates are signed. The app installs only an update signed with the project's update key; anything else is refused, and the launcher says why. Builds from before automatic updates (the first `0.1.0` downloads) need one manual install of a newer release.
+
+Each server row in the launcher shows that server's version while it answers. The app supports servers from a minimum version up, and a server can require a minimum app version. When the two don't fit, the row says so with a ⚠, and the server's window still opens, with a banner naming both versions and the fix: `perch update` on the server, or an app update. A server from before versions (no `/version.json`) counts as too old. The Local server always matches the app.
 
 ### Tray and notifications
 
@@ -87,7 +123,8 @@ On Linux and macOS it goes in `~/.local/bin`, and the app tells you if that fold
 | `perch instances` | List every running instance — any port, any launch method (`npm run dev`, `npm start`, the service, or a `start --port` one-off) |
 | `perch logs` | Follow the server's logs |
 | `perch enable` / `disable` | Install and enable (or disable) the system service (systemd or launchd) |
-| `perch update` | Pull the latest code, reinstall, rebuild, and restart |
+| `perch update` | Move to the latest release (or `main` with `--main`), reinstall, rebuild, and restart - see [Versions and updates](#versions-and-updates) |
+| `perch --version` | The installed version and commit (also `perch version`) |
 | `perch doctor` | Check dependencies and install health, and troubleshoot problems |
 | `perch open [path]` | Open a folder or file in the app, like `code`/`code-server` — see below |
 | `perch ext <cmd>` | Install and manage extensions: `install`, `ls`, `uninstall`, `enable`, `disable` — see below |

@@ -5,12 +5,22 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.sh | bash
 #
+# It installs the latest release. PERCH_CHANNEL=beta includes pre-releases,
+# and PERCH_REF=main installs the main branch instead.
+#
 # Override the source repo or install location for testing/forks:
 #   PERCH_REPO=/path/to/repo PERCH_DIR=/tmp/tsv bash install.sh
 set -euo pipefail
 
 REPO_URL="${PERCH_REPO:-https://github.com/tuanpham-dev/perch.git}"
 INSTALL_DIR="${PERCH_DIR:-$HOME/.local/share/perch}"
+CHANNEL="${PERCH_CHANNEL:-stable}"
+REF="${PERCH_REF:-}"
+
+# The newest vX.Y.Z tag in `git ls-remote --tags` output on stdin (pre-releases
+# only with "beta"), by SemVer order - the same order perch update uses.
+PICK_TAG='const ch=process.argv[1];const P=/^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;const key=t=>{const m=P.exec(t);return m&&{n:[+m[1],+m[2],+m[3]],p:m[4]?m[4].split('.'):[]}};const cmp=(a,b)=>{for(let i=0;i<3;i++)if(a.n[i]!==b.n[i])return a.n[i]-b.n[i];if(!a.p.length||!b.p.length)return b.p.length-a.p.length;for(let i=0;i<Math.max(a.p.length,b.p.length);i++){const x=a.p[i],y=b.p[i];if(x===undefined)return -1;if(y===undefined)return 1;if(x===y)continue;const xn=/^\d+$/.test(x),yn=/^\d+$/.test(y);if(xn&&yn)return x-y;if(xn)return -1;if(yn)return 1;return x<y?-1:1}return 0};let input='';process.stdin.on('data',d=>input+=d).on('end',()=>{let best=null;for(const l of input.split('\n')){const r=(l.split('\t')[1]||'').trim().replace('refs/tags/','').replace('^{}','');const k=key(r);if(!k||(ch!=='beta'&&k.p.length))continue;if(!best||cmp(k,best.k)>0)best={r,k}}if(best)console.log(best.r)});'
+
 BIN_DIR="$HOME/.local/bin"
 
 if [ -t 1 ]; then
@@ -45,18 +55,33 @@ heading "Installing to $INSTALL_DIR"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
   ok "existing install found — updating"
-  git -C "$INSTALL_DIR" pull --ff-only
+  # perch update knows the rest: which release, never moving backwards,
+  # reinstalling, rebuilding and restarting.
+  UPDATE_FLAGS=()
+  [ "$REF" = "main" ] && UPDATE_FLAGS+=(--main)
+  [ "$CHANNEL" = "beta" ] && UPDATE_FLAGS+=(--beta)
+  node "$INSTALL_DIR/bin/perch" update "${UPDATE_FLAGS[@]}"
 elif [ -e "$INSTALL_DIR" ]; then
   die "$INSTALL_DIR already exists and isn't a Perch checkout — remove it or set PERCH_DIR to a different path"
 else
+  if [ -z "$REF" ]; then
+    REF="$(git ls-remote --tags "$REPO_URL" | node -e "$PICK_TAG" "$CHANNEL")"
+    if [ -z "$REF" ]; then
+      warn "no ${CHANNEL} release yet — installing the main branch"
+      REF="main"
+    fi
+  fi
   mkdir -p "$(dirname "$INSTALL_DIR")"
-  git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
-fi
-ok "source ready"
+  git -c advice.detachedHead=false clone --depth 1 --branch "$REF" "$REPO_URL" "$INSTALL_DIR"
+  git -C "$INSTALL_DIR" config perch.track "$([ "$REF" = "main" ] && echo main || echo release)"
+  ok "source ready ($REF)"
 
-heading "Building"
-( cd "$INSTALL_DIR" && npm install && npm run build )
-ok "build complete"
+  heading "Building"
+  # ci, not install: install rewrites package-lock.json, which perch update
+  # would then see as a local change.
+  ( cd "$INSTALL_DIR" && npm ci && npm run build )
+  ok "build complete"
+fi
 
 heading "Installing the perch command"
 mkdir -p "$BIN_DIR"

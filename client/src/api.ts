@@ -996,3 +996,27 @@ export function resolveOpenTarget(path: string, line?: number, action?: "editor"
   if (action) query.set("action", action);
   return request(`/api/open-target/resolve?${query}`);
 }
+
+// Perch's own version and whether a newer release exists (server
+// updates.ts). The server asks GitHub; this only reads its answer.
+export interface UpdateStatus {
+  current: string;
+  commit: string;
+  channel: "stable" | "beta";
+  autoCheck: boolean;
+  latest: { version: string; url: string } | null;
+  available: boolean;
+  checkedAt: number | null;
+  lastSuccessAt: number | null;
+  error: string | null;
+  checking: boolean;
+}
+
+export function getUpdates(): Promise<UpdateStatus> {
+  return request("/api/updates");
+}
+
+/** Asks the server to check GitHub now, and returns the new answer. */
+export function checkForUpdates(): Promise<UpdateStatus> {
+  return request("/api/updates/check", { method: "POST" });
+}

@@ -347,6 +347,7 @@ fn configure<'a>(
                     if let Some(id) = server_id_of(&label) {
                         crate::alerts::window_loaded(webview.app_handle(), id);
                     }
+                    crate::compat::check_window(webview.app_handle(), &label);
                 }
             }
         })

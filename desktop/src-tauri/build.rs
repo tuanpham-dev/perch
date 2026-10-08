@@ -22,6 +22,12 @@ const COMMANDS: &[&str] = &[
     "start_local",
     "stop_local",
     "detect_installed",
+    "server_versions",
+    "get_update_state",
+    "check_updates",
+    "restart_to_update",
+    "set_update_settings",
+    "open_release_page",
     "spike_report",
 ];
 

@@ -108,3 +108,45 @@ input {
 .edit input { flex: 1; }
 .local { margin-top: auto; display: flex; align-items: center; gap: 10px; color: var(--muted); padding-top: 4px; }
 .local .grow { flex: 1; }
+.app-version { font-size: 12px; }
+/* The app's own update, above the footer: something to act on. */
+.update {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+.update .grow { flex: 1; min-width: 0; }
+.update:not([hidden]) + .local { margin-top: 0; }
+.update .warn { color: var(--bad); }
+.updates-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 52px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(320px, calc(100vw - 36px));
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.panel-title { font-weight: 600; }
+.panel-status { color: var(--muted); font-size: 12px; user-select: text; }
+.updates-panel .check, .updates-panel .channel { display: flex; align-items: center; gap: 6px; }
+select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+}

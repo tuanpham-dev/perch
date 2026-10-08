@@ -5,6 +5,7 @@ import { Exit, fail, heading, info, ok, warn } from './output.ts';
 import { appUrl, BIN_DIR, REPO_DIR } from './paths.ts';
 import { responding, succeeds, which } from './run.ts';
 import { usableServiceManager } from './serviceManager.ts';
+import { versionLine } from './version.ts';
 
 const NODE_MAJOR = 23;
 
@@ -36,6 +37,7 @@ export async function cmdDoctor(): Promise<void> {
   }
 
   heading('Install health');
+  info(`perch ${versionLine()} at ${REPO_DIR}`);
   need(existsSync(join(REPO_DIR, 'node_modules')), 'dependencies installed',
     `node_modules missing - run: perch update  (or cd ${REPO_DIR} && npm install)`);
   const ptyInstalled = ['node_modules/node-pty', 'mux/node_modules/node-pty', 'server/node_modules/node-pty'].some((p) => existsSync(join(REPO_DIR, p)));

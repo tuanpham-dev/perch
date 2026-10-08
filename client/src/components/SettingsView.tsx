@@ -12,6 +12,7 @@ import EditorSection from "./settings/EditorSection";
 import TerminalSection from "./settings/TerminalSection";
 import ExtensionsSection from "./settings/ExtensionsSection";
 import UiSection from "./settings/UiSection";
+import AboutSection from "./settings/AboutSection";
 
 interface Props {
   active: boolean;
@@ -49,7 +50,7 @@ interface Props {
 // installing, and managing extensions themselves lives in the sidebar's
 // Extensions tab (ExtensionsPanel), not here — see
 // plans/extension-registry-and-extensions-tab.md.
-type Section = "terminal" | "backend" | "editor" | "behavior" | "ui" | "extensions" | "ai" | `ext:${string}`;
+type Section = "terminal" | "backend" | "editor" | "behavior" | "ui" | "extensions" | "ai" | "about" | `ext:${string}`;
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "terminal", label: "Terminal" },
@@ -65,6 +66,7 @@ const SECTIONS: { id: Section; label: string }[] = [
   // "which AIs does this app have" has one answer and one place to read it
   // (plans/consolidate-agents-into-ai-providers.md).
   { id: "ai", label: "AI Providers" },
+  { id: "about", label: "About" },
 ];
 
 export default function SettingsView({
@@ -194,6 +196,7 @@ export default function SettingsView({
           {section === "ui" && <UiSection />}
           {section === "extensions" && <ExtensionsSection />}
           {section === "ai" && <AiProvidersSection />}
+          {section === "about" && <AboutSection />}
           {activeExtension && (
             <ExtensionConfigSection
               ext={activeExtension}

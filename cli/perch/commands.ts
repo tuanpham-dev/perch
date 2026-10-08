@@ -12,6 +12,8 @@ import { ask, die, Exit, fail, green, heading, info, interactive, ok, red, table
 import { appUrl, ENV_FILE, LOG_FILE, logFileForPort, PID_FILE, pidFileForPort, readPort, REPO_DIR } from './paths.ts';
 import { inherit, output, responding } from './run.ts';
 import { usableServiceManager } from './serviceManager.ts';
+import { moveCheckout, UPDATE_USAGE } from './update.ts';
+import { versionLine } from './version.ts';
 import { enableLinger } from './systemd.ts';
 
 // ---- run ------------------------------------------------------------------
@@ -258,6 +260,7 @@ export async function cmdInstances(): Promise<void> {
 }
 
 export async function cmdStatus(): Promise<void> {
+  info(`perch ${versionLine()}`);
   const manager = usableServiceManager();
   if (manager?.installed()) manager.printStatus();
   else {
@@ -305,7 +308,8 @@ export function cmdDisable(): void {
 
 // ---- update -------------------------------------------------------------------
 
-export async function cmdUpdate(): Promise<void> {
+export async function cmdUpdate(args: string[] = []): Promise<void> {
+  if (args.includes('--help') || args.includes('-h')) return info(UPDATE_USAGE);
   info(`updating ${REPO_DIR}...`);
   // A dirty checkout breaks the pull: tracked edits make --ff-only refuse,
   // and untracked files block incoming commits that add them. Offer to
@@ -322,8 +326,11 @@ export async function cmdUpdate(): Promise<void> {
     inherit('git', ['-C', REPO_DIR, 'clean', '-fd']);
     ok('cleaned');
   }
-  if (inherit('git', ['-C', REPO_DIR, 'pull', '--ff-only']) !== 0) die('git pull failed');
-  if (inherit('npm', ['install'], REPO_DIR) !== 0) die('npm install failed');
+  // Releases by default, main with --main (plans/app-versioning.md).
+  if (!moveCheckout(args)) return;
+  // ci, not install: install rewrites package-lock.json, which then shows up
+  // as a local change that the next update asks to discard.
+  if (inherit('npm', ['ci'], REPO_DIR) !== 0) die('npm ci failed');
   if (inherit('npm', ['run', 'build'], REPO_DIR) !== 0) die('npm run build failed');
   ok('updated');
 

@@ -10,6 +10,7 @@ import { cmdExt } from './extensions.ts';
 import { cmdOpen } from './open.ts';
 import { cmdSettings } from './settings.ts';
 import { Exit, fail, info } from './output.ts';
+import { cmdVersion } from './version.ts';
 
 const HELP = `perch - manage a Perch install
 
@@ -27,7 +28,8 @@ Commands:
   logs       Follow the server's logs
   enable     Install + enable the system service (starts on login/boot)
   disable    Disable the system service
-  update     Pull the latest code, reinstall, rebuild, and restart
+  update     Move to the latest release, reinstall, rebuild, and restart
+             (see: perch update --help)
   doctor     Check dependencies, install health, and troubleshoot problems
   run        Run in the foreground (used internally by the system service)
   open       Open a folder or file in the app, like \`code\`/\`code-server\`
@@ -42,6 +44,7 @@ Commands:
   daemon     Terminal daemon: status, start, stop (stopping ends every terminal;
              sessions come back on the next start)
   path       Print the install directory
+  version    Print the installed version (also: perch --version, perch -v)
   help       Show this help`;
 
 async function main(argv: string[]): Promise<void> {
@@ -56,7 +59,7 @@ async function main(argv: string[]): Promise<void> {
     case 'logs': return cmdLogs();
     case 'enable': return cmdEnable();
     case 'disable': return cmdDisable();
-    case 'update': return cmdUpdate();
+    case 'update': return cmdUpdate(rest);
     case 'doctor': return cmdDoctor();
     case 'open': return cmdOpen(rest);
     case 'ext': return cmdExt(rest);
@@ -69,6 +72,10 @@ async function main(argv: string[]): Promise<void> {
       if (status !== 0) throw new Exit(status);
       return;
     }
+    case 'version':
+    case '--version':
+    case '-v':
+      return cmdVersion();
     case 'help':
     case '-h':
     case '--help':

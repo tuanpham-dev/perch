@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::local_server::Status;
 use crate::servers::{ServerEntry, LOCAL_ID};
-use crate::{alerts, paths, tray, windows, AppState};
+use crate::{alerts, compat, paths, tray, windows, AppState};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +127,37 @@ pub async fn stop_local(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     changed(&app);
     result
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerVersion {
+    id: String,
+    // While it answers.
+    version: Option<String>,
+    // When it and this app don't fit (compat.rs).
+    compat_note: Option<String>,
+}
+
+/// Each server's version, asked of the servers themselves. Separate from
+/// list_servers: an unreachable remote takes seconds to give up on, and the
+/// list shouldn't wait for it.
+#[tauri::command]
+pub async fn server_versions(app: AppHandle) -> Vec<ServerVersion> {
+    let entries = {
+        let state = app.state::<AppState>();
+        state.servers.list(state.local.port())
+    };
+    let probes = compat::probe_all(&entries).await;
+    entries
+        .into_iter()
+        .zip(probes)
+        .map(|(entry, probe)| ServerVersion {
+            id: entry.id,
+            version: compat::version_of(&probe),
+            compat_note: compat::note(&probe),
+        })
+        .collect()
 }
 
 /// Looks for an installed Perch again. The launcher calls this every few

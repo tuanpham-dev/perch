@@ -321,6 +321,13 @@ export interface AppSettings {
   // seconds. 0 disables. Read server-side (index.ts, which calls push.ts) from the synced doc —
   // the shell reports and the push fan-out never touch the client.
   notifyCommandMinDuration: number;
+  // Perch's own updates (plans/app-versioning.md): whether the server checks
+  // GitHub for a newer release on its own, which releases count (Beta adds
+  // pre-releases), and the version whose "available" notice was dismissed,
+  // so it stays hidden until a still newer one appears.
+  checkForUpdates: boolean;
+  updateChannel: "stable" | "beta";
+  dismissedUpdate: string;
 }
 
 // Defaults mirror the user's code-server settings.json (editor.fontFamily,
@@ -400,6 +407,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoUpdateExtensions: false,
   paletteSortByUsage: false,
   notifyCommandMinDuration: 0,
+  checkForUpdates: true,
+  updateChannel: "stable",
+  dismissedUpdate: "",
 };
 
 // A stored value from before the built-in theme/icon theme/font were

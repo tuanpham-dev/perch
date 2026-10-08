@@ -5,16 +5,20 @@
 #   Rust tests on Linux and a compile check on macOS and Windows - the
 #   target_os-gated code there can't be checked on a Linux machine (the
 #   -sys crates need each platform's own C compiler).
-# - build: every platform's packages, only on a desktop-v* tag (attached to
-#   a draft GitHub Release) or a manual run (uploaded as the run's
-#   artifacts) - never on an ordinary push. Each platform builds on its own
-#   runner, so the bundled server's native module (node-pty) is compiled for
-#   exactly the Node it ships with.
+# - build: every platform's packages, only on a vX.Y.Z release tag (attached
+#   to a draft GitHub Release "Perch X.Y.Z" whose notes are that version's
+#   CHANGELOG.md entry; a -rc/-beta tag makes a pre-release) or a manual run
+#   (uploaded as the run's artifacts) - never on an ordinary push. Each
+#   platform builds on its own runner, so the bundled server's native module
+#   (node-pty) is compiled for exactly the Node it ships with. Both also
+#   sign the app's update files with the update key (repository secrets;
+#   docs/DEVELOPMENT.md), and a release gets the latest.json the installed
+#   apps check (plans/app-versioning.md R21).
 name: Desktop app
 
 on:
   push:
-    tags: ["desktop-v*"]
+    tags: ["v*"]
     branches: ["**"]
     paths:
       - "desktop/**"
@@ -104,7 +108,7 @@ jobs:
   build:
     name: Build (${{ matrix.name }})
     needs: check
-    if: startsWith(github.ref, 'refs/tags/desktop-v') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     strategy:
@@ -155,30 +159,53 @@ jobs:
       - name: Stage the bundled server
         run: npm run stage --prefix desktop
 
+      # The release's notes: this version's CHANGELOG.md entry (written by
+      # `npm run release`). A tag without one fails here, before building.
+      - name: Release notes
+        id: notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          {
+            echo "version=${GITHUB_REF_NAME#v}"
+            echo "body<<PERCH_NOTES_EOF"
+            node scripts/changelog-entry.mjs "$GITHUB_REF_NAME"
+            echo "PERCH_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       # Two steps rather than one with ternary'd inputs: tauri-action treats
       # a present-but-empty tagName differently from an omitted one (only
       # omitting it skips creating a release) - openray's note.
+      # createUpdaterArtifacts is set here, not in tauri.conf.json: it needs
+      # the signing key, which a local `npm run build` doesn't have.
       - name: Build and publish release (tag)
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
+          args: --config '{"bundle":{"createUpdaterArtifacts":true}}'
           tagName: ${{ github.ref_name }}
-          releaseName: Perch Desktop ${{ github.ref_name }}
-          releaseBody: Unsigned builds. See docs/INSTALL.md (Desktop app) for first-run steps on each platform.
+          releaseName: Perch ${{ steps.notes.outputs.version }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       - name: Build only (manual run)
-        if: "!startsWith(github.ref, 'refs/tags/desktop-v')"
+        if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
+          args: --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
       - name: Upload packages
-        if: "!startsWith(github.ref, 'refs/tags/desktop-v')"
+        if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/upload-artifact@v7
         with:
           name: perch-desktop-${{ matrix.name }}

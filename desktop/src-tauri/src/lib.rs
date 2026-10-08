@@ -4,6 +4,7 @@
 mod alerts;
 mod bridge;
 mod cli;
+mod compat;
 mod deeplink;
 mod launcher;
 mod local_server;
@@ -15,6 +16,7 @@ mod servers;
 #[cfg(debug_assertions)]
 mod spike;
 mod tray;
+mod updater;
 mod windows;
 
 use std::collections::{HashMap, HashSet};
@@ -27,6 +29,7 @@ pub struct AppState {
     pub servers: servers::Servers,
     pub local: local_server::LocalServer,
     pub alerts: alerts::Alerts,
+    pub updates: updater::Updates,
     // Set by Quit; otherwise closing the last window leaves the app in the
     // tray.
     quitting: AtomicBool,
@@ -82,6 +85,7 @@ pub fn run() {
         servers: servers::Servers::load(paths::config_dir().join("servers.json")),
         local,
         alerts: alerts::Alerts::default(),
+        updates: updater::Updates::default(),
         quitting: AtomicBool::new(false),
         loaded: Mutex::new(HashSet::new()),
         pending_scripts: Mutex::new(HashMap::new()),
@@ -110,6 +114,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().with_denylist(&[windows::LAUNCHER]).build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             bridge::window_minimize,
@@ -131,6 +136,12 @@ pub fn run() {
             launcher::start_local,
             launcher::stop_local,
             launcher::detect_installed,
+            launcher::server_versions,
+            updater::get_update_state,
+            updater::check_updates,
+            updater::restart_to_update,
+            updater::set_update_settings,
+            updater::open_release_page,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -152,6 +163,14 @@ pub fn run() {
             let detect = handle.clone();
             std::thread::spawn(move || {
                 let state = detect.state::<AppState>();
+                // After an app update: the bundled server still runs the
+                // old version. Restarted on this one (its terminals carry
+                // on, R15).
+                if state.local.outdated() {
+                    let _ = state.local.ensure_running();
+                    tray::refresh(&detect);
+                    let _ = tauri::Emitter::emit_to(&detect, windows::LAUNCHER, "servers-changed", ());
+                }
                 if state.servers.detect_installed(state.local.port()) {
                     alerts::sync(&detect);
                     tray::refresh(&detect);
@@ -160,8 +179,16 @@ pub fn run() {
             });
             #[cfg(debug_assertions)]
             qa::watch(&handle);
+            updater::start(&handle);
+            // Restarted to install an update: back to the windows it had.
+            let reopen = updater::take_windows_to_reopen().unwrap_or_default();
             match &link {
                 Some(link) => deeplink::handle(&handle, link),
+                None if !reopen.is_empty() => {
+                    for id in &reopen {
+                        windows::open_server(&handle, id);
+                    }
+                }
                 None => windows::show_launcher(&handle),
             }
             Ok(())

@@ -26,9 +26,35 @@ interface LauncherState {
   local: LocalStatus;
 }
 
+interface ServerVersion {
+  id: string;
+  version: string | null;
+  compatNote: string | null;
+}
+
+// The app's own update (src-tauri/src/updater.rs).
+interface UpdateView {
+  appVersion: string;
+  autoCheck: boolean;
+  channel: "stable" | "beta";
+  phase: "idle" | "checking" | "upToDate" | "downloading" | "ready" | "available" | "error";
+  version: string | null;
+  error: string | null;
+  checkedAt: number | null;
+  noticeOnly: boolean;
+  releaseUrl: string | null;
+}
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const list = $<HTMLUListElement>("servers");
 const footer = $<HTMLElement>("local");
+const updateBar = $<HTMLElement>("update");
+const updatesPanel = $<HTMLElement>("updates-panel");
+
+// What each server said its version is, and whether it fits this app.
+const versions = new Map<string, ServerVersion>();
+let update: UpdateView | null = null;
+let updatesOpen = false;
 
 // Whether each remote answered at the last check, and when it last did.
 const reachable = new Map<string, boolean>();
@@ -102,6 +128,23 @@ async function refresh() {
   state = await invoke<LauncherState>("list_servers");
   render();
   void checkReachable();
+  void checkVersions();
+}
+
+let askingVersions = false;
+async function checkVersions() {
+  if (askingVersions) return;
+  askingVersions = true;
+  try {
+    const answers = await invoke<ServerVersion[]>("server_versions");
+    versions.clear();
+    for (const v of answers) versions.set(v.id, v);
+    render();
+  } catch {
+    // Versions are extra; the list works without them.
+  } finally {
+    askingVersions = false;
+  }
 }
 
 // A remote answers if anything comes back for its public /tunnel.mjs; an
@@ -174,6 +217,7 @@ function render() {
   if (confirmingRemove !== openMenu) confirmingRemove = null;
   list.replaceChildren(...state.servers.map(row));
   renderFooter();
+  renderUpdate();
 }
 
 function row(s: Server): HTMLLIElement {
@@ -189,13 +233,23 @@ function row(s: Server): HTMLLIElement {
   name.textContent = s.name;
   const loc = document.createElement("div");
   loc.className = "where";
-  loc.textContent = where(s);
-  loc.title = where(s);
+  const v = versions.get(s.id);
+  // Only while it answers: a version from an earlier check could be stale.
+  const version = v?.version && (s.kind !== "remote" || reachable.get(s.id) !== false) ? ` · v${v.version}` : "";
+  loc.textContent = where(s) + version;
+  loc.title = loc.textContent;
+  if (v?.compatNote) loc.append(" ⚠");
   who.append(name, loc);
   if (status.note) {
     const note = document.createElement("div");
     note.className = `note${status.warn ? " warn" : ""}`;
     note.textContent = status.note;
+    who.append(note);
+  }
+  if (v?.compatNote) {
+    const note = document.createElement("div");
+    note.className = "note warn";
+    note.textContent = v.compatNote;
     who.append(note);
   }
   const open = button(
@@ -342,7 +396,101 @@ function renderFooter() {
     start.disabled = busy;
     actions.push(start);
   }
-  footer.replaceChildren(text, ...actions);
+  const app = document.createElement("span");
+  app.className = "app-version";
+  app.textContent = update ? `App v${update.appVersion}` : "";
+  const updates = button("Updates", () => {
+    updatesOpen = !updatesOpen;
+    renderUpdate();
+  });
+  updates.setAttribute("aria-haspopup", "dialog");
+  updates.setAttribute("aria-expanded", String(updatesOpen));
+  footer.replaceChildren(text, app, ...actions, updates);
+}
+
+// ---- The app's own update -------------------------------------------------
+
+function renderUpdate() {
+  const u = update;
+  // The bar: something to act on.
+  if (u && u.phase === "ready" && u.version) {
+    const text = document.createElement("span");
+    text.className = "grow";
+    text.textContent = `Perch ${u.version} is ready - Restart to update`;
+    updateBar.replaceChildren(text, button("Restart", () => void run("restart_to_update"), ""));
+    updateBar.hidden = false;
+  } else if (u && u.phase === "available" && u.version) {
+    const text = document.createElement("span");
+    text.className = "grow";
+    text.textContent = `Perch ${u.version} is available`;
+    updateBar.replaceChildren(text, button("Download", () => void run("open_release_page"), ""));
+    updateBar.hidden = false;
+  } else if (u && u.phase === "error" && u.error) {
+    const text = document.createElement("span");
+    text.className = "grow warn";
+    text.textContent = `Couldn't update the app: ${u.error}`;
+    updateBar.replaceChildren(text, button("Try again", () => void run("check_updates")));
+    updateBar.hidden = false;
+  } else {
+    updateBar.hidden = true;
+  }
+
+  updatesPanel.hidden = !updatesOpen || !u;
+  if (!updatesOpen || !u) return;
+  const title = document.createElement("div");
+  title.className = "panel-title";
+  title.textContent = `Perch app ${u.appVersion}`;
+  const status = document.createElement("div");
+  status.className = "panel-status";
+  status.textContent = updateStatusText(u);
+  const busy = u.phase === "checking" || u.phase === "downloading";
+  const check = button(busy ? "Checking..." : "Check for updates now", () => void run("check_updates"));
+  check.disabled = busy || u.phase === "ready";
+
+  const auto = document.createElement("label");
+  auto.className = "check";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = u.autoCheck;
+  box.addEventListener("change", () => void run("set_update_settings", { autoCheck: box.checked }));
+  auto.append(box, " Automatically check for updates");
+
+  const channel = document.createElement("label");
+  channel.className = "channel";
+  const select = document.createElement("select");
+  for (const [value, label] of [
+    ["stable", "Stable"],
+    ["beta", "Beta (includes pre-releases)"],
+  ]) {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    o.selected = u.channel === value;
+    select.append(o);
+  }
+  select.addEventListener("change", () => void run("set_update_settings", { channel: select.value }));
+  channel.append("Channel ", select);
+
+  updatesPanel.replaceChildren(title, status, check, auto, channel);
+}
+
+function updateStatusText(u: UpdateView): string {
+  switch (u.phase) {
+    case "checking":
+      return "Checking for updates...";
+    case "downloading":
+      return `Downloading Perch ${u.version ?? ""}...`;
+    case "ready":
+      return `Perch ${u.version} is ready - Restart to update.`;
+    case "available":
+      return `Perch ${u.version} is available.${u.noticeOnly ? " Installed from a package: download it from the release page." : ""}`;
+    case "error":
+      return `Couldn't check for updates: ${u.error ?? "unknown error"}`;
+    case "upToDate":
+      return `Up to date. Checked ${u.checkedAt ? ago(u.checkedAt) : "just now"}.`;
+    default:
+      return u.autoCheck ? "Not checked yet." : "Automatic checks are off.";
+  }
 }
 
 // ---- Wiring --------------------------------------------------------------
@@ -372,15 +520,24 @@ addForm.addEventListener("submit", async (e) => {
 $("error-close").addEventListener("click", () => {
   $("error").hidden = true;
 });
-document.addEventListener("click", () => {
+document.addEventListener("click", (e) => {
   if (openMenu) {
     openMenu = null;
     render();
+  }
+  // A click outside the Updates panel (and its button) closes it.
+  if (updatesOpen && !updatesPanel.contains(e.target as Node) && !footer.contains(e.target as Node)) {
+    updatesOpen = false;
+    renderUpdate();
+    renderFooter();
   }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && openMenu) {
     openMenu = null;
+    render();
+  } else if (e.key === "Escape" && updatesOpen) {
+    updatesOpen = false;
     render();
   }
 });
@@ -389,6 +546,14 @@ void listen<string>("launcher-error", (e) => {
   busy = false;
   showError(e.payload);
   void refresh();
+});
+void listen<UpdateView>("updates-changed", (e) => {
+  update = e.payload;
+  render();
+});
+void invoke<UpdateView>("get_update_state").then((u) => {
+  update = u;
+  render();
 });
 void listen("servers-changed", () => {
   busy = false;

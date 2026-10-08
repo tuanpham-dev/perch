@@ -1,12 +1,13 @@
 // The tray icon (menu bar on macOS) and, on macOS, the same items in the app
 // menu (plans/desktop-app.md T16). Rebuilt whenever the local server's state
 // or the server list changes.
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, Submenu, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 use crate::local_server::Status;
+use crate::updater::{self, Channel, Phase};
 use crate::{cli, windows, AppState};
 
 const TRAY_ID: &str = "perch";
@@ -72,7 +73,7 @@ fn build_menu(app: &AppHandle, status: &Status) -> tauri::Result<Menu<Wry>> {
     } else {
         MenuItemBuilder::with_id("install-cli", "Install perch-desktop Command").build(app)?
     };
-    MenuBuilder::new(app)
+    let mut menu = MenuBuilder::new(app)
         .item(&MenuItemBuilder::with_id("status", local_status_line(status)).enabled(false).build(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id("launcher", "Open Launcher").build(app)?)
@@ -80,8 +81,54 @@ fn build_menu(app: &AppHandle, status: &Status) -> tauri::Result<Menu<Wry>> {
         .separator()
         .item(&local_toggle)
         .item(&command_item)
+        .separator();
+    for item in update_items(app)? {
+        menu = menu.item(&item);
+    }
+    menu.item(&updates_menu(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id("quit", "Quit Perch").build(app)?)
+        .build()
+}
+
+// The app's own update (updater.rs): what's waiting, and checking now.
+fn update_items(app: &AppHandle) -> tauri::Result<Vec<tauri::menu::MenuItem<Wry>>> {
+    let view = app.state::<AppState>().updates.view(app);
+    let mut items = Vec::new();
+    match (view.phase, view.version.as_deref()) {
+        (Phase::Ready, Some(v)) => {
+            items.push(MenuItemBuilder::with_id("restart-update", format!("Perch {v} is ready - Restart to Update")).build(app)?)
+        }
+        (Phase::Available, Some(v)) => {
+            items.push(MenuItemBuilder::with_id("open-release", format!("Perch {v} is available - Download...")).build(app)?)
+        }
+        _ => {}
+    }
+    let busy = matches!(view.phase, Phase::Checking | Phase::Downloading);
+    let label = match view.phase {
+        Phase::Checking => "Checking for Updates...",
+        Phase::Downloading => "Downloading the Update...",
+        _ => "Check for Updates Now",
+    };
+    items.push(MenuItemBuilder::with_id("check-updates", label).enabled(!busy && view.phase != Phase::Ready).build(app)?);
+    Ok(items)
+}
+
+fn updates_menu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
+    let settings = app.state::<AppState>().updates.settings();
+    SubmenuBuilder::new(app, "Updates")
+        .item(
+            &CheckMenuItemBuilder::with_id("update-auto", "Automatically Check for Updates")
+                .checked(settings.auto_check)
+                .build(app)?,
+        )
+        .separator()
+        .item(&CheckMenuItemBuilder::with_id("channel-stable", "Stable").checked(settings.channel == Channel::Stable).build(app)?)
+        .item(
+            &CheckMenuItemBuilder::with_id("channel-beta", "Beta (includes pre-releases)")
+                .checked(settings.channel == Channel::Beta)
+                .build(app)?,
+        )
         .build()
 }
 
@@ -151,6 +198,21 @@ pub fn on_menu(app: &AppHandle, id: &str) {
             }
             refresh(app);
         }
+        "check-updates" => {
+            tauri::async_runtime::spawn(updater::check(app.clone()));
+        }
+        "restart-update" => {
+            if let Err(e) = updater::restart_now(app) {
+                message(app, &e, MessageDialogKind::Error);
+            }
+        }
+        "open-release" => updater::open_release_page(app.clone()),
+        "update-auto" => {
+            let on = !app.state::<AppState>().updates.settings().auto_check;
+            report(app, updater::set_settings(app, Some(on), None));
+        }
+        "channel-stable" => report(app, updater::set_settings(app, None, Some(Channel::Stable))),
+        "channel-beta" => report(app, updater::set_settings(app, None, Some(Channel::Beta))),
         "quit" => crate::quit(app),
         "close-window" => {
             if let Some(w) = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)) {
@@ -163,6 +225,15 @@ pub fn on_menu(app: &AppHandle, id: &str) {
             }
         }
     }
+}
+
+fn report(app: &AppHandle, result: Result<(), String>) {
+    if let Err(e) = result {
+        message(app, &e, MessageDialogKind::Error);
+    }
+    // A check item toggles itself when clicked; the rebuild puts it back
+    // to what the setting says.
+    refresh(app);
 }
 
 fn message(app: &AppHandle, text: &str, kind: MessageDialogKind) {

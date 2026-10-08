@@ -13,6 +13,8 @@ import { api } from "./api.js";
 import { paintIndexHtml, paintManifest, readThemePaint } from "./themePaint.js";
 import { clientPathsMiddleware } from "./clientPaths.js";
 import { writeInstanceRecord } from "./instanceRecord.js";
+import { versionInfo } from "./version.js";
+import { startUpdateChecks } from "./updates.js";
 import { subscribeCommandEvents } from "./commandEvents.js";
 import { loadEnabledServerHooks } from "./extensions.js";
 import { captureConsole } from "./logChannels.js";
@@ -204,6 +206,13 @@ app.get("/tunnel.mjs", (_req, res) => {
   res.type("text/javascript").sendFile(tunnelCli);
 });
 
+// Which Perch this is, for the desktop app's launcher and its compatibility
+// check (plans/app-versioning.md R2). Public like /tunnel.mjs - outside /api,
+// so the sign-in gate doesn't apply - and it carries nothing but versions.
+app.get("/version.json", (_req, res) => {
+  res.set("Cache-Control", "no-store").json(versionInfo());
+});
+
 const clientDist = path.resolve(import.meta.dirname, "../../client/dist");
 if (existsSync(clientDist)) {
   const manifestPath = path.join(clientDist, "manifest.webmanifest");
@@ -245,6 +254,7 @@ if (existsSync(clientDist)) {
       req.path.startsWith("/api/") ||
       req.path.startsWith("/ws/") ||
       req.path === "/tunnel.mjs" ||
+      req.path === "/version.json" ||
       parseProxyPath(req.path) !== null
     ) {
       next();
@@ -383,6 +393,7 @@ selectEngine(typeof backend === "string" ? backend : DAEMON_ENGINE_ID, {
 startDaemonLink(PORT, () => whenEngineReady().then(() => activeEngineId() === DAEMON_ENGINE_ID));
 applyTerminalSettings().catch((err) => console.error("failed to apply terminal settings:", err));
 resumeRestoredAgents();
+startUpdateChecks();
 getMultiplexer().onEvent((event) => {
   if (event.event === "sessions-changed") resumeRestoredAgents();
   if (event.event !== "bell") return;
