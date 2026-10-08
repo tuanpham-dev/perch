@@ -55,11 +55,11 @@ The app opens on a list of servers. Each one opens in its own window, which reme
 - **Installed** - a Perch already running on this machine (from `install.sh` or `install.ps1`), listed while it answers.
 - **Remote servers** you add with **+ Add server**: a name and an address, such as `https://perch.example.com`. A server with `AUTH_TOKEN` shows its sign-in page once; the window keeps the sign-in after that. Editing a server's address closes its window; the next Open uses the new address.
 
-Inside a server window, Perch looks as it does in a browser, with its own title bar in place of the OS one (Settings → UI → Use custom title bar turns that off). Links to other sites open in your browser. The Local window can also do a few things a browser can't: **Reveal in Finder / File Explorer / Files** and **Open with Default App** in the FILES menu, and the OS folder picker for Open Folder. Remote servers never get those.
+Inside a server window, Perch looks as it does in a browser, with its own title bar in place of the OS one (Settings → UI → Use custom title bar turns that off). On macOS the title bar keeps the usual traffic lights, and Cmd+W closes the current tab rather than the window. On Windows the minimize, maximize and close buttons sit at the right; on Linux they follow your desktop's button layout setting (GNOME Tweaks, KDE's window decorations and the like), and move when you change it. Links to other sites open in your browser. The Local window can also do a few things a browser can't: **Reveal in Finder / File Explorer / Files** and **Open with Default App** in the FILES menu, and the OS folder picker for Open Folder. Remote servers never get those.
 
 ### Tray and notifications
 
-Closing a window leaves Perch in the tray (the menu bar on macOS), where you can open any server, start or stop the local server, and quit. Alerts, such as an agent waiting for input or a long command finishing, arrive as OS notifications from every server whose **Notify** is on, even with its window closed. Local and Installed have it on by default; turn it on for a remote server from its **...** menu. Click a notification to open that server on the terminal it's about.
+Closing a window leaves Perch in the tray (the menu bar on macOS), where you can open any server, start or stop the local server, and quit. Alerts, such as an agent waiting for input or a long command finishing, arrive as OS notifications from every server whose **Notify** is on, even with its window closed. Local and Installed have it on by default; turn it on for a remote server from its **...** menu. On Linux and macOS, clicking a notification opens that server on the terminal it's about.
 
 ### `perch-desktop` and `perch://` links
 
@@ -71,12 +71,12 @@ perch-desktop . --server "build box"    # open a folder in another server's wind
 perch-desktop start | stop | status     # the bundled local server
 ```
 
-On Linux and macOS it goes in `~/.local/bin`; the app tells you if that folder isn't on your `PATH`. Links do the same from anywhere: `perch://open?path=/home/me/app/main.rs&line=12` (add `&server=<name>` for another server, `&action=editor` or `&action=preview` to choose how a file opens).
+On Linux and macOS it goes in `~/.local/bin`, and the app tells you if that folder isn't on your `PATH`; on Windows it goes in `%LOCALAPPDATA%\Perch\bin`, which is added to your `PATH` (open a new terminal to use it). Links do the same from anywhere: `perch://open?path=/home/me/app/main.rs&line=12` (add `&server=<name>` for another server, `&action=editor` or `&action=preview` to choose how a file opens).
 
 ### Known limitations
 
 - **Linux:** H.264 video in the media viewer needs `gstreamer1.0-libav` (the `.deb` installs it; install it yourself for the AppImage). On Fedora it comes from RPM Fusion (`gstreamer1-libav`), so the `.rpm` can't install it for you. Dragging files in from a file manager hasn't been confirmed yet. Typing through an input method (IME) needs `GTK_IM_MODULE` set the way your desktop normally sets it.
-- **macOS** builds haven't been tested on a real machine yet. On macOS and Windows, clicking a notification may only bring the app forward, without switching to the terminal it's about.
+- **Windows:** clicking a notification doesn't open the terminal it's about yet; open the server from the tray instead.
 
 ### The `perch` command
 

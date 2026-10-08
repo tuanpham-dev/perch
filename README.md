@@ -47,6 +47,14 @@ See [docs/FEATURES.md](docs/FEATURES.md) for the full tour.
 
 ## Install
 
+Prefer an app? The **desktop app** for macOS, Windows and Linux carries its
+own Perch server, so it needs no Node or toolchain, and it opens remote Perch
+servers too. Download it from the
+[Releases page](https://github.com/tuanpham-dev/perch/releases) - see
+[Desktop app](docs/INSTALL.md#desktop-app).
+
+To install Perch as a service on the machine your code runs on:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.sh | bash
 ```
@@ -71,7 +79,7 @@ run `perch doctor` if anything looks wrong.
 |---|---|
 | [Features](docs/FEATURES.md) | What everything does, in detail |
 | [Keyboard & mouse](docs/KEYBINDINGS.md) | Default shortcuts and terminal gestures |
-| [Install](docs/INSTALL.md) | Requirements, the installer, and the `perch` CLI |
+| [Install](docs/INSTALL.md) | Requirements, the installer, the desktop app, and the `perch` CLI |
 | [Deployment](docs/DEPLOYMENT.md) | Production, nginx, and authentication |
 | [Port forwarding](docs/PORT_FORWARDING.md) | The tunnel CLI and the built-in port proxy |
 | [Extensions](docs/EXTENSIONS.md) | Installing, bundling, and writing extensions |
