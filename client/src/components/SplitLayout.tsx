@@ -720,6 +720,16 @@ export default function SplitLayout({
             latestRef.current.applyDrop(payload.tabs[0].id, local.sourceGroupId, target);
           }
           local.handledLocally = true;
+          // The drag's own dragend, where this would otherwise end, never
+          // comes when the drop moved the dragged tab into another pane: its
+          // element is unmounted from under the drag. Left on, the page
+          // stayed in drag mode, the moved tab faded and the panes' content
+          // unclickable. Ended here instead; a later dragend finds nothing.
+          nativeRef.current = null;
+          if (payload.kind !== "chip") tabJustDraggedRef.current = true;
+          setDragTabId(null);
+          setNativeDragGroupKey(null);
+          document.body.classList.remove("tab-dragging");
         } else if (payload.windowId !== WINDOW_INSTANCE_ID) {
           latestRef.current.onForeignDrop(payload, target);
         }
