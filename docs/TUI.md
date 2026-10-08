@@ -181,7 +181,7 @@ support links.
 | `x` | Stop the process holding the port (asks first) |
 | `c` | Copy the tunnel command |
 | `s` | Show or hide the token |
-| `t` or `Esc` | Close the box |
+| `q`, `t` or `Esc` | Close the box |
 
 Copying asks your terminal to put the text on your clipboard (OSC 52). That
 works in Perch's web terminal and most modern terminals, also over SSH, but

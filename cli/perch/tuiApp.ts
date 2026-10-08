@@ -508,7 +508,7 @@ export class TuiApp {
       if (list.length === 0) return;
       mode.selected = portKey(list[Math.max(0, Math.min(list.length - 1, (at < 0 ? 0 : at) + delta))]!);
     };
-    if (key.name === 'escape' || key.name === 'ctrl-c' || ch === 't') {
+    if (key.name === 'escape' || key.name === 'ctrl-c' || ch === 't' || ch === 'q') {
       clearInterval(this.#portsPoll);
       this.#mode = { kind: 'list' };
     } else if (key.name === 'up' || ch === 'k') move(-1);
@@ -903,7 +903,7 @@ export class TuiApp {
       const url = this.#portLink(mode, selected.port);
       tail.push({ text: url, link: url });
     }
-    tail.push({ text: '⏎ go to terminal · o open · u copy URL · x kill · Esc close', dim: true });
+    tail.push({ text: '⏎ go to terminal · o open · u copy URL · x kill · q close', dim: true });
 
     const body: BoxLine[] = [];
     if (ports === undefined) body.push({ text: 'Loading ports...', dim: true });
@@ -958,7 +958,9 @@ export class TuiApp {
     for (const l of lines.slice(0, height - 2)) {
       const text = fit(l.text, inner);
       const styled = l.selected ? `${style.inverse}${text}${style.reset}` : l.dim ? `${style.dim}${text}${style.reset}` : text;
-      const body = l.link ? osc8(l.link, styled) : styled;
+      // A link covers its text only, not the padding that fills the row.
+      const shown = text.trimEnd();
+      const body = l.link ? `${osc8(l.link, shown)}${text.slice(shown.length)}` : styled;
       out += `${at(y++)}│ ${body} │`;
     }
     out += `${at(y)}└${'─'.repeat(width - 2)}┘`;
