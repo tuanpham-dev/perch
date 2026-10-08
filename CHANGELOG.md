@@ -3,6 +3,16 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.1.1 - 2026-10-08
+
+- **The Mac app can update itself.** macOS builds now include the signed
+  update bundle, which 0.1.0 left out, so the Mac app finds and installs
+  new releases like the Windows and Linux ones do.
+- **perch tui:** `q` closes the Ports box, as it quits from the list; keys
+  typed after it no longer run as box actions. A port's link is underlined
+  across the URL only, not to the box's edge.
+- **README:** screenshots of the current app, including `perch tui`.
+
 ## 0.1.0 - 2026-10-08
 
 The first release of Perch: a self-hosted workspace for terminals in the
