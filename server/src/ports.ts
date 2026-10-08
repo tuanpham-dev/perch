@@ -156,22 +156,39 @@ const MAX_ANCESTRY_HOPS = 64;
 // absent here so it stays inside the tree.
 const BOUNDARY_SHELLS = new Set(["zsh", "bash", "fish", "csh", "tcsh", "ksh"]);
 
+// Service managers and init-like processes are never perch's own either,
+// though perch may run under one (a systemd user service, launchd, a
+// container's init). They adopt every orphaned process of the user - a dev
+// server started with `&` or nohup from a shell that has since exited - so
+// claiming one would hide all of those as perch's own, before the
+// PERCH_WINDOW/PERCH_SESSION fallback that exists for them gets a look.
+// Names as /proc's comm gives them (at most 15 characters).
+const BOUNDARY_SUPERVISORS = new Set([
+  "systemd", "init", "launchd", "tini", "dumb-init", "docker-init",
+  "supervisord", "s6-supervise", "runsv", "containerd-shim",
+]);
+
 // Ancestors of this server process, up to the terminal it's running in, the
-// first interactive shell, or the process-tree root — whichever comes first
+// first interactive shell or service manager, or the process-tree root — whichever comes first
 // (all excluded). A port whose owning process's chain passes through one of
 // these pids belongs to perch itself or a sibling dev-server process
 // spawned by the same `npm run dev`/concurrently tree (e.g. Vite), rather
 // than to something the user launched in a terminal. Stopping at the
 // shell keeps the set to exactly that tree: collecting all the way to the
 // pane would also sweep in the launching shell/agent, wrongly excluding any
-// *other* dev server the same agent spawns later.
-function computeOwnAncestors(procMap: Map<number, ProcInfo>, panePids: Map<number, string>): Set<number> {
+// *other* dev server the same agent spawns later. A service manager is a
+// boundary too (see BOUNDARY_SUPERVISORS).
+export function computeOwnAncestors(
+  procMap: Map<number, ProcInfo>,
+  panePids: Map<number, string>,
+  start: number = process.pid,
+): Set<number> {
   const ancestors = new Set<number>();
-  let pid = process.pid;
+  let pid = start;
   for (let hop = 0; hop < MAX_ANCESTRY_HOPS; hop++) {
     if (pid <= 1 || panePids.has(pid)) break;
     const info = procMap.get(pid);
-    if (info && BOUNDARY_SHELLS.has(info.comm)) break;
+    if (info && (BOUNDARY_SHELLS.has(info.comm) || BOUNDARY_SUPERVISORS.has(info.comm))) break;
     ancestors.add(pid);
     if (!info) break;
     pid = info.ppid;
