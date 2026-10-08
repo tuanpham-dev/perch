@@ -95,11 +95,15 @@ function toWindow(w: WindowInfo): MuxWindow {
 }
 
 async function listSessions(): Promise<MuxSession[]> {
+  // An unreachable daemon is an error, not "no sessions": it is down for a
+  // moment while it restarts (and restores every session), and an empty
+  // list then read to the page as every terminal having closed - each of
+  // its terminal tabs was closed with it. Callers keep their last answer.
   let conn: ClientConn;
   try {
     conn = await connect();
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(`The terminal daemon isn't reachable: ${(err as Error).message}`);
   }
   try {
     const sessions = (await conn.request({ kind: "session.list" })) as SessionInfo[];
