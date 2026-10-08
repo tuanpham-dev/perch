@@ -2685,6 +2685,7 @@ export default function App() {
                 active={visible}
                 settings={settings}
                 onSettingsChange={setSettings}
+                confirmDialog={confirmDialog}
                 extensions={extensions}
                 onReloadExtensions={reloadExtensions}
                 extensionSettings={extensionSettings}

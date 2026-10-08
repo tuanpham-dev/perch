@@ -17,6 +17,8 @@ interface Props {
   active: boolean;
   settings: AppSettings;
   onSettingsChange: (settings: AppSettings) => void;
+  // App's confirm dialog (rendered at the app root, like every dialog).
+  confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean>;
   extensions: ExtensionInfo[];
   onReloadExtensions: () => void;
   extensionSettings: ExtensionSettingsValues;
@@ -69,6 +71,7 @@ export default function SettingsView({
   active,
   settings,
   onSettingsChange,
+  confirmDialog,
   extensions,
   onReloadExtensions,
   extensionSettings,
@@ -229,7 +232,17 @@ export default function SettingsView({
             ) : (
               <button
                 className="dialog-button secondary"
-                onClick={() => onSettingsChange({ ...DEFAULT_SETTINGS })}
+                // Everything at once, AI providers and agents included, so it
+                // asks first.
+                onClick={async () => {
+                  const ok =
+                    !confirmDialog ||
+                    (await confirmDialog(
+                      "Reset every setting to its default? This includes your AI providers and agents.",
+                      "Reset",
+                    ));
+                  if (ok) onSettingsChange({ ...DEFAULT_SETTINGS });
+                }}
               >
                 Reset Settings to Defaults
               </button>
