@@ -10,15 +10,17 @@ keep running in a daemon of their own, and come back with their history,
 working directories and names after a server restart, a redeploy, a crash,
 or a reboot.
 
-![Sidebar, FILES panel, Source Control panel, and an nvim tab with inline git blame](docs/screenshots/overview.png)
+![The PROJECTS and FILES panels, nvim with inline git blame, and SOURCE CONTROL in the right sidebar](docs/screenshots/overview.png)
 
 <details>
 <summary>More screenshots</summary>
 
 | | |
 |---|---|
-| ![Colorized terminal output in a tab](docs/screenshots/tabs-and-logs.png) | ![git log and status in a terminal tab](docs/screenshots/git-shell.png) |
-| ![Extensions settings panel](docs/screenshots/extensions.png) | ![Ctrl+P quick switcher for tabs, terminals, and projects](docs/screenshots/quick-switcher.png) |
+| ![A dev server's colored log in a terminal tab, with its port in the PORTS panel below](docs/screenshots/tabs-and-logs.png) | ![git log and status beside nvim in a split editor](docs/screenshots/git-shell.png) |
+| ![The installed extensions, and the Git extension's page](docs/screenshots/extensions.png) | ![Ctrl+P quick switcher for tabs, terminals, and projects](docs/screenshots/quick-switcher.png) |
+
+![perch tui: projects and their terminals in a terminal, with the Ports box open](docs/screenshots/tui.png)
 
 </details>
 
@@ -36,7 +38,14 @@ or a reboot.
 - **Your editor, your keys, your theme.** `nvim` by default, VS Code color
   and icon themes installed unchanged, and every shortcut rebindable.
 - **Ports, reachable.** The server lists what's listening and opens it in a
-  tab, proxies it, or forwards it to your machine with one command.
+  tab, proxies it, or forwards it to your machine with one command - and
+  while that tunnel runs, links your server's programs open come up in
+  your own browser.
+- **Or no browser at all.** `perch tui` lists your projects and terminals in
+  any terminal - over SSH, or against a remote server - and attaches to them
+  full screen, with the same ports and tunnel at hand.
+- **An app if you want one.** The desktop app for macOS, Windows and Linux
+  runs its own server or opens remote ones, and keeps itself up to date.
 - **AI agents as first-class citizens.** Claude Code and Codex are
   configured once and reused everywhere, with hooks written for you and
   push notifications when an agent needs an answer.
@@ -74,7 +83,7 @@ It installs the latest release; `perch update` moves it to newer ones as they
 come out (see [Versions and updates](docs/INSTALL.md#versions-and-updates)).
 Manage it with `perch start` / `stop` / `status` / `logs` / `update`, and
 run `perch doctor` if anything looks wrong. `perch tui` browses and attaches
-to your projects' terminals without a browser.
+to your projects' terminals without a browser (see [Terminal UI](docs/TUI.md)).
 
 ## Documentation
 
