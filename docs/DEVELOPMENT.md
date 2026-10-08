@@ -58,6 +58,22 @@ Compatibility minimums change only when a change breaks the other side: `MIN_DES
 
 The desktop app installs only updates signed with the project's update key (minisign, made with `npx tauri signer generate`). Its public half is `plugins.updater.pubkey` in `tauri.conf.json`. The private key and its password are the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, which the workflow uses. The maintainer's backup copy is in `.backups/` at the repo root (`perch-updater.key`, `.key.password` and `.key.pub`), which git ignores; keep another copy somewhere safe off the machine. Without the private key, a release can't be signed, so installed apps can't update themselves. A new key would need every user to install one release by hand.
 
+### Testing the app's updater
+
+To try a self-update without publishing a release, make a throwaway key and build two versions with its public half, the newer one with update files:
+
+```bash
+cd desktop
+npx tauri signer generate --ci -p test -w /tmp/test.key
+export TAURI_SIGNING_PRIVATE_KEY="$(cat /tmp/test.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=test
+PUB=$(cat /tmp/test.key.pub)
+npx tauri build --bundles app --config "{\"version\":\"0.1.1\",\"bundle\":{\"createUpdaterArtifacts\":true},\"plugins\":{\"updater\":{\"pubkey\":\"$PUB\"}}}"
+# keep the .app.tar.gz and .sig it made, then build the one to install:
+npx tauri build --bundles app --config "{\"version\":\"0.1.0\",\"plugins\":{\"updater\":{\"pubkey\":\"$PUB\",\"dangerousInsecureTransportProtocol\":true}}}"
+```
+
+Serve a `latest.json` naming the newer version, with the `.sig` file's contents as `signature` and the tarball's address as `url` under the platform's key (`darwin-aarch64`, `windows-x86_64`, `linux-x86_64`, ...), and run the older app with `PERCH_DESKTOP_UPDATE_URL` set to the `latest.json` address. The updater refuses a plain-`http` address unless the build sets `dangerousInsecureTransportProtocol`, as the second build above does. Leave it out of anything you ship. The test app shares the real app's identifier, so it uses your real launcher's server list and its local server's folder in the app data directory.
+
 ## Project layout
 
 ```

@@ -178,7 +178,9 @@ impl Updates {
 /// Where a channel's newest release manifest (latest.json) is. Stable is
 /// GitHub's "latest release", which skips pre-releases; Beta looks the
 /// newest one up, pre-releases included. `PERCH_DESKTOP_UPDATE_URL` points
-/// both elsewhere, for testing.
+/// both elsewhere, for testing. The updater plugin refuses a plain-http
+/// address unless the build sets `plugins.updater.dangerousInsecureTransportProtocol`
+/// (docs/DEVELOPMENT.md shows how), which shipped builds never do.
 async fn endpoint(channel: Channel) -> Result<Url, String> {
     if let Ok(url) = std::env::var("PERCH_DESKTOP_UPDATE_URL") {
         return url.parse().map_err(|_| "PERCH_DESKTOP_UPDATE_URL isn't an address".to_string());
