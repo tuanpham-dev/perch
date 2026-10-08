@@ -4,6 +4,17 @@ import { listColorThemeOptions } from "../../theme";
 import { listIconThemeOptions } from "../../utils/iconThemes";
 import { useSettingsContext } from "./context";
 
+// A theme the setting names but no installed (or enabled) extension has -
+// one just uninstalled, say - is listed as itself. A <select> whose value
+// matches no option shows the first one, so "Plastic Legacy" looked
+// chosen while the app ran on fallback colors, and choosing it changed
+// nothing.
+function withStored(options: { value: string; label: string }[], stored: string) {
+  if (!stored || options.some((o) => o.value === stored)) return options;
+  const name = stored.slice(stored.indexOf(":") + 1) || stored;
+  return [{ value: stored, label: `${name} (not installed)` }, ...options];
+}
+
 export default function UiSection() {
   const { settings, set, extensions } = useSettingsContext();
 
@@ -18,7 +29,7 @@ export default function UiSection() {
           value={settings.colorTheme}
           onChange={(e) => set("colorTheme", e.target.value)}
         >
-          {listColorThemeOptions(extensions).map((opt) => (
+          {withStored(listColorThemeOptions(extensions), settings.colorTheme).map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
@@ -33,7 +44,7 @@ export default function UiSection() {
           value={settings.iconTheme}
           onChange={(e) => set("iconTheme", e.target.value)}
         >
-          {listIconThemeOptions(extensions).map((opt) => (
+          {withStored(listIconThemeOptions(extensions), settings.iconTheme).map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
