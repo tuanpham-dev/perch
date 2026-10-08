@@ -39,6 +39,8 @@ Commands:
              enable, disable (see: perch ext --help)
   settings   Export settings to a shareable file, or import one
              (see: perch settings --help)
+  tui        Browse projects and terminals in a terminal UI and attach to
+             them (see: perch tui --help)
   ls         List terminal sessions
   attach     Attach this terminal to a session or window (e.g. perch attach work)
   daemon     Terminal daemon: status, start, stop (stopping ends every terminal;
@@ -65,6 +67,8 @@ async function main(argv: string[]): Promise<void> {
     case 'ext': return cmdExt(rest);
     case 'settings': return cmdSettings(rest);
     case 'path': return cmdPath();
+    // Loaded on demand: it pulls in the terminal daemon's path helpers.
+    case 'tui': return (await import('./tui.ts')).cmdTui(rest);
     case 'ls':
     case 'attach':
     case 'daemon': {

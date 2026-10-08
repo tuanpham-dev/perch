@@ -309,6 +309,37 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
     };
   }, []);
 
+  // Projects can change behind this tab's back - `perch tui` pins and opens
+  // them through the same document. The write-back below sends this tab's
+  // whole copy, so a tab that last read projects at load would put an older
+  // list back. Re-read them whenever the tab comes back into view, so the
+  // copy it next writes is the current one. Unchanged lists keep their
+  // identity, which keeps this from triggering a write-back of its own.
+  useEffect(() => {
+    let inFlight = false;
+    const reread = () => {
+      if (!serverSyncReady.current || inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      api
+        .fetchSettingsDoc()
+        .then((doc) => {
+          if (!Array.isArray(doc.projects)) return;
+          const next = sanitizeProjects(doc.projects);
+          setProjects((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+        })
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    document.addEventListener("visibilitychange", reread);
+    window.addEventListener("focus", reread);
+    return () => {
+      document.removeEventListener("visibilitychange", reread);
+      window.removeEventListener("focus", reread);
+    };
+  }, []);
+
   // Debounced write-back of the whole doc. Read-merge-write: fetches the
   // current doc first and preserves any top-level key this client doesn't
   // own (e.g. extensionSettings written by a newer client while an older

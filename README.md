@@ -73,7 +73,8 @@ installer checks first and tells you what's missing.
 It installs the latest release; `perch update` moves it to newer ones as they
 come out (see [Versions and updates](docs/INSTALL.md#versions-and-updates)).
 Manage it with `perch start` / `stop` / `status` / `logs` / `update`, and
-run `perch doctor` if anything looks wrong.
+run `perch doctor` if anything looks wrong. `perch tui` browses and attaches
+to your projects' terminals without a browser.
 
 ## Documentation
 
@@ -83,6 +84,7 @@ run `perch doctor` if anything looks wrong.
 | [Keyboard & mouse](docs/KEYBINDINGS.md) | Default shortcuts and terminal gestures |
 | [Install](docs/INSTALL.md) | Requirements, the installer, the desktop app, and the `perch` CLI |
 | [Deployment](docs/DEPLOYMENT.md) | Production, nginx, and authentication |
+| [Terminal UI](docs/TUI.md) | `perch tui`: projects and terminals without a browser |
 | [Port forwarding](docs/PORT_FORWARDING.md) | The tunnel CLI and the built-in port proxy |
 | [Extensions](docs/EXTENSIONS.md) | Installing, bundling, and writing extensions |
 | [Extension API](docs/EXTENSION_API.md) | The complete API reference |

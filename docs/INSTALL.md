@@ -131,6 +131,7 @@ On Linux and macOS it goes in `~/.local/bin`, and the app tells you if that fold
 | `perch settings <cmd>` | `export` your settings to a shareable file, or `import` one — see below |
 | `perch ls` | List terminal sessions |
 | `perch attach <session>` | Attach this terminal to a session (`work`) or one window (`work:1`); detach with `Ctrl+\` twice |
+| `perch tui` | Browse projects and terminals in a terminal UI and attach to them - see [The terminal UI](TUI.md) |
 | `perch daemon status` / `stop` | The terminal daemon. Restarting or updating the server never touches it; `daemon stop` ends every terminal, and sessions come back the next time it starts |
 
 Config (`PORT`, `AUTH_TOKEN`, `ALLOWED_HOSTS`, `NEW_SESSION_CWD`, `APP_NAME`, `PROXY_DOMAIN`, `EXTENSION_REGISTRY`) goes in `~/.local/share/perch/server/.env` — see [Deployment](DEPLOYMENT.md#production) for what each does. Without a service manager, `start`/`stop`/`restart` fall back to running the server in the background directly.
@@ -153,6 +154,10 @@ perch start --port=8040 --app-name="Perch - Work"
 `perch open [path[:line]] [editor|preview]` opens a folder as a project, or a file in the editor — like `code`/`code-server`, but for every browser tab currently connected to that instance. With no path, opens the current directory; a bare `perch <path>` works the same as `perch open <path>`. A file's default action mirrors a click in the FILES panel (nvim, or its preview viewer when one applies); pass `editor` or `preview` as a second argument to force one or the other. Run from inside a terminal this app created (e.g. a `claude` session opened as a project), `open` targets that terminal's own instance automatically — otherwise it auto-detects the running instance, or asks which one if more than one is up (`--port <n>` skips that).
 
 If no browser tab is connected, `open` prints a link (`?folder=`/`?file=`) you can open manually instead — note that link carries no auth token, so on an `AUTH_TOKEN`-protected instance it only works in a browser that's already logged in.
+
+#### The terminal UI
+
+`perch tui` browses the instance's projects and terminals in a full-screen list and attaches to any of them, with no browser; press `Ctrl+\` twice to come back to the list. It also reaches other machines with `--url` and `--token`. See [The terminal UI](TUI.md) for the keys and everything else.
 
 #### Extensions from the terminal
 
