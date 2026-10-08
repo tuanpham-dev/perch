@@ -306,6 +306,19 @@ fn configure<'a>(
             if !sized {
                 child = child.inner_size(1200.0, 800.0);
             }
+            // macOS: the WebView never learns where its window is
+            // (window.screenX/Y read 0 and the screen's height), so a
+            // position the page worked out from them - a moved-out tab is
+            // placed relative to its window - landed off the bottom of the
+            // screen. Placed a step down and right of the window it came
+            // from instead.
+            #[cfg(target_os = "macos")]
+            if let Some(opener) = popup_app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)) {
+                if let (Ok(pos), Ok(scale)) = (opener.outer_position(), opener.scale_factor()) {
+                    let at = pos.to_logical::<f64>(scale);
+                    child = child.position(at.x + 40.0, at.y + 40.0);
+                }
+            }
             let child = configure(&popup_app, child, &popup_entry, &popup_origin, popup_entry.kind == ServerKind::Local);
             match child.build() {
                 Ok(window) => NewWindowResponse::Create { window },
