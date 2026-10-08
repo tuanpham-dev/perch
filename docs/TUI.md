@@ -188,16 +188,23 @@ works in Perch's web terminal and most modern terminals, also over SSH, but
 some terminals don't allow it, and the TUI can't tell. If nothing lands on
 your clipboard, select the text in the box with the mouse.
 
-`o` opens the URL in a browser, when the TUI can reach one in front of you:
+`o` opens the URL in a browser in front of you:
 
-- **On your own desktop** (macOS, Windows, or Linux with a display), in your
-  default browser: `open` on macOS, `rundll32 url.dll,FileProtocolHandler` on
-  Windows, `xdg-open` on Linux.
-- **Inside a Perch terminal**, in the Perch browser tab you're typing in, the
-  same way any program there opening a link does.
-- **Without a display** (over SSH, or in code-server's terminal) there is no
-  browser it can reach, so it says so: Ctrl/Cmd-click the link instead, or
-  press `u` and paste the URL.
+- **Through your tunnel**, when the tunnel started from this box's command
+  is connected: it runs on your machine, so the link opens in your own
+  browser, wherever the TUI runs (code-server, SSH, anywhere). This is the
+  way to open links from a server.
+- **Otherwise on your own desktop** (macOS, Windows, or Linux with a
+  display), in your default browser: `open` on macOS,
+  `rundll32 url.dll,FileProtocolHandler` on Windows, `xdg-open` on Linux.
+- **Otherwise inside a Perch terminal**, in the Perch browser tab you're
+  typing in.
+- **Otherwise** (no display, no tunnel) it says so: start the tunnel with
+  `c`, Ctrl/Cmd-click the link, or press `u`.
+
+While that tunnel is connected, programs on the server that open a browser
+(`npm run dev -- --open`, `gh auth login`) open in your browser through it
+too; see [Port forwarding](PORT_FORWARDING.md).
 
 The ports list comes from the Ports extension; without it, the box shows only
 the command.

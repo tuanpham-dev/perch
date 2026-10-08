@@ -17,6 +17,15 @@ const FRAME_WINDOW = 6; // both directions, payload: uint32 BE bytes consumed
 // localhost:<port>. Purely informational: nothing is authorized by it, and a
 // client that never sends it (an older CLI) just reports no ports.
 const FRAME_PORTS = 7;
+// client -> server, payload: utf8 JSON {"openUrls": true}. Sent on connect by
+// a tunnel that can open URLs in its machine's browser (one started with
+// --client); a tunnel that never sends it (an older CLI) is never asked to.
+const FRAME_CAPS = 8;
+// server -> client, payload: utf8 JSON {url, direct, serverPort, proxyDomain}:
+// open this http(s) URL in the browser on the tunnel's machine. `direct` URLs
+// open as sent; others are server-side URLs the CLI rewrites (localhost on
+// the server is not localhost there).
+const FRAME_OPEN_URL = 9;
 
 // Per-channel flow-control credit. Caps memory per channel without one
 // stalled channel blocking the others sharing the WebSocket.
@@ -67,7 +76,8 @@ function errCode(err: unknown): string {
 // channels only open when a local connection actually arrives, so they say
 // nothing about what is merely listening. Module-level because
 // /api/tunnel-status reads it from outside any one socket's closure.
-const tunnels = new Map<WebSocket, { ports: Set<number>; client: string | null }>();
+// Insertion order is connect order, which openUrlThroughTunnel relies on.
+const tunnels = new Map<WebSocket, { ports: Set<number>; client: string | null; openUrls: boolean }>();
 
 // "Is this port reachable at localhost for the person asking?" is the only
 // question the status answers, and the answer is per-machine: a tunnel
@@ -104,9 +114,40 @@ export function tunnelStatus(client: string | null | undefined): TunnelStatus {
   return { connected, ports: [...ports].sort((a, b) => a - b) };
 }
 
+export interface TunnelOpen {
+  // Only this pairing id's tunnels; any paired tunnel when omitted.
+  client?: string | null;
+  // Open exactly as given (the URL is already right for the tunnel's machine).
+  direct: boolean;
+  // For rewriting server-side URLs: the port this server listens on, and its
+  // proxy domain, if any.
+  serverPort: number;
+  proxyDomain: string | null;
+}
+
+/**
+ * Asks the most recently connected tunnel that can open URLs (see
+ * FRAME_CAPS) to open `url` in its machine's browser. False when there is no
+ * such tunnel, so the caller can fall back.
+ */
+export function openUrlThroughTunnel(url: string, opts: TunnelOpen): boolean {
+  const wanted = opts.client === undefined ? undefined : parseTunnelClientId(opts.client);
+  if (wanted === null) return false;
+  let target: WebSocket | null = null;
+  for (const [ws, entry] of tunnels) {
+    if (!entry.openUrls || entry.client === null) continue;
+    if (wanted !== undefined && entry.client !== wanted) continue;
+    if (ws.readyState === WebSocket.OPEN) target = ws;
+  }
+  if (!target) return false;
+  const payload = { url, direct: opts.direct, serverPort: opts.serverPort, proxyDomain: opts.proxyDomain };
+  target.send(encodeFrame(FRAME_OPEN_URL, 0, Buffer.from(JSON.stringify(payload), "utf8")));
+  return true;
+}
+
 export function handleTunnel(ws: WebSocket, client: string | null): void {
   const channels = new Map<number, Channel>();
-  tunnels.set(ws, { ports: new Set(), client: parseTunnelClientId(client) });
+  tunnels.set(ws, { ports: new Set(), client: parseTunnelClientId(client), openUrls: false });
   // Channel ids with a terminal-ownership check in flight — guards against a
   // duplicate FRAME_OPEN for the same id (channels.has(id) can't catch it,
   // since the channel isn't created until the check resolves).
@@ -232,6 +273,9 @@ export function handleTunnel(ws: WebSocket, client: string | null): void {
       case FRAME_PORTS:
         reportPorts(frame.payload);
         break;
+      case FRAME_CAPS:
+        reportCaps(frame.payload);
+        break;
       default:
         break;
     }
@@ -253,6 +297,18 @@ export function handleTunnel(ws: WebSocket, client: string | null): void {
     reported.clear();
     for (const value of parsed) {
       if (Number.isInteger(value) && value >= 1 && value <= 65535) reported.add(value as number);
+    }
+  };
+
+  // Only a paired tunnel counts as able to open URLs: an unpaired one was
+  // hand-started without saying whose browser it is.
+  const reportCaps = (payload: Buffer) => {
+    const entry = tunnels.get(ws);
+    if (!entry || entry.client === null) return;
+    try {
+      entry.openUrls = (JSON.parse(payload.toString("utf8")) as { openUrls?: unknown })?.openUrls === true;
+    } catch {
+      // A malformed report changes nothing.
     }
   };
 

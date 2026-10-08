@@ -7,6 +7,7 @@
 // multiplexed "channel" (see the frame format below). The frame codec is
 // duplicated in server/src/wsTunnel.ts — keep both copies in sync.
 
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import http from "node:http";
 import https from "node:https";
@@ -25,6 +26,13 @@ const FRAME_WINDOW = 6; // both directions, payload: uint32 BE bytes consumed
 // app can show which ports are reachable at localhost:<port>. Informational
 // only — the server authorizes nothing from it.
 const FRAME_PORTS = 7;
+// client -> server, payload: utf8 JSON {"openUrls": true}. Sent on connect by
+// a tunnel started with --client: it may be asked to open URLs here.
+const FRAME_CAPS = 8;
+// server -> client, payload: utf8 JSON {url, direct, serverPort, proxyDomain}:
+// open this URL in this machine's browser (see openUrlFrame).
+const FRAME_OPEN_URL = 9;
+const MAX_OPEN_URL_LENGTH = 2048;
 
 const WINDOW_SIZE = 1024 * 1024;
 
@@ -277,6 +285,20 @@ class WsTunnel {
     // socket is opened lazily and a drop clears the server's registry, so
     // without this the status readout would go stale until the next change.
     this.reportedPorts = [];
+    // remote port -> the local port it's reachable at here, while listening.
+    this.localFor = new Map();
+  }
+
+  // A paired tunnel can be asked to open URLs at any time, so it stays
+  // connected instead of connecting only when a forwarded connection needs
+  // it: now, and again shortly after every drop.
+  keepConnected() {
+    this.keepAlive = true;
+    this.ensureConnected().catch((err) => {
+      if (err.message !== this.lastConnectError) console.error(`tunnel connection failed: ${err.message}`);
+      this.lastConnectError = err.message;
+      setTimeout(() => this.keepConnected(), 3000);
+    });
   }
 
   ensureConnected() {
@@ -298,13 +320,16 @@ class WsTunnel {
     socket.on("error", () => {});
     if (head && head.length) this.parser.push(head);
     console.log(`connected to ${this.urlStr}`);
+    this.lastConnectError = null;
     this._sendPorts();
+    if (this.client) this._send(FRAME_CAPS, 0, Buffer.from(JSON.stringify({ openUrls: true }), "utf8"));
   }
 
   _onSocketClosed() {
     this.socket = null;
     for (const ch of this.channels.values()) ch.localSocket.destroy();
     this.channels.clear();
+    if (this.keepAlive) setTimeout(() => this.keepConnected(), 3000);
   }
 
   _sendControl(opcode, payload) {
@@ -340,6 +365,10 @@ class WsTunnel {
   }
 
   _onTunnelFrame(type, id, payload) {
+    if (type === FRAME_OPEN_URL) {
+      this._openUrl(payload);
+      return;
+    }
     const ch = this.channels.get(id);
     if (!ch) return;
     switch (type) {
@@ -400,6 +429,34 @@ class WsTunnel {
     );
   }
 
+  // Only a paired tunnel opens anything; it announced as much (FRAME_CAPS).
+  _openUrl(payload) {
+    if (!this.client) return;
+    let msg;
+    try {
+      msg = JSON.parse(payload.toString("utf8"));
+    } catch {
+      return;
+    }
+    const target = openUrlFrame(msg, {
+      base: this.urlStr,
+      localFor: this.localFor,
+    });
+    if (!target.ok) {
+      console.error(target.error);
+      return;
+    }
+    const { cmd, args } = openerFor(process.platform, target.url);
+    console.log(`opening ${target.url}`);
+    try {
+      const child = spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true });
+      child.on("error", (err) => console.error(`couldn't open ${target.url}: ${cmd}: ${err.message}`));
+      child.unref();
+    } catch (err) {
+      console.error(`couldn't open ${target.url}: ${err.message}`);
+    }
+  }
+
   _sendPorts() {
     this._send(FRAME_PORTS, 0, Buffer.from(JSON.stringify(this.reportedPorts), "utf8"));
   }
@@ -448,7 +505,11 @@ class WsTunnel {
       process.exit(1);
     });
 
+    server.on("close", () => {
+      if (this.localFor.get(remotePort) === localPort) this.localFor.delete(remotePort);
+    });
     server.listen(localPort, "127.0.0.1", () => {
+      this.localFor.set(remotePort, localPort);
       console.log(
         `localhost:${localPort} -> remote:${remotePort}${opts.label ? ` (${opts.label})` : ""}`,
       );
@@ -547,6 +608,56 @@ function startAutoForward(tunnel, urlStr, headers, skipPorts) {
   setInterval(() => void poll(), AUTO_POLL_MS);
 }
 
+// --- Opening URLs here ----------------------------------------------------
+
+// The system command that opens a URL in this machine's default browser.
+// Not `cmd /c start` on Windows: cmd would split the URL at every "&".
+export function openerFor(platform, url) {
+  if (platform === "darwin") return { cmd: "open", args: [url] };
+  if (platform === "win32") return { cmd: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
+  return { cmd: "xdg-open", args: [url] };
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
+
+// What to open here for a URL a program on the server asked to open. On the
+// server "localhost" means the server: a port this tunnel forwards is at
+// localhost here too (at its local port); the app's own port is the app at
+// the address this tunnel reaches it by; any other port goes through the
+// app's port proxy. Non-loopback URLs are already right everywhere.
+export function rewriteForBrowser(raw, { base, serverPort, proxyDomain, localFor }) {
+  const url = new URL(raw);
+  if (!LOOPBACK_HOSTS.has(url.hostname)) return url.href;
+  const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+  const rest = `${url.pathname}${url.search}${url.hash}`;
+  const local = localFor.get(port);
+  if (local !== undefined) return `${url.protocol}//localhost:${local}${rest}`;
+  const app = new URL(base);
+  if (port === serverPort) return `${app.origin}${rest}`;
+  if (proxyDomain) return `${app.protocol}//${port}.${proxyDomain}${rest}`;
+  return `${app.origin}/proxy/${port}${rest}`;
+}
+
+// Checks an open request from the server and decides the URL to open: only
+// http(s), within the same length limit as the server's own open route, and
+// rewritten unless the sender marked it direct (already right for here).
+export function openUrlFrame(msg, { base, localFor }) {
+  const raw = typeof msg?.url === "string" ? msg.url : "";
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, error: `refused to open ${JSON.stringify(raw.slice(0, 80))} (not a URL)` };
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || raw.length > MAX_OPEN_URL_LENGTH) {
+    return { ok: false, error: `refused to open ${JSON.stringify(raw.slice(0, 80))} (only http and https)` };
+  }
+  if (msg.direct === true) return { ok: true, url: url.href };
+  const serverPort = Number.isInteger(msg.serverPort) ? msg.serverPort : 0;
+  const proxyDomain = typeof msg.proxyDomain === "string" && msg.proxyDomain ? msg.proxyDomain : null;
+  return { ok: true, url: rewriteForBrowser(url.href, { base, serverPort, proxyDomain, localFor }) };
+}
+
 // --- CLI ------------------------------------------------------------------
 
 function printUsage() {
@@ -558,7 +669,10 @@ function printUsage() {
       "                         sessions; polls so new ports are picked up and vanished\n" +
       "                         ones closed without restarting\n" +
       "  --client ID            the browser this tunnel is for, so it shows as forwarded\n" +
-      "                         there (the app's copied command fills it in)",
+      "                         there (the app's copied command fills it in). A tunnel\n" +
+      "                         with an id also opens links the server sends it (the\n" +
+      "                         TUI's o, programs on the server opening a browser) in\n" +
+      "                         this machine's browser",
   );
 }
 
@@ -645,6 +759,8 @@ function main() {
     // Explicitly requested local ports stay owned by their specs.
     startAutoForward(tunnel, args.url, args.headers, new Set(args.specs.map((s) => s.local)));
   }
+  if (args.client) tunnel.keepConnected();
 }
 
-main();
+// Tests import the helpers above without starting a tunnel.
+if (!process.env.PERCH_TUNNEL_NO_MAIN) main();

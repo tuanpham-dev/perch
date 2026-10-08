@@ -150,6 +150,15 @@ export class PerchClient {
     return { connected: r?.connected === true, ports: Array.isArray(r?.ports) ? r.ports : [] };
   }
 
+  /**
+   * Asks the tunnel paired as `client` to open `url` in the browser on its
+   * machine; false when that tunnel isn't connected (or is too old to open).
+   */
+  async openThroughTunnel(client: string, url: string): Promise<boolean> {
+    const r = await this.#request<{ opened?: boolean }>('POST', '/tunnel-open', { client, url });
+    return r?.opened === true;
+  }
+
   /** The proxy domain ports are served under, or null for the /proxy/ path. */
   async proxyDomain(): Promise<string | null> {
     const r = await this.#request<{ domain?: string | null }>('GET', '/proxy-config');

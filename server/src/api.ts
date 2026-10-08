@@ -71,7 +71,7 @@ import { broadcastOpenTarget, broadcastOpenUrl, subscribeOpenUrl } from "./openU
 import { parseOpenTargetParams, resolveOpenTarget } from "./openTarget.js";
 import { checkIfChannelChanged, checkNow, updateStatus } from "./updates.js";
 import { getTunnelablePorts } from "./ports.js";
-import { tunnelStatus } from "./wsTunnel.js";
+import { openUrlThroughTunnel, tunnelStatus } from "./wsTunnel.js";
 import { addSubscription, getVapidPublicKey, removeSubscription } from "./push.js";
 import { getDefaultRegistry, getRegistryCatalog, getRegistryIcon, getRegistryReadme, resolvePackageForInstall } from "./registry.js";
 import { shellIntegrationPath, shellIntegrationProfile, shellIntegrationSourceLine } from "./shellIntegration.js";
@@ -881,6 +881,35 @@ api.get("/terminal-engines", (_req, res) => {
   res.json({ engines: listEngines() });
 });
 
+// Asks the tunnel paired as `client` (the TUI's or a browser's own id) to
+// open `url` in its machine's browser, exactly as given. Behind the auth gate
+// like the rest of /api, unlike /open-url: the caller may be anywhere.
+api.post("/tunnel-open", (req, res) => {
+  const { client, url } = (req.body ?? {}) as { client?: unknown; url?: unknown };
+  if (typeof client !== "string" || typeof url !== "string" || !url || url.length > MAX_OPEN_URL_LENGTH) {
+    res.status(400).json({ error: "client and url are required" });
+    return;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    res.status(400).json({ error: "invalid url" });
+    return;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    res.status(400).json({ error: "only http(s) urls are supported" });
+    return;
+  }
+  const opened = openUrlThroughTunnel(parsed.href, {
+    client,
+    direct: true,
+    serverPort: req.socket.localPort ?? 0,
+    proxyDomain: primaryProxyDomain(),
+  });
+  res.json({ opened });
+});
+
 api.get("/proxy-config", (_req, res) => {
   res.json({ domain: primaryProxyDomain() });
 });
@@ -1518,7 +1547,14 @@ api.post("/open-url", urlencoded({ extended: false }), (req, res) => {
   // localPort rather than a threaded-through config value: it's exactly the
   // port this instance is serving on, which is what the client compares
   // loopback URLs against to decide app-origin vs port-proxy rewriting.
-  broadcastOpenUrl(parsed.href, req.socket.localPort ?? 0);
+  const serverPort = req.socket.localPort ?? 0;
+  // A paired tunnel opens it in the browser on the machine it runs on - the
+  // one you're at - and then the tabs stay out of it, so it never opens twice.
+  if (openUrlThroughTunnel(parsed.href, { direct: false, serverPort, proxyDomain: primaryProxyDomain() })) {
+    res.status(204).end();
+    return;
+  }
+  broadcastOpenUrl(parsed.href, serverPort);
   res.status(204).end();
 });
 

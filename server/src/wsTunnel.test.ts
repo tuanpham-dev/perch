@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { handleTunnel, tunnelStatus } from "./wsTunnel.js";
+import { handleTunnel, openUrlThroughTunnel, tunnelStatus } from "./wsTunnel.js";
 
 // Enough of a socket for handleTunnel: it only listens, pings and (on the
 // paths these tests take) never writes. The real frame codec is exercised by
@@ -9,8 +9,11 @@ import { handleTunnel, tunnelStatus } from "./wsTunnel.js";
 class FakeSocket extends EventEmitter {
   readyState = WebSocket.OPEN;
   terminated = false;
+  sent: Buffer[] = [];
   ping(): void {}
-  send(): void {}
+  send(data: Buffer): void {
+    this.sent.push(data);
+  }
   terminate(): void {
     this.terminated = true;
     this.emit("close");
@@ -112,5 +115,64 @@ describe("tunnel liveness", () => {
     }
     expect(socket.terminated).toBe(false);
     expect(tunnelStatus("laptop").connected).toBe(true);
+  });
+});
+
+const FRAME_CAPS = 8;
+const FRAME_OPEN_URL = 9;
+
+function capsFrame(caps: object): Buffer {
+  const payload = Buffer.from(JSON.stringify(caps), "utf8");
+  const frame = Buffer.alloc(5 + payload.length);
+  frame.writeUInt8(FRAME_CAPS, 0);
+  payload.copy(frame, 5);
+  return frame;
+}
+
+// The open-url frames a socket was sent, decoded.
+const opened = (socket: FakeSocket) =>
+  socket.sent.filter((b) => b.readUInt8(0) === FRAME_OPEN_URL).map((b) => JSON.parse(b.subarray(5).toString("utf8")));
+
+describe("opening URLs through a tunnel", () => {
+  const opts = { direct: false, serverPort: 3001, proxyDomain: null };
+  const capable = (client: string | null) => {
+    const socket = connect(client);
+    socket.emit("message", capsFrame({ openUrls: true }), true);
+    return socket;
+  };
+
+  it("sends the URL to a paired tunnel that said it can open URLs", () => {
+    const laptop = capable("laptop");
+    expect(openUrlThroughTunnel("http://localhost:3000/", opts)).toBe(true);
+    expect(opened(laptop)).toEqual([{ url: "http://localhost:3000/", direct: false, serverPort: 3001, proxyDomain: null }]);
+  });
+
+  it("never picks a tunnel that didn't say so, or one with no pairing id", () => {
+    connect("laptop"); // an older CLI: no caps frame
+    capable(null); // unpaired: its caps are ignored
+    expect(openUrlThroughTunnel("http://x/", opts)).toBe(false);
+  });
+
+  it("picks the most recently connected one", () => {
+    const first = capable("laptop");
+    const second = capable("desktop");
+    openUrlThroughTunnel("http://x/", opts);
+    expect(opened(first)).toEqual([]);
+    expect(opened(second)).toHaveLength(1);
+  });
+
+  it("keeps to one pairing id when asked", () => {
+    const laptop = capable("laptop");
+    capable("desktop");
+    expect(openUrlThroughTunnel("http://x/", { ...opts, client: "laptop", direct: true })).toBe(true);
+    expect(opened(laptop)).toEqual([{ url: "http://x/", direct: true, serverPort: 3001, proxyDomain: null }]);
+    expect(openUrlThroughTunnel("http://x/", { ...opts, client: "phone" })).toBe(false);
+    expect(openUrlThroughTunnel("http://x/", { ...opts, client: "not a token" })).toBe(false);
+  });
+
+  it("forgets a tunnel once it closes", () => {
+    const laptop = capable("laptop");
+    laptop.emit("close");
+    expect(openUrlThroughTunnel("http://x/", opts)).toBe(false);
   });
 });

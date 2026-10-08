@@ -522,16 +522,36 @@ export class TuiApp {
       if (p) this.#copy(this.#portLink(mode, p.port), 'URL');
     } else if (ch === 'o') {
       const p = this.#selectedPort(mode);
-      if (p) this.#openInBrowser(this.#portLink(mode, p.port));
+      if (p) this.#openInBrowser(mode, this.#portLink(mode, p.port));
     } else if (ch === 'x') this.#killPort(mode);
     else if (key.name === 'enter') this.#goToPort(mode);
   }
 
-  // Opens the URL in a browser you can see, when there is one this machine
-  // can reach (see openMethod).
-  #openInBrowser(url: string): void {
+  // Opens the URL in a browser you can see: through this TUI's own tunnel
+  // when it's connected (the tunnel runs on your machine, so that's your
+  // browser, wherever the TUI runs), else this machine's when it has one
+  // (see openMethod).
+  #openInBrowser(mode: Ports, url: string): void {
+    if (mode.tunnel) {
+      this.#client.openThroughTunnel(this.#tunnel(), url).then(
+        (opened) => {
+          if (opened) this.#setStatus('Opened in your browser (through your tunnel)');
+          else this.#openHere(url);
+          this.#render();
+        },
+        () => {
+          this.#openHere(url);
+          this.#render();
+        },
+      );
+      return;
+    }
+    this.#openHere(url);
+  }
+
+  #openHere(url: string): void {
     if (openMethod(process.platform, process.env) === 'none') {
-      return this.#setStatus("Can't open a browser from here (no display) - Ctrl/Cmd-click the link, or press u to copy it");
+      return this.#setStatus("Can't open a browser from here (no display) - start the tunnel (c) to open links on your machine, or press u");
     }
     const { cmd, args } = openCommand(process.platform, url);
     try {
