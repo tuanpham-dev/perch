@@ -34,6 +34,7 @@ import { statusForEntry, type GitFileStatus } from "../statusModel.mjs";
 import {
   parseConflictSegments,
   buildResolvedContent,
+  stripGitComments,
   type ConflictBlock,
   type ResolutionChoice,
   type ResolutionMap,
@@ -1057,17 +1058,30 @@ function GitPanel({ actionsTarget, showMenu }: PanelProps) {
   // message the user already started stays untouched. `message` is
   // deliberately left out of the dependency array: this effect should react
   // to the operation changing, not to the user's own typing.
+  //
+  // MERGE_MSG carries git's "# Conflicts:" notes as comment lines, which git
+  // drops only when it opens an editor; a commit made from this box (git
+  // commit -m) kept them, so they're stripped here. And when the operation
+  // ends without a commit (an abort), a message still exactly as prefilled
+  // is cleared rather than left for the next, unrelated commit.
   const prefilledOpRef = useRef<OperationKind | null>(null);
+  const prefilledTextRef = useRef<string | null>(null);
+  const messageRef = useRef(message);
+  messageRef.current = message;
   useEffect(() => {
     const op = status?.operation ?? null;
     if (!op) {
       prefilledOpRef.current = null;
+      if (prefilledTextRef.current !== null && messageRef.current === prefilledTextRef.current) setMessage("");
+      prefilledTextRef.current = null;
       return;
     }
     if (prefilledOpRef.current === op) return;
     prefilledOpRef.current = op;
     if (!message.trim() && status?.mergeMsg) {
-      setMessage(status.mergeMsg.replace(/\n+$/, ""));
+      const text = stripGitComments(status.mergeMsg);
+      prefilledTextRef.current = text;
+      setMessage(text);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.operation, status?.mergeMsg]);

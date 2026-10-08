@@ -33,3 +33,4 @@ export function buildResolvedContent(
   segments: ConflictSegment[],
   resolutions: ResolutionMap,
 ): string;
+export function stripGitComments(message: string): string;

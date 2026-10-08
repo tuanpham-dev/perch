@@ -4,7 +4,7 @@
 // bundling. See statusModel.test.mjs for the sibling model's tests.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseConflictSegments, buildResolvedContent } from "./conflictModel.mjs";
+import { parseConflictSegments, buildResolvedContent, stripGitComments } from "./conflictModel.mjs";
 
 function lines(text) {
   return text.split("\n");
@@ -208,5 +208,12 @@ describe("buildResolvedContent", () => {
       [blocks[1].start]: "theirs",
     });
     assert.equal(resolved, "start\na1\nmiddle\nb2\nend");
+  });
+});
+
+describe("stripGitComments", () => {
+  it("drops git's comment lines from a merge message", () => {
+    assert.equal(stripGitComments("Merge branch 'feature'\n\n# Conflicts:\n#\tsrc/math.js\n"), "Merge branch 'feature'");
+    assert.equal(stripGitComments("Revert \"x\"\n\nThis reverts commit abc.\n"), "Revert \"x\"\n\nThis reverts commit abc.");
   });
 });

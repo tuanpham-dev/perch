@@ -95,3 +95,14 @@ export function buildResolvedContent(lines, segments, resolutions) {
   }
   return out.join("\n");
 }
+
+// A merge or revert's prefilled message without git's comment lines (the
+// "# Conflicts:" notes in MERGE_MSG), which git itself drops only when it
+// opens an editor for the message.
+export function stripGitComments(message) {
+  return message
+    .split("\n")
+    .filter((line) => !line.startsWith("#"))
+    .join("\n")
+    .replace(/\n+$/, "");
+}
