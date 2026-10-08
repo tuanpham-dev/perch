@@ -169,8 +169,14 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
       replayed: () => send({ type: "replayed" }),
       windowSwitched: (index) => send({ type: "windowSwitched", windowIndex: index }),
       resized: (c, r) => send({ type: "resize", cols: c, rows: r }),
-      closed: () => {
-        send({ type: "exit" });
+      // "exit" tells the page the terminal is gone and its tab can close.
+      // The daemon going away (a restart, which restores every window; a
+      // crash) isn't that: the connection just closes, the page reconnects,
+      // and a window that really didn't come back answers that attach with
+      // its own "exit". Sent regardless, a daemon restart closed every
+      // terminal tab in every open page.
+      closed: (reason) => {
+        if (reason !== "daemon-closed") send({ type: "exit" });
         end();
         if (ws.readyState === WebSocket.OPEN) ws.close();
       },
