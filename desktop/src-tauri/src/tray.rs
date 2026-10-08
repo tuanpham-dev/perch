@@ -90,6 +90,25 @@ fn build_menu(app: &AppHandle, status: &Status) -> tauri::Result<Menu<Wry>> {
 #[cfg(target_os = "macos")]
 fn set_app_menu(app: &AppHandle, status: &Status) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
+    // The standard menu's Close Window takes Cmd+W, which closed the whole
+    // server window - every tab in it - where a Mac user reaches for it to
+    // close a tab. The page closes a tab on Cmd+W instead (tab.close's
+    // macDesktop binding), and closing the window moves to Shift+Cmd+W.
+    for item in menu.items()? {
+        let Some(sub) = item.as_submenu() else { continue };
+        let entries = sub.items()?;
+        for (i, entry) in entries.iter().enumerate().rev() {
+            let Some(predefined) = entry.as_predefined_menuitem() else { continue };
+            if predefined.text()? != "Close Window" {
+                continue;
+            }
+            sub.remove_at(i)?;
+            let close = MenuItemBuilder::with_id("close-window", "Close Window")
+                .accelerator("CmdOrCtrl+Shift+W")
+                .build(app)?;
+            sub.insert(&close, i)?;
+        }
+    }
     let perch = SubmenuBuilder::new(app, "Server").build()?;
     for item in build_menu(app, status)?.items()? {
         if let Some(i) = item.as_menuitem() {
@@ -133,6 +152,11 @@ pub fn on_menu(app: &AppHandle, id: &str) {
             refresh(app);
         }
         "quit" => crate::quit(app),
+        "close-window" => {
+            if let Some(w) = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)) {
+                let _ = w.close();
+            }
+        }
         other => {
             if let Some(server) = other.strip_prefix("open:") {
                 windows::open_server(app, server);

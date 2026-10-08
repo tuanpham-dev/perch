@@ -50,7 +50,9 @@ export const COMMANDS: Command[] = [
   { id: "quickSwitcher.selectPrevious", label: "Quick Switcher: Select Previous Item", defaultBindings: [{ key: "alt+KeyK", when: "quickSwitcherOpen" }], scope: "global" },
   { id: "tab.next", label: "Next Tab", defaultBindings: [{ key: "ctrl+Tab" }], scope: "global" },
   { id: "tab.previous", label: "Previous Tab", defaultBindings: [{ key: "ctrl+shift+Tab" }], scope: "global" },
-  { id: "tab.close", label: "Close Tab", defaultBindings: [{ key: "ctrl+KeyW" }], scope: "global" },
+  // Cmd+W too in the desktop app on macOS, where it isn't the browser's to
+  // take and is what closing a tab is everywhere else on a Mac.
+  { id: "tab.close", label: "Close Tab", defaultBindings: [{ key: "ctrl+KeyW" }, { key: "meta+KeyW", when: "macDesktop" }], scope: "global" },
   { id: "tab.closeOthers", label: "Tab: Close Others", defaultBindings: [], scope: "global" },
   { id: "tab.focus1", label: "Tab: Focus 1st Tab", defaultBindings: [{ key: "alt+Digit1" }], scope: "global" },
   { id: "tab.focus2", label: "Tab: Focus 2nd Tab", defaultBindings: [{ key: "alt+Digit2" }], scope: "global" },

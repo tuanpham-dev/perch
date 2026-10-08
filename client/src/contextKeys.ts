@@ -5,6 +5,8 @@
 // The full v1 key list, with descriptions, lives in CONTEXT_KEYS below —
 // it's also what the Keyboard Shortcuts editor's when-input autosuggest
 // reads, so a key added there automatically appears in the dropdown.
+import { desktop } from "./desktop";
+
 const contextStore: Record<string, unknown> = {};
 
 // terminalFocus is derived per-event from the keydown target (see
@@ -23,6 +25,7 @@ export const CONTEXT_KEYS: { key: string; description: string }[] = [
   { key: "commandPaletteOpen", description: "The Quick Switcher was opened in \">\" command mode" },
   { key: "activeSession", description: "A real session tab is active" },
   { key: "activeWindow", description: "The active tab is pinned to a specific window" },
+  { key: "macDesktop", description: "Running in the desktop app on macOS (where Cmd shortcuts are free to use)" },
 ];
 
 export function setContextKey(key: string, value: unknown): void {
@@ -34,6 +37,7 @@ export function setContextKey(key: string, value: unknown): void {
 // store value.
 export function getContextGetter(e?: KeyboardEvent): (key: string) => unknown {
   return (key: string) => {
+    if (key === "macDesktop") return desktop?.info.platform === "macos";
     if (key === "terminalFocus" && e) {
       return (e.target as HTMLElement | null)?.closest(".terminal-host") != null;
     }
