@@ -247,12 +247,17 @@ export function getFolderIconResult(folderName: string, isExpanded: boolean): Ic
 }
 
 export interface IconThemeOption {
-  value: string; // "" = no icon theme; else `${extensionId}:${iconThemeId}`
+  // "none" = no icon theme; else `${extensionId}:${iconThemeId}`. Not "":
+  // a stored "" is an older settings file's "the built-in icons", which
+  // settings.ts maps to Seti on every load, so "None" could never stick.
+  value: string;
   label: string;
 }
 
+export const NO_ICON_THEME = "none";
+
 export function listIconThemeOptions(extensions: ExtensionInfo[]): IconThemeOption[] {
-  const options: IconThemeOption[] = [{ value: "", label: "None" }];
+  const options: IconThemeOption[] = [{ value: NO_ICON_THEME, label: "None" }];
   for (const ext of extensions) {
     if (!ext.enabled) continue;
     for (const theme of ext.iconThemes) {
