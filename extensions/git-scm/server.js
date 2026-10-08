@@ -1579,6 +1579,19 @@ export function activate({ router, log, host, getSettings, ai }) {
 
   const COMMIT_HASH_RE = /^[0-9a-f]{4,40}$/i;
 
+  // The commit holding a stash entry's untracked files (`git stash -u`): its
+  // third parent, a root commit git names "untracked files on <branch>: ...".
+  // Diffs against the first parent never see those files, so a stash of
+  // only untracked files looked empty. Null for anything else.
+  async function stashUntrackedParent(hash, root) {
+    try {
+      const subject = await git(["show", "-s", "--format=%s", `${hash}^3`], root);
+      return subject.startsWith("untracked files on ") ? `${hash}^3` : null;
+    } catch {
+      return null;
+    }
+  }
+
   router.get("/commit-diff", async (req, res) => {
     const cwd = requireCwd(req, res);
     if (!cwd) return;
@@ -1614,7 +1627,14 @@ export function activate({ router, log, host, getSettings, ai }) {
       // author, date and message beside it, and repeating them eats the top
       // of the pane. The whole-commit diff keeps the full header.
       const formatArg = relPath ? "--format=" : "--format=fuller";
-      const diff = await git([...showArgs, formatArg, "--patch", ...pathArgs], root);
+      let diff = await git([...showArgs, formatArg, "--patch", ...pathArgs], root);
+      // A stash's untracked files: one of them on its own, or all of them
+      // after the tracked changes in the whole entry's patch.
+      const untracked = req.query.firstParent === "1" ? await stashUntrackedParent(hash, root) : null;
+      if (untracked && (!relPath || !diff.trim())) {
+        const extra = await git(["show", untracked, "--format=", "--patch", ...pathArgs], root);
+        diff = relPath ? extra : `${diff.replace(/\n*$/, "\n")}${extra}`;
+      }
       res.json({ diff });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1709,6 +1729,18 @@ export function activate({ router, log, host, getSettings, ai }) {
       ]);
       const stats = parseNumstatZ(rawNumstat);
       const statuses = parseNameStatusZ(rawNameStatus);
+      // A stash entry's untracked files live in its third parent; listed as
+      // added, since that's what applying the stash does with them.
+      const untracked = parents.length === 3 ? await stashUntrackedParent(hash, root) : null;
+      if (untracked) {
+        const extra = ["diff-tree", "-r", "--no-commit-id", "-z", "--root", untracked];
+        const [extraNumstat, extraNameStatus] = await Promise.all([
+          git([...extra, "--numstat"], root),
+          git([...extra, "--name-status"], root),
+        ]);
+        for (const [filePath, stat] of parseNumstatZ(extraNumstat)) if (!stats.has(filePath)) stats.set(filePath, stat);
+        for (const [filePath, entry] of parseNameStatusZ(extraNameStatus)) if (!statuses.has(filePath)) statuses.set(filePath, entry);
+      }
       const files = [...statuses.entries()].map(([filePath, entry]) => {
         const stat = stats.get(filePath);
         return {
