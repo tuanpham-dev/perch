@@ -8,7 +8,7 @@
 // before anything has started. Writes surface the error.
 import { connectOrSpawn, tryConnect, type ClientConn } from "perch-mux/client";
 import { setConfigKey, unsetConfigKey } from "perch-mux/config";
-import type { SessionInfo, WindowInfo } from "perch-mux/protocol";
+import type { ServerEvent, SessionInfo, WindowInfo } from "perch-mux/protocol";
 import type { AttachHandle, AttachHandlers, Multiplexer, MuxEvent, MuxSession, MuxWindow, ViewerColors } from "./multiplexer.js";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -135,6 +135,19 @@ async function listSessions(): Promise<MuxSession[]> {
   }
 }
 
+/**
+ * Whether a daemon event ends an attach. The daemon tells every connection
+ * in a session that one of its windows closed (with that window's index),
+ * so a viewer pinned to another window, or one following the session to its
+ * next window, must carry on; only a pinned viewer whose own window is gone
+ * gets index -1 (and then its socket ends). Treating every window-closed as
+ * the end closed all of a session's tabs when one shell exited.
+ */
+export function endsAttach(event: ServerEvent): boolean {
+  if (event.event === "session-closed") return true;
+  return event.event === "window-closed" && event.index < 0;
+}
+
 async function attach(
   target: string,
   opts: { pinned: boolean; cols: number; rows: number; colors?: ViewerColors },
@@ -152,7 +165,7 @@ async function attach(
     if (event.event === "replayed") handlers.replayed();
     else if (event.event === "window-switch") handlers.windowSwitched(event.index);
     else if (event.event === "resize") handlers.resized(event.cols, event.rows);
-    else if (event.event === "window-closed" || event.event === "session-closed") close(event.event);
+    else if (endsAttach(event)) close(event.event);
   };
   conn.onClose = () => close("daemon-closed");
   try {
