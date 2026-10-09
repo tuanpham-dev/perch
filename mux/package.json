@@ -1,7 +1,7 @@
 {
   "name": "perch-mux",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "perch's terminal daemon: sessions and windows with reboot persistence",
   "type": "module",
   "bin": {

@@ -3,6 +3,17 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.1.2 - 2026-10-09
+
+- **Exiting a terminal closes only its tab.** Typing `exit` in one of a
+  project's terminals also closed every other tab of that project; now only
+  its own tab closes.
+- **Background dev servers show up in Ports again** when Perch runs as a
+  systemd user service. A dev server started with `&` or `nohup` from a shell
+  that has since exited (or by an agent) was hidden as part of Perch itself;
+  it's now listed under the project that started it, and the tunnel forwards
+  it.
+
 ## 0.1.1 - 2026-10-08
 
 - **The Mac app can update itself.** macOS builds now include the signed
