@@ -3,6 +3,14 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.1.3 - 2026-10-12
+
+- **The Linux and macOS installer works again.** A fresh install with
+  `curl ... install.sh | bash` stopped with `SyntaxError: Unexpected token
+  '.'` before installing anything, because the shell mangled the small
+  script that picks the newest release. Existing installs and `perch update`
+  were not affected, and neither was the Windows installer.
+
 ## 0.1.2 - 2026-10-09
 
 - **Exiting a terminal closes only its tab.** Typing `exit` in one of a
