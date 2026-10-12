@@ -18,8 +18,13 @@ CHANNEL="${PERCH_CHANNEL:-stable}"
 REF="${PERCH_REF:-}"
 
 # The newest vX.Y.Z tag in `git ls-remote --tags` output on stdin (pre-releases
-# only with "beta"), by SemVer order - the same order perch update uses.
-PICK_TAG='const ch=process.argv[1];const P=/^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;const key=t=>{const m=P.exec(t);return m&&{n:[+m[1],+m[2],+m[3]],p:m[4]?m[4].split('.'):[]}};const cmp=(a,b)=>{for(let i=0;i<3;i++)if(a.n[i]!==b.n[i])return a.n[i]-b.n[i];if(!a.p.length||!b.p.length)return b.p.length-a.p.length;for(let i=0;i<Math.max(a.p.length,b.p.length);i++){const x=a.p[i],y=b.p[i];if(x===undefined)return -1;if(y===undefined)return 1;if(x===y)continue;const xn=/^\d+$/.test(x),yn=/^\d+$/.test(y);if(xn&&yn)return x-y;if(xn)return -1;if(yn)return 1;return x<y?-1:1}return 0};let input='';process.stdin.on('data',d=>input+=d).on('end',()=>{let best=null;for(const l of input.split('\n')){const r=(l.split('\t')[1]||'').trim().replace('refs/tags/','').replace('^{}','');const k=key(r);if(!k||(ch!=='beta'&&k.p.length))continue;if(!best||cmp(k,best.k)>0)best={r,k}}if(best)console.log(best.r)});'
+# only with "beta"), by SemVer order - the same order perch update uses. A
+# quoted heredoc, not a '...' string: the script's own single quotes would end
+# a single-quoted string and reach node stripped.
+PICK_TAG="$(cat <<'JS'
+const ch=process.argv[1];const P=/^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;const key=t=>{const m=P.exec(t);return m&&{n:[+m[1],+m[2],+m[3]],p:m[4]?m[4].split('.'):[]}};const cmp=(a,b)=>{for(let i=0;i<3;i++)if(a.n[i]!==b.n[i])return a.n[i]-b.n[i];if(!a.p.length||!b.p.length)return b.p.length-a.p.length;for(let i=0;i<Math.max(a.p.length,b.p.length);i++){const x=a.p[i],y=b.p[i];if(x===undefined)return -1;if(y===undefined)return 1;if(x===y)continue;const xn=/^\d+$/.test(x),yn=/^\d+$/.test(y);if(xn&&yn)return x-y;if(xn)return -1;if(yn)return 1;return x<y?-1:1}return 0};let input='';process.stdin.on('data',d=>input+=d).on('end',()=>{let best=null;for(const l of input.split('\n')){const r=(l.split('\t')[1]||'').trim().replace('refs/tags/','').replace('^{}','');const k=key(r);if(!k||(ch!=='beta'&&k.p.length))continue;if(!best||cmp(k,best.k)>0)best={r,k}}if(best)console.log(best.r)});
+JS
+)"
 
 BIN_DIR="$HOME/.local/bin"
 
