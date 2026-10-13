@@ -3,6 +3,38 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.2.0 - 2026-10-13
+
+- **Preview any website inside Perch.** The PORTS tab is now a web preview
+  with an address bar: local dev servers open as before, and any other site
+  loads through the Perch server into a sandbox that can't reach the app.
+  Sites you sign in to stay signed in across restarts (their cookies are
+  kept on the server; clear them per site or in Settings), and private
+  network addresses are refused unless you list them in Settings → Behavior.
+  Open it from the command palette (*Web Preview: Open URL…*), from PORTS,
+  or from terminal links.
+- **Comment on a page for your agent.** In the web preview and the HTML
+  preview, pick an element, several (Shift+click), an area (drag) or
+  selected text, and write what should change. Each comment carries a
+  screenshot with the subject outlined and, if you like, the errors the page
+  logged. Send them all at once with *Send & Submit* or *Send Only*.
+- **Viewports.** Preview at phone, tablet and desktop sizes or a custom one,
+  and compare two side by side with an adjustable split; a comment can cover
+  one viewport, both, or say you're not sure.
+- **Comments stay put.** Badges sit where you clicked and follow the page as
+  it scrolls, clicking a comment in the list scrolls to it, and pending
+  comments survive a reload.
+- **Check Fixes.** Sent comments move to a Sent list; once the agent has
+  worked on them, Check Fixes reloads the page and shows before and after
+  side by side, so you can mark each fixed or send it back.
+- **Terminal links can open in Perch.** Turn on *Open terminal links in a web
+  preview tab* in Settings → Behavior; Ctrl/Cmd+Shift+click opens a link the
+  other way.
+- **The preview comment UI follows your colour theme,** using its button and
+  input colours.
+- **Extensions:** `ctx.registerUrlHandler` lets an extension open web links
+  inside the app (see docs/EXTENSION_API.md).
+
 ## 0.1.3 - 2026-10-12
 
 - **The Linux and macOS installer works again.** A fresh install with
