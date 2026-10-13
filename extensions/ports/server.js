@@ -3,6 +3,7 @@
 // in core server/src/ports.ts — it also feeds the WS tunnel's security
 // gate, so this extension consumes the same data rather than re-scanning.
 import { spawnSync } from "node:child_process";
+import { mountScreenshotRoutes } from "../_shared/screenshotRoutes.mjs";
 
 const KILL_GRACE_MS = 5_000;
 
@@ -12,6 +13,7 @@ function endTree(pid, force) {
 }
 
 export function activate({ router, host }) {
+  mountScreenshotRoutes(router);
   router.get("/list", async (_req, res) => {
     try {
       res.json(await host.ports.list());

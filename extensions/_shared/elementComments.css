@@ -1,0 +1,710 @@
+/* ---- ElementComments (see ElementComments.tsx) ----
+   Every colour comes from the active colour theme: buttons and badges from
+   the same --button-* tokens the app's own forms use, surfaces from
+   --input-bg / --panel-bg. The previewed page underneath is arbitrary, so
+   these restate the app's UI font rather than inheriting whatever the host
+   element happens to carry. */
+
+.pc-popover,
+.pc-panel,
+.pc-badge {
+  font-family: system-ui, Ubuntu, "Droid Sans", sans-serif;
+}
+
+/* Form controls don't inherit type by default. Family and size only: the
+   `font` shorthand would also reset weight, flattening the primary button. */
+.pc-popover textarea,
+.pc-popover button,
+.pc-panel button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.pc-popover {
+  position: absolute;
+  /* Above the badge markers and the pending panel, which a popover for an
+     element near the bottom of the page must win against. */
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 320px;
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
+  padding: 8px 10px;
+  background: var(--input-bg, var(--bg));
+  /* Not var(--border): several themes set it to the panel's own colour,
+     where the edge disappears. Derived from the foreground it always shows. */
+  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* A quiet label in the app's small-caps header idiom, not competing with the
+   comment it introduces. */
+.pc-selector {
+  color: var(--fg-inactive);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-textarea {
+  width: 100%;
+  min-height: 64px;
+  box-sizing: border-box;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border, var(--border));
+  border-radius: 2px;
+  padding: 5px 6px;
+  outline: none;
+}
+
+.pc-textarea:focus {
+  border-color: var(--focus-border);
+}
+
+.pc-textarea::placeholder {
+  color: var(--fg-inactive);
+}
+
+/* The comment's viewport: a quiet row under the text box. */
+.pc-viewport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-inactive);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pc-viewport-label {
+  flex-shrink: 0;
+}
+
+.pc-viewport-current {
+  font-size: 14px;
+  color: var(--fg);
+}
+
+.pc-select {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border, var(--border));
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: normal;
+  text-transform: none;
+  outline: none;
+}
+
+.pc-select:focus {
+  border-color: var(--focus-border);
+}
+
+.pc-viewport-note {
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+.pc-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pc-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+/* The app's own button pair (see client/src/styles.css's form buttons):
+   --button-bg for the one action that moves the work along, the secondary
+   tokens for the rest. */
+.pc-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.pc-btn .codicon {
+  font-size: 14px;
+}
+
+.pc-btn-primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.pc-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--button-bg) 88%, var(--button-fg));
+}
+
+.pc-btn-secondary {
+  background: var(--button-secondary-bg, var(--list-hover-bg));
+  color: var(--button-secondary-fg, var(--fg));
+  border-color: var(--button-secondary-border, transparent);
+}
+
+.pc-btn-secondary:hover:not(:disabled) {
+  background: var(--button-secondary-hover-bg, var(--list-hover-bg));
+}
+
+/* Disabled the way the app's own forms show it (the new-worktree form's
+   buttons): the same button, faded. */
+.pc-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pc-btn:focus-visible,
+.pc-badge:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+/* Numbered like the sidebar's tab badges (--button-bg/--button-fg), sized
+   up for standalone legibility. The ring and shadow keep it readable over
+   whatever the page paints underneath. */
+.pc-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: 2px solid var(--bg);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Pinned to the centre of its picked element (the rect captured at pick
+   time); above the pending panel so a marker near the bottom stays
+   clickable. */
+.pc-marker {
+  position: absolute;
+  z-index: 11;
+  transform: translate(-50%, -50%);
+}
+
+.pc-marker.open {
+  outline: 2px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.pc-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  max-height: 45%;
+  background: var(--panel-bg, var(--bg));
+  border-top: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.25);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.pc-panel-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.pc-panel-count {
+  flex: 1;
+  color: var(--fg-bright, var(--fg));
+}
+
+.pc-panel-error {
+  padding: 0 10px 6px;
+  color: var(--error);
+  flex-shrink: 0;
+}
+
+.pc-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 8px;
+  overflow: auto;
+}
+
+.pc-panel-item {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.pc-panel-selector {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-accent);
+  font-family: var(--terminal-font, monospace);
+}
+
+.pc-panel-viewport {
+  flex-shrink: 0;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-inactive);
+}
+
+.pc-panel-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+/* Themed page states a preview shows instead of its frame: loading, a file
+   or site that couldn't load, a blocked address. */
+.pc-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--fg-inactive);
+  font-family: system-ui, Ubuntu, "Droid Sans", sans-serif;
+  font-size: 13px;
+  text-align: center;
+}
+
+.pc-status-title {
+  color: var(--fg-bright, var(--fg));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pc-status.error .pc-status-title {
+  color: var(--error);
+}
+
+.pc-status-detail {
+  max-width: 52ch;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Viewport stage (viewports.tsx) ---- */
+
+/* Fills the preview's frame area. At "fit" the device box is the whole
+   stage; at a preset it is the device's own size, centred and scaled down
+   when the tab is smaller, over a quiet backdrop. */
+.pc-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.pc-stage.device {
+  background: var(--panel-bg, var(--bg));
+}
+
+.pc-device {
+  position: absolute;
+  inset: 0;
+}
+
+.pc-stage.device .pc-device {
+  right: auto;
+  bottom: auto;
+  transform-origin: 0 0;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 20%, transparent), 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.pc-stage-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--fg-inactive);
+  font-family: system-ui, Ubuntu, "Droid Sans", sans-serif;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Pick kinds, screenshots, errors, sent comments ---- */
+
+.pc-quote {
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--fg) 30%, transparent);
+  color: var(--fg-bright, var(--fg));
+  font-style: italic;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* Gives way to the buttons beside it: shortens, never pushes them to wrap. */
+.pc-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  align-self: center;
+  margin-left: auto;
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+.pc-hint .codicon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.pc-hint-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.pc-shot {
+  display: block;
+  border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent);
+  border-radius: 2px;
+  overflow: hidden;
+  max-height: 160px;
+}
+
+.pc-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.pc-shot-state {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  line-height: 1;
+  color: var(--fg-inactive);
+}
+
+.pc-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.pc-tab {
+  padding: 2px 8px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-inactive);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pc-tab.active {
+  color: var(--fg-bright, var(--fg));
+  border-bottom-color: var(--button-bg);
+}
+
+.pc-tab:hover:not(.active) {
+  color: var(--fg);
+}
+
+.pc-count {
+  margin-left: 2px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.pc-spacer {
+  flex: 1;
+}
+
+.pc-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pc-errors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 0 10px 6px;
+  flex-shrink: 0;
+}
+
+.pc-errors-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+}
+
+.pc-errors-list {
+  flex-basis: 100%;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 96px;
+  overflow: auto;
+  font-family: var(--terminal-font, monospace);
+  font-size: 11px;
+  color: var(--fg-inactive);
+}
+
+.pc-errors-list li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pc-error-kind {
+  color: var(--error);
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.pc-error-kind.network,
+.pc-error-kind.resource {
+  color: var(--warning, var(--error));
+}
+
+.pc-sent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.pc-sent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pc-compare-shots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pc-compare-shots figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.pc-compare-shots figcaption {
+  margin-bottom: 2px;
+  color: var(--fg-inactive);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pc-compare-shots img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 140px;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+  border-radius: 2px;
+}
+
+.pc-shot-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 64px;
+  border: 1px dashed color-mix(in srgb, var(--fg) 20%, transparent);
+  border-radius: 2px;
+  color: var(--fg-inactive);
+  font-size: 11px;
+}
+
+/* ---- Side by side (viewports.tsx's CompareSplit) ---- */
+
+.pc-split {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.pc-split-pane {
+  position: relative;
+  min-width: 0;
+  flex-grow: 0;
+  flex-shrink: 1;
+}
+
+.pc-split-divider {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  touch-action: none;
+}
+
+.pc-split-divider:hover,
+.pc-split.dragging .pc-split-divider {
+  background: var(--focus-border);
+}
+
+/* Frames would swallow the pointer mid-drag. */
+.pc-split.dragging iframe {
+  pointer-events: none;
+}
+
+.pc-shots {
+  display: flex;
+  gap: 6px;
+}
+
+.pc-shots .pc-shot {
+  flex: 1;
+  min-width: 0;
+}
+
+.pc-shot-count {
+  font-size: 10px;
+  margin-left: 1px;
+}
+
+.pc-panel-item:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.pc-panel-item.selected {
+  background: color-mix(in srgb, var(--focus-border) 14%, transparent);
+}
+
+/* Send as a split button (SendButton): the action, joined to a menu arrow
+   that chooses whether it also presses Enter. */
+.pc-split-btn {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.pc-split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.pc-split-arrow {
+  padding: 3px 4px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid color-mix(in srgb, var(--button-fg) 30%, transparent);
+}
+
+/* Opens upward: the panel sits at the bottom of the preview. */
+.pc-split-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  padding: 4px;
+  background: var(--input-bg, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.pc-split-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pc-split-item:hover,
+.pc-split-item:focus-visible {
+  background: var(--list-hover-bg, color-mix(in srgb, var(--fg) 8%, transparent));
+  outline: none;
+}
+
+.pc-split-check {
+  flex: 0 0 16px;
+  display: inline-flex;
+  justify-content: center;
+  padding-top: 1px;
+}
+
+.pc-split-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pc-split-label {
+  font-size: 12px;
+  color: var(--fg-bright, var(--fg));
+}
+
+.pc-split-detail {
+  font-size: 11px;
+  color: var(--fg-inactive);
+}

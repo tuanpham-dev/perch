@@ -10,7 +10,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,13 +24,8 @@ import Icon from "../../_shared/Icon";
 import type { MenuItem } from "../../_shared/types";
 import { useListNavigation } from "../../_shared/useListNavigation";
 import { useLongPressMenu } from "../../_shared/useLongPressMenu";
-import {
-  agentWindows,
-  fetchSessions,
-  resolveAgentTargets,
-  sendToAgent,
-  type AgentTargetProgram,
-} from "../../_shared/agentTarget";
+import { BrowserView, browserTabPath, configureBrowser, parseAddress } from "./browser";
+import { setViewportPrompt } from "../../_shared/viewports";
 
 // ---- Module-level host bridge ----
 
@@ -62,13 +56,6 @@ interface ActiveContext {
 
 function readClickAction(): "app" | "browser" {
   return extSettings?.get("ports.clickAction") === "browser" ? "browser" : "app";
-}
-
-// Which panes count as an agent comes from core's registry (Settings → AI
-// Providers), and from nowhere else. This extension had its own agentPrograms
-// setting until the migration; it is gone, not deprecated.
-function agentTargets(): Promise<AgentTargetProgram[]> {
-  return resolveAgentTargets();
 }
 
 function readSendAutoSubmit(): boolean {
@@ -238,548 +225,6 @@ function proxyUrl(port: number, proxyConfig: ProxyConfig): string {
     return `${window.location.protocol}//${port}.${proxyConfig.domain}/`;
   }
   return `${window.location.origin}/proxy/${port}/`;
-}
-
-// ---- Port proxy viewer: opens a port's app in a tab, with an element
-// picker -> comment -> queue -> send flow (mirrors live-preview's, and
-// git-scm's DiffView.tsx pending-comment treatment). Unlike live-preview
-// (which serves static files it controls and can inject a script into),
-// this iframes a live-streamed proxy response it never touches — so
-// picking is done via direct DOM access on the iframe's own document
-// instead of an injected script + postMessage handshake. That only works
-// same-origin: the default path-based "/proxy/<port>/" URL shares this
-// app's own origin, but a configured PROXY_DOMAIN routes to a real
-// "<port>.<domain>" subdomain, which the browser blocks parent-frame DOM
-// access to — Inspect is disabled in that case (see crossOrigin below). ----
-
-interface ElementRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-interface PickedElement {
-  selector: string;
-  outerHTML: string;
-  styles: Record<string, string>;
-  rect: ElementRect;
-}
-
-// A drafted-but-not-yet-sent element comment — mirrors live-preview's
-// PendingElementComment, queued via "Add Comment" and delivered together by
-// "Send to Agent" rather than one message per pick.
-interface PendingElementComment {
-  id: number;
-  selector: string;
-  outerHTML: string;
-  styles: Record<string, string>;
-  text: string;
-  rect: ElementRect;
-}
-
-const STYLE_PROPS = [
-  "display", "position", "top", "right", "bottom", "left", "width", "height",
-  "margin", "padding", "boxSizing", "color", "backgroundColor", "fontFamily", "fontSize",
-  "fontWeight", "lineHeight", "flexDirection", "justifyContent", "alignItems",
-] as const;
-
-// Walks up from el to (not including) its document's <body>, building a
-// short CSS-like path: tag#id (stops climbing once an id is hit) else
-// tag.class1.class2 plus :nth-of-type(n) when siblings share the same tag.
-// Ported from live-preview/server.js's INSPECT_SCRIPT selectorFor to operate
-// directly on a live DOM node here instead of inside an injected page script.
-function selectorFor(el: Element): string {
-  const doc = el.ownerDocument;
-  const parts: string[] = [];
-  let node: Element | null = el;
-  while (node && node.nodeType === 1 && node !== doc.body && node !== doc.documentElement) {
-    let part = node.tagName.toLowerCase();
-    if (node.id) {
-      parts.unshift(`${part}#${node.id}`);
-      break;
-    }
-    if (typeof node.className === "string" && node.className.trim()) {
-      const cls = node.className.trim().split(/\s+/).filter(Boolean).slice(0, 2);
-      if (cls.length) part += `.${cls.join(".")}`;
-    }
-    const parent: Element | null = node.parentElement;
-    if (parent) {
-      const siblings = Array.from(parent.children).filter((c) => c.tagName === node!.tagName);
-      if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
-    }
-    parts.unshift(part);
-    node = node.parentElement;
-  }
-  return parts.join(" > ");
-}
-
-function buildElementContextBlock(label: string, pc: PendingElementComment): string {
-  const styleLines = Object.entries(pc.styles)
-    .map(([k, v]) => `  ${k}: ${v};`)
-    .join("\n");
-  return `Element ${pc.selector} on ${label}:\n\`\`\`html\n${pc.outerHTML}\n\`\`\`\nComputed styles:\n${styleLines}\n\n${pc.text}`;
-}
-
-// Joins every pending element comment's own context block into one message —
-// sent as a single review, not one send-keys call per comment (same
-// combining scheme as git-scm's DiffView.tsx buildCombinedText).
-function buildCombinedElementText(label: string, pending: PendingElementComment[]): string {
-  return pending.map((pc) => buildElementContextBlock(label, pc)).join("\n\n---\n\n");
-}
-
-// Clamps a popover anchored to a picked element's rect so it stays fully
-// inside the host container (an element near the right/bottom edge would
-// otherwise render partly or fully off-screen) and doesn't render underneath
-// the pending-comments footer panel when that's visible — falls back to
-// placing the popover above the element when there isn't room below.
-function clampPopoverPosition(
-  container: HTMLElement,
-  popover: HTMLElement,
-  anchor: ElementRect,
-): { left: number; top: number } {
-  const gap = 4;
-  const edge = 8;
-  const cw = container.clientWidth;
-  const ch = container.clientHeight;
-  const pw = popover.offsetWidth;
-  const ph = popover.offsetHeight;
-  const footer = container.querySelector<HTMLElement>(".ports-pending-panel");
-  const reservedBottom = footer ? footer.offsetHeight : 0;
-  const below = anchor.top + anchor.height + gap;
-  const above = anchor.top - ph - gap;
-  const maxTop = ch - reservedBottom - ph - edge;
-  const top = below <= maxTop ? Math.max(edge, below) : Math.max(edge, Math.min(above, maxTop));
-  const left = Math.min(Math.max(anchor.left, edge), Math.max(edge, cw - pw - edge));
-  return { left, top };
-}
-
-// Renders the popover once at its naive "below the element" position (so it
-// has a real size to measure), then corrects it before paint — the flash of
-// the naive position is never visible since useLayoutEffect runs before the
-// browser paints.
-function usePopoverPosition(containerRef: React.RefObject<HTMLElement | null>, anchor: ElementRect | null) {
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const [corrected, setCorrected] = useState<{ left: number; top: number } | null>(null);
-
-  useLayoutEffect(() => {
-    if (!anchor) {
-      setCorrected(null);
-      return;
-    }
-    const container = containerRef.current;
-    const popover = popoverRef.current;
-    if (!container || !popover) return;
-    setCorrected(clampPopoverPosition(container, popover, anchor));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor?.left, anchor?.top, anchor?.width, anchor?.height]);
-
-  // Re-clamp when the popover's own size changes after the initial
-  // measurement (typing wraps to another line, or the textarea's resize
-  // handle is dragged) instead of only once at open time.
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    const popover = popoverRef.current;
-    if (!anchor || !container || !popover) return;
-    const observer = new ResizeObserver(() => {
-      setCorrected(clampPopoverPosition(container, popover, anchor));
-    });
-    observer.observe(popover);
-    return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor?.left, anchor?.top, anchor?.width, anchor?.height]);
-
-  const fallback = anchor ? { left: anchor.left, top: anchor.top + anchor.height + 4 } : { left: 0, top: 0 };
-  return { popoverRef, pos: corrected ?? fallback };
-}
-
-interface PortProxyProps {
-  filePath: string;
-  active: boolean;
-  toolbarTarget?: HTMLDivElement | null;
-}
-
-function PortProxyView({ filePath, active, toolbarTarget }: PortProxyProps) {
-  const port = Number(filePath.slice("port:".length));
-  const label = `port ${port}`;
-
-  const [proxyConfig, setProxyConfig] = useState<ProxyConfig>(NO_PROXY_CONFIG);
-  const [reloadTick, setReloadTick] = useState(0);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const [inspecting, setInspecting] = useState(false);
-  const [activePick, setActivePick] = useState<PickedElement | null>(null);
-  const [pickComment, setPickComment] = useState("");
-  const [pendingComments, setPendingComments] = useState<PendingElementComment[]>([]);
-  const [sendBusy, setSendBusy] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const nextPendingId = useRef(0);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editText, setEditText] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchProxyConfig()
-      .then((next) => {
-        if (!cancelled) setProxyConfig(next);
-      })
-      .catch(() => {
-        if (!cancelled) setProxyConfig(NO_PROXY_CONFIG);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const url = proxyUrl(port, proxyConfig);
-  const crossOrigin = proxyConfig.domain !== null;
-  const refresh = useCallback(() => setReloadTick((t) => t + 1), []);
-
-  const toggleInspect = useCallback(() => {
-    if (crossOrigin) return;
-    setInspecting((prev) => !prev);
-  }, [crossOrigin]);
-
-  // Picks via direct DOM access on the iframe's own (same-origin) document —
-  // see the file-level comment above for why this differs from
-  // live-preview's injected-script + postMessage approach.
-  useEffect(() => {
-    if (!inspecting) return;
-    const iframe = iframeRef.current;
-    let doc: Document | null = null;
-    try {
-      doc = iframe?.contentDocument ?? null;
-    } catch {
-      doc = null;
-    }
-    if (!doc) {
-      setInspecting(false);
-      return;
-    }
-    const overlay = doc.createElement("div");
-    overlay.style.cssText =
-      "position:fixed;pointer-events:none;z-index:2147483647;" +
-      "background:rgba(79,168,255,0.25);border:1px solid rgba(79,168,255,0.9);display:none;";
-    doc.documentElement.appendChild(overlay);
-    let hovered: Element | null = null;
-
-    const onMouseMove = (e: MouseEvent) => {
-      const el = doc!.elementFromPoint(e.clientX, e.clientY);
-      if (!el || el === overlay) return;
-      hovered = el;
-      const r = el.getBoundingClientRect();
-      overlay.style.left = `${r.left}px`;
-      overlay.style.top = `${r.top}px`;
-      overlay.style.width = `${r.width}px`;
-      overlay.style.height = `${r.height}px`;
-      overlay.style.display = "block";
-    };
-
-    const onClick = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const el = hovered || doc!.elementFromPoint(e.clientX, e.clientY);
-      if (!el) return;
-      const cs = doc!.defaultView?.getComputedStyle(el);
-      const styles: Record<string, string> = {};
-      for (const p of STYLE_PROPS) styles[p] = cs ? cs[p as keyof CSSStyleDeclaration] as string : "";
-      let html = el.outerHTML;
-      if (html.length > 4000) html = `${html.slice(0, 4000)}…`;
-      const r = el.getBoundingClientRect();
-      setActivePick({
-        selector: selectorFor(el),
-        outerHTML: html,
-        styles,
-        rect: { left: r.left, top: r.top, width: r.width, height: r.height },
-      });
-      setPickComment("");
-      setSendError(null);
-      setInspecting(false);
-    };
-
-    doc.addEventListener("mousemove", onMouseMove, true);
-    doc.addEventListener("click", onClick, true);
-    return () => {
-      doc?.removeEventListener("mousemove", onMouseMove, true);
-      doc?.removeEventListener("click", onClick, true);
-      overlay.remove();
-    };
-  }, [inspecting, reloadTick]);
-
-  const cancelPick = useCallback(() => {
-    setActivePick(null);
-    setPickComment("");
-  }, []);
-
-  const addPickComment = useCallback(() => {
-    if (!activePick || !pickComment.trim()) return;
-    const id = nextPendingId.current++;
-    setPendingComments((prev) => [
-      ...prev,
-      {
-        id,
-        selector: activePick.selector,
-        outerHTML: activePick.outerHTML,
-        styles: activePick.styles,
-        text: pickComment.trim(),
-        rect: activePick.rect,
-      },
-    ]);
-    setActivePick(null);
-    setPickComment("");
-  }, [activePick, pickComment]);
-
-  const removePendingComment = useCallback((id: number) => {
-    setPendingComments((prev) => prev.filter((pc) => pc.id !== id));
-    setExpandedId((prev) => (prev === id ? null : prev));
-    setEditingId((prev) => (prev === id ? null : prev));
-  }, []);
-
-  const toggleExpanded = useCallback((id: number) => {
-    setExpandedId((prev) => (prev === id ? null : id));
-  }, []);
-
-  const startEdit = useCallback((pc: PendingElementComment) => {
-    setEditingId(pc.id);
-    setEditText(pc.text);
-  }, []);
-
-  const cancelEdit = useCallback(() => {
-    setEditingId(null);
-    setEditText("");
-  }, []);
-
-  const saveEdit = useCallback(() => {
-    const text = editText.trim();
-    if (editingId === null || !text) return;
-    setPendingComments((prev) => prev.map((pc) => (pc.id === editingId ? { ...pc, text } : pc)));
-    setEditingId(null);
-    setEditText("");
-  }, [editingId, editText]);
-
-  const sendAllComments = useCallback(async () => {
-    if (pendingComments.length === 0) return;
-    const text = buildCombinedElementText(label, pendingComments);
-    setSendBusy(true);
-    setSendError(null);
-    try {
-      const activeCwd = getActiveContext?.()?.cwd ?? null;
-      if (!activeCwd) {
-        setSendError("No active project - open a project first.");
-        return;
-      }
-      const [sessions, agents] = await Promise.all([fetchSessions(), agentTargets()]);
-      const targets = agentWindows(sessions, activeCwd, agents);
-      if (targets.length === 0) {
-        setSendError("No agent is running in this project - start one first.");
-        return;
-      }
-      await sendToAgent(targets[0].sessionName, text, readSendAutoSubmit(), { windowIndex: targets[0].windowIndex });
-      setPendingComments([]);
-      setExpandedId(null);
-      setEditingId(null);
-    } catch (err) {
-      setSendError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSendBusy(false);
-    }
-  }, [pendingComments, label]);
-
-  const expandedComment = pendingComments.find((pc) => pc.id === expandedId) ?? null;
-  const { popoverRef: pickPopoverRef, pos: pickPos } = usePopoverPosition(hostRef, activePick?.rect ?? null);
-  const { popoverRef: commentPopoverRef, pos: commentPos } = usePopoverPosition(
-    hostRef,
-    expandedComment?.rect ?? null,
-  );
-
-  const controls = (
-    <>
-      <button className="icon-button" title="Refresh" onClick={refresh}>
-        <Icon name="refresh" />
-      </button>
-      <button className="icon-button" title="Open in Browser" onClick={() => window.open(url, "_blank", "noopener")}>
-        <Icon name="link-external" />
-      </button>
-      <button
-        className={`icon-button${inspecting ? " active" : ""}`}
-        disabled={crossOrigin}
-        title={
-          crossOrigin
-            ? "Inspect isn't available with a custom proxy domain configured"
-            : inspecting
-              ? "Click an element to comment on it (click the button again to cancel)"
-              : "Inspect element → add comment"
-        }
-        onClick={toggleInspect}
-      >
-        <Icon name="inspect" />
-      </button>
-    </>
-  );
-
-  return (
-    <div ref={hostRef} className={`ports-proxy-host${active ? "" : " hidden"}`}>
-      <iframe
-        key={reloadTick}
-        ref={iframeRef}
-        className="ports-proxy-frame"
-        src={url}
-        title={label}
-      />
-      {activePick && (
-        <div ref={pickPopoverRef} className="ports-pick-popover" style={{ left: pickPos.left, top: pickPos.top }}>
-          <div className="ports-pick-selector">{activePick.selector}</div>
-          <textarea
-            autoFocus
-            placeholder="What should the agent do with this element?"
-            value={pickComment}
-            onChange={(e) => setPickComment(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                cancelPick();
-              } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                addPickComment();
-              }
-            }}
-          />
-          <div className="ports-pick-buttons">
-            <button
-              type="button"
-              className="ports-btn-primary"
-              disabled={!pickComment.trim()}
-              onClick={addPickComment}
-            >
-              Add Comment
-            </button>
-            <button type="button" className="ports-btn-ghost" onClick={cancelPick}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-      {pendingComments.map((pc, index) => (
-        <button
-          key={pc.id}
-          type="button"
-          className="ports-comment-badge ports-comment-marker"
-          style={{ left: pc.rect.left + pc.rect.width / 2, top: pc.rect.top + pc.rect.height / 2 }}
-          title={pc.text}
-          onClick={() => toggleExpanded(pc.id)}
-        >
-          {index + 1}
-        </button>
-      ))}
-      {expandedComment && (
-        <div
-          ref={commentPopoverRef}
-          className="ports-pick-popover ports-comment-popover"
-          style={{ left: commentPos.left, top: commentPos.top }}
-        >
-          <div className="ports-pick-selector">{expandedComment.selector}</div>
-          {editingId === expandedComment.id ? (
-            <>
-              <textarea
-                autoFocus
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    cancelEdit();
-                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    saveEdit();
-                  }
-                }}
-              />
-              <div className="ports-pick-buttons">
-                <button
-                  type="button"
-                  className="ports-btn-primary"
-                  disabled={!editText.trim()}
-                  onClick={saveEdit}
-                >
-                  Save
-                </button>
-                <button type="button" className="ports-btn-ghost" onClick={cancelEdit}>
-                  Cancel
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="ports-comment-text">{expandedComment.text}</div>
-              <div className="ports-pick-buttons">
-                <button type="button" className="ports-btn-ghost" onClick={() => startEdit(expandedComment)}>
-                  <Icon name="edit" /> Edit
-                </button>
-                <button
-                  type="button"
-                  className="ports-btn-ghost"
-                  onClick={() => removePendingComment(expandedComment.id)}
-                >
-                  <Icon name="close" /> Remove
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-      {pendingComments.length > 0 && (
-        <div className="ports-pending-panel">
-          <div className="ports-pending-summary">
-            <span className="ports-pending-count">
-              {pendingComments.length} comment{pendingComments.length === 1 ? "" : "s"} pending
-            </span>
-            <button
-              type="button"
-              className="ports-btn-primary"
-              disabled={sendBusy}
-              onClick={() => void sendAllComments()}
-            >
-              <Icon name="send" /> {sendBusy ? "Sending…" : "Send to Agent"}
-            </button>
-            <button
-              type="button"
-              className="ports-btn-ghost"
-              disabled={sendBusy}
-              onClick={() => {
-                setPendingComments([]);
-                setExpandedId(null);
-                setEditingId(null);
-              }}
-            >
-              Clear
-            </button>
-          </div>
-          {sendError && <div className="ports-pending-error">{sendError}</div>}
-          <ul className="ports-pending-list">
-            {pendingComments.map((pc, index) => (
-              <li key={pc.id} className="ports-pending-item">
-                <button type="button" className="ports-comment-badge" onClick={() => toggleExpanded(pc.id)}>
-                  {index + 1}
-                </button>
-                <span className="ports-pending-selector">{pc.selector}</span>
-                <span className="ports-pending-text">{pc.text}</span>
-                <button
-                  type="button"
-                  className="icon-button"
-                  title="Remove this comment"
-                  onClick={() => removePendingComment(pc.id)}
-                >
-                  <Icon name="close" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {active && toolbarTarget && createPortal(controls, toolbarTarget)}
-    </div>
-  );
 }
 
 // Tunnel state, for the status-bar readout and the forwarded markers. A
@@ -1431,8 +876,10 @@ interface ExtensionContext {
     id: string;
     extensions: string[];
     mode: "default" | "preview";
-    component: typeof PortProxyView;
+    component: typeof BrowserView;
   }): void;
+  registerCommand?(command: { id: string; label: string; defaultBinding?: string; run: () => void }): void;
+  registerUrlHandler?(handler: (url: string) => boolean): void;
   registerStatusBarItem(item: {
     id: string;
     title?: string;
@@ -1455,6 +902,7 @@ interface ExtensionContext {
   app: {
     getActiveContext(): ActiveContext;
     openViewerTab(viewerId: string, path: string, opts?: { title?: string }): void;
+    promptDialog?(message: string, defaultValue?: string): Promise<string | null>;
     openSessionWindow?(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void;
     togglePanelView?(viewId: string): boolean;
   };
@@ -1690,12 +1138,54 @@ export function activate(ctx: ExtensionContext): void {
     order: 10,
     component: PortsStatusItem,
   });
+  // The web preview tab (browser.tsx). Still "portProxy": tabs the PORTS Open
+  // action opened before it grew an address bar restore into it.
   ctx.registerFileViewer({
     id: "portProxy",
     extensions: [],
     mode: "default",
-    component: PortProxyView,
+    component: BrowserView,
   });
+  configureBrowser({
+    fetchListeningPorts: () => fetchPorts(),
+    localProxyBase: async (port) => {
+      const config = await fetchProxyConfig().catch(() => NO_PROXY_CONFIG);
+      return { base: proxyUrl(port, config), crossOrigin: config.domain !== null };
+    },
+    openUrlTab: (url) => openUrlTab(url),
+    resolveCwd: () => getActiveContext?.()?.cwd ?? null,
+    readSendAutoSubmit,
+    hookBase: (ctx.assetUrl("x").match(/^(\/api\/extensions\/[^/]+)\/file\//)?.[1] ?? "").replace("/extensions/", "/ext/"),
+    pageAgentUrl: ctx.assetUrl("dist/page-agent.js"),
+  });
+  if (ctx.app.promptDialog) setViewportPrompt(ctx.app.promptDialog);
+  ctx.registerCommand?.({
+    id: "openUrl",
+    label: "Web Preview: Open URL…",
+    run: () => {
+      void ctx.app.promptDialog?.("Open a web address in a preview tab", "https://").then((input) => {
+        if (!input?.trim()) return;
+        const url = parseAddress(input);
+        openUrlTab(url ? url.href : input.trim());
+      });
+    },
+  });
+  // Terminal links the user chose to open inside Perch (core's openUrl).
+  ctx.registerUrlHandler?.((url) => {
+    if (!openViewerTab) return false;
+    openUrlTab(url);
+    return true;
+  });
+}
+
+function openUrlTab(url: string): void {
+  let title = url;
+  try {
+    title = new URL(url).host;
+  } catch {
+    // an address the tab will report as invalid
+  }
+  openViewerTab?.("portProxy", browserTabPath(url), { title });
 }
 
 export function deactivate(): void {
@@ -1707,4 +1197,5 @@ export function deactivate(): void {
   extSettings = null;
   getActiveContext = null;
   openViewerTab = null;
+  configureBrowser(null);
 }

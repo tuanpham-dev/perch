@@ -4,9 +4,11 @@
 // tsx in both dev and prod (see server/package.json), so no build step is
 // needed here, unlike the client entry (see extensions/build.mjs).
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
+import { mountScreenshotRoutes } from "../_shared/screenshotRoutes.mjs";
 
 // Paths from the page may arrive "~"-shortened, the way core shows them
 // (server files.ts's shortenHome) - expand before touching the filesystem
@@ -36,119 +38,14 @@ const SCROLL_SCRIPT = `<script>(function(){
   });
 })();</script>`;
 
-// The element picker (Orca-style "Design Mode", scoped to live-preview's own
-// sandboxed HTML files only — see plans/orca-features-implementation.md's
-// Approach on why a proxied dev-server response is a different risk class
-// and out of scope here). Armed/disarmed by a postMessage from the parent
-// tab (client.tsx's inspect toggle); while armed, mousemove outlines the
-// hovered element with one shared overlay box (no per-element style writes,
-// so hovering doesn't fight the page's own styles) and a capture-phase click
-// (preventDefault'd so the page's own click handlers never fire while
-// picking) posts the selector/outerHTML/computed-styles back to the parent.
-const INSPECT_SCRIPT = `<script>(function(){
-  var armed = false;
-  var hovered = null;
-  var overlay = null;
-  var STYLE_PROPS = ["display","position","top","right","bottom","left","width","height",
-    "margin","padding","boxSizing","color","backgroundColor","fontFamily","fontSize",
-    "fontWeight","lineHeight","flexDirection","justifyContent","alignItems"];
-
-  function ensureOverlay() {
-    if (overlay) return overlay;
-    overlay = document.createElement("div");
-    overlay.style.cssText = "position:fixed;pointer-events:none;z-index:2147483647;" +
-      "background:rgba(79,168,255,0.25);border:1px solid rgba(79,168,255,0.9);display:none;";
-    document.documentElement.appendChild(overlay);
-    return overlay;
-  }
-
-  // Walks up from el to (not including) <body>, building a short CSS-like
-  // path: tag#id (stops climbing once an id is hit — ids are unique enough
-  // to anchor the whole path), else tag.class1.class2 plus :nth-of-type(n)
-  // when siblings share the same tag. A rough locator for a human or an
-  // agent to find the element again, not a guaranteed-unique selector.
-  function selectorFor(el) {
-    var parts = [];
-    var node = el;
-    while (node && node.nodeType === 1 && node !== document.body && node !== document.documentElement) {
-      var part = node.tagName.toLowerCase();
-      if (node.id) {
-        parts.unshift(part + "#" + node.id);
-        break;
-      }
-      if (typeof node.className === "string" && node.className.trim()) {
-        var cls = node.className.trim().split(/\\s+/).filter(Boolean).slice(0, 2);
-        if (cls.length) part += "." + cls.join(".");
-      }
-      var parent = node.parentElement;
-      if (parent) {
-        var siblings = Array.prototype.filter.call(parent.children, function (c) {
-          return c.tagName === node.tagName;
-        });
-        if (siblings.length > 1) {
-          part += ":nth-of-type(" + (Array.prototype.indexOf.call(siblings, node) + 1) + ")";
-        }
-      }
-      parts.unshift(part);
-      node = node.parentElement;
-    }
-    return parts.join(" > ");
-  }
-
-  function onMouseMove(e) {
-    if (!armed) return;
-    var el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el || el === overlay) return;
-    hovered = el;
-    var r = el.getBoundingClientRect();
-    var o = ensureOverlay();
-    o.style.left = r.left + "px";
-    o.style.top = r.top + "px";
-    o.style.width = r.width + "px";
-    o.style.height = r.height + "px";
-    o.style.display = "block";
-  }
-
-  function onClick(e) {
-    if (!armed) return;
-    e.preventDefault();
-    e.stopPropagation();
-    var el = hovered || document.elementFromPoint(e.clientX, e.clientY);
-    if (!el) return;
-    var cs = window.getComputedStyle(el);
-    var styles = {};
-    STYLE_PROPS.forEach(function (p) { styles[p] = cs[p]; });
-    var html = el.outerHTML;
-    if (html.length > 4000) html = html.slice(0, 4000) + "…";
-    // Viewport-relative rect — the host positions its comment popover with
-    // this directly (live-preview-frame fills its host 1:1, no offset math
-    // needed on the host side, see client.tsx).
-    var r = el.getBoundingClientRect();
-    window.parent.postMessage(
-      {
-        __livePreviewPicked: {
-          selector: selectorFor(el),
-          outerHTML: html,
-          styles: styles,
-          rect: { left: r.left, top: r.top, width: r.width, height: r.height },
-        },
-      },
-      "*",
-    );
-  }
-
-  window.addEventListener("message", function (e) {
-    var val = e && e.data && e.data.__livePreviewInspect;
-    if (typeof val !== "boolean") return;
-    armed = val;
-    if (!armed && overlay) overlay.style.display = "none";
-  });
-  document.addEventListener("mousemove", onMouseMove, true);
-  document.addEventListener("click", onClick, true);
-})();</script>`;
+// The page bootstrap (../_shared/pageBootstrap.js): starts the page's error
+// log before its own scripts run, and installs the page agent (element
+// picking, badges that follow the page, screenshots) when the preview tab
+// sends it. Read once; it ships with the bundled extensions.
+const BOOTSTRAP_SCRIPT = `<script>${readFileSync(new URL("../_shared/pageBootstrap.js", import.meta.url), "utf8")}</script>`;
 
 function injectScripts(html) {
-  const combined = SCROLL_SCRIPT + INSPECT_SCRIPT;
+  const combined = BOOTSTRAP_SCRIPT + SCROLL_SCRIPT;
   const headClose = html.search(/<\/head\s*>/i);
   if (headClose !== -1) return html.slice(0, headClose) + combined + html.slice(headClose);
   const bodyClose = html.search(/<\/body\s*>/i);
@@ -197,6 +94,7 @@ function noteServed(token, relPath) {
 }
 
 export function activate({ router }) {
+  mountScreenshotRoutes(router);
   // Origin-checked normally (not under /public/) — see
   // server/src/security.ts's isOriginExemptPath for why that matters: this
   // is the only way a token can come into existence, so an attacker's page

@@ -4,8 +4,8 @@
 // react/react-dom/react-jsx-runtime are aliased to _shared/shims so every
 // bundled extension shares the host's single React instance instead of
 // shipping its own — see _shared/shims/*.mjs and client/src/main.tsx.
-import { context } from "esbuild";
-import { existsSync, readdirSync } from "node:fs";
+import { build, context } from "esbuild";
+import { existsSync, mkdirSync, readFileSync, readdirSync, watchFile, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,9 +60,52 @@ async function buildOne(name) {
   }
 }
 
+// The page agent: the tools a preview tab installs into the page it shows
+// (see _shared/pageAgent.js). One script, the screenshot library, the
+// bootstrap and the agent in that order, written to each extension that
+// previews pages, where its client fetches it through ctx.assetUrl.
+const PAGE_AGENT_CONSUMERS = ["live-preview", "ports"];
+
+async function buildPageAgent() {
+  const shared = path.join(__dirname, "_shared");
+  const lib = await build({
+    entryPoints: [path.join(shared, "pageCaptureEntry.ts")],
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: "es2018",
+    minify: true,
+    write: false,
+    logLevel: "silent",
+  });
+  const source = [
+    lib.outputFiles[0].text,
+    readFileSync(path.join(shared, "pageBootstrap.js"), "utf8"),
+    readFileSync(path.join(shared, "pageAgent.js"), "utf8"),
+  ].join("\n;\n");
+  for (const name of PAGE_AGENT_CONSUMERS) {
+    const dir = path.join(__dirname, name, "dist");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "page-agent.js"), source);
+  }
+  console.log("[extensions] built page agent");
+}
+
+async function watchPageAgent() {
+  await buildPageAgent();
+  const shared = path.join(__dirname, "_shared");
+  let timer = null;
+  for (const file of ["pageAgent.js", "pageBootstrap.js", "pageCaptureEntry.ts"]) {
+    watchFile(path.join(shared, file), { interval: 500 }, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => buildPageAgent().catch((err) => console.error("[extensions] page agent:", err)), 100);
+    });
+  }
+}
+
 const names = findExtensionNames();
 if (names.length === 0) {
   console.log("[extensions] no extensions with a src/client.tsx entry found");
 } else {
-  await Promise.all(names.map(buildOne));
+  await Promise.all([...names.map(buildOne), watch ? watchPageAgent() : buildPageAgent()]);
 }
