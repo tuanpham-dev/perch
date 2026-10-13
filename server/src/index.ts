@@ -48,6 +48,7 @@ import {
 } from "./security.js";
 import { handleAttach } from "./wsAttach.js";
 import { handleTunnel } from "./wsTunnel.js";
+import { createWebProxy, isWebUpgradePath } from "./webProxy.js";
 
 // Before anything below prints: the OUTPUT view's "Perch" channel
 // (logChannels.ts) is fed from console, so the wrap has to be in place first.
@@ -75,6 +76,7 @@ function escapeHtml(s: string): string {
 }
 
 const app = express();
+const webProxy = createWebProxy();
 // Host guards against DNS rebinding; Origin guards against a browser tab on
 // some other site making a request here (WebSockets ignore same-origin
 // policy entirely, and a handful of no-body POST endpoints are reachable
@@ -84,6 +86,15 @@ const app = express();
 app.use((req, res, next) => {
   if (!isAllowedHost(req.headers.host)) {
     res.status(403).json({ error: "forbidden host" });
+    return;
+  }
+  // The web preview's proxied pages (webProxy.ts) authorize by the token in
+  // their URL instead: a sandboxed frame sends Origin: null and no cookies,
+  // so neither the Origin check below nor the sign-in gate can apply. Handled
+  // here, ahead of both and of every body parser, so request bodies stream
+  // through to the site untouched.
+  if (webProxy.isWebProxyRequest(req)) {
+    webProxy.handleWebRequest(req, res).catch(next);
     return;
   }
   // /public/ routes (e.g. live-preview's serve/mtime) enforce their own
@@ -199,6 +210,7 @@ app.use((req, res, next) => {
 app.use("/api/agent-hooks/report", agentHookBodyParser);
 app.use(express.json());
 app.use(clientPathsMiddleware);
+app.use("/api/web-preview", webProxy.api);
 app.use("/api", api);
 
 const tunnelCli = path.resolve(import.meta.dirname, "../../cli/tunnel.mjs");
@@ -293,7 +305,17 @@ const server = createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
-  if (!isAllowedHost(req.headers.host) || !isAllowedOrigin(req.headers.origin)) {
+  if (!isAllowedHost(req.headers.host)) {
+    socket.destroy();
+    return;
+  }
+  // A proxied page's own WebSocket: Origin null, token in the URL (see the
+  // matching HTTP branch above).
+  if (isWebUpgradePath(req.url)) {
+    webProxy.handleWebUpgrade(req, socket, head);
+    return;
+  }
+  if (!isAllowedOrigin(req.headers.origin)) {
     socket.destroy();
     return;
   }

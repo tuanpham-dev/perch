@@ -118,6 +118,10 @@ export function isAllowedOrigin(originHeader: string | undefined): boolean {
 // Never use this for a route that trusts ambient browser state (cookies,
 // session, Referer) instead of an explicit capability — Origin exemption
 // bypasses exactly the protection those would need.
+//
+// The web preview (webProxy.ts) follows the same rule with its own token, on
+// /web/ paths and on document-form URLs carrying a __wp parameter; index.ts
+// hands those to it ahead of this check and the sign-in gate.
 export function isOriginExemptPath(path: string): boolean {
   return /^\/api\/ext\/[^/]+\/public\//.test(path);
 }

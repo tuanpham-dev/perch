@@ -9,9 +9,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "es-module-lexer": "^1.7.0",
     "express": "^4.21.2",
     "node-pty": "^1.0.0",
+    "parse5-html-rewriting-stream": "^8.0.1",
     "perch-mux": "*",
+    "tough-cookie": "^6.0.2",
     "tsx": "^4.19.2",
     "web-push": "^3.6.7",
     "ws": "^8.18.0"

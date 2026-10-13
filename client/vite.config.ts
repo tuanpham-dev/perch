@@ -93,6 +93,10 @@ export default defineConfig({
         target: api,
         ws: true,
       },
+      "/web": {
+        target: api,
+        ws: true,
+      },
     },
   },
 });
