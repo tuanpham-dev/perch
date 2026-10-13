@@ -192,7 +192,7 @@ export default function SettingsView({
           {section === "terminal" && <TerminalSection />}
           {section === "backend" && <BackendSection />}
           {section === "editor" && <EditorSection />}
-          {section === "behavior" && <BehaviorSection />}
+          {section === "behavior" && <BehaviorSection confirmDialog={confirmDialog} />}
           {section === "ui" && <UiSection />}
           {section === "extensions" && <ExtensionsSection />}
           {section === "ai" && <AiProvidersSection />}

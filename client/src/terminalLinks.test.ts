@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { findCandidates, joinWrappedPath } from "./terminalLinks";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { findCandidates, joinWrappedPath, openUrl, setInAppUrlOpener, setOpenUrlsInAppByDefault } from "./terminalLinks";
 
 const paths = (text: string) =>
   findCandidates(text)
@@ -131,5 +131,50 @@ describe("joinWrappedPath: a path a program broke across rows", () => {
     const j = joinWrappedPath("see client/src/components/Terminal".padEnd(34), "View.tsx now", 34);
     expect(j?.target).toBe("client/src/components/TerminalView.tsx");
     expect(j?.contLength).toBe(8);
+  });
+});
+
+describe("openUrl: browser or web preview", () => {
+  const opened: string[] = [];
+  const inApp: string[] = [];
+  function setup(handles: boolean) {
+    opened.length = 0;
+    inApp.length = 0;
+    vi.stubGlobal("window", { open: (url: string) => opened.push(url) });
+    setInAppUrlOpener((url) => {
+      inApp.push(url);
+      return handles;
+    });
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setInAppUrlOpener(null);
+    setOpenUrlsInAppByDefault(false);
+  });
+
+  it("opens the browser by default and the preview on the secondary gesture", () => {
+    setup(true);
+    openUrl("https://example.com/");
+    openUrl("https://example.com/b", { secondary: true });
+    expect(opened).toEqual(["https://example.com/"]);
+    expect(inApp).toEqual(["https://example.com/b"]);
+  });
+
+  it("swaps the two when the setting is on", () => {
+    setup(true);
+    setOpenUrlsInAppByDefault(true);
+    openUrl("https://example.com/");
+    openUrl("https://example.com/b", { secondary: true });
+    expect(inApp).toEqual(["https://example.com/"]);
+    expect(opened).toEqual(["https://example.com/b"]);
+  });
+
+  it("falls back to the browser when nothing in the app takes it, or it isn't a web address", () => {
+    setup(false);
+    setOpenUrlsInAppByDefault(true);
+    openUrl("https://example.com/");
+    openUrl("mailto:a@b.c");
+    expect(opened).toEqual(["https://example.com/", "mailto:a@b.c"]);
+    expect(inApp).toEqual(["https://example.com/"]);
   });
 });

@@ -9,4 +9,7 @@ export interface MenuItem {
   // Leading check icon (the host's ContextMenu); any item setting it, true
   // or false, reserves the gutter so labels stay aligned.
   checked?: boolean;
+  disabled?: boolean;
+  // A divider row; label/onClick are placeholders.
+  separator?: boolean;
 }

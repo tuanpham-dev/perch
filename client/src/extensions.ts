@@ -311,6 +311,10 @@ export interface ExtensionContext {
   // matching (so image/media/pdf viewers keep their paths) and must fail
   // open: any thrown error falls through to the editor.
   registerFileOpenInterceptor(intercept: (path: string) => Promise<boolean>): void;
+  // Offers to open a web address inside the app (a terminal link the user
+  // chose to open in Perch, see RegisteredUrlHandler). Return true when
+  // handled; false, or no handler at all, opens it in the browser.
+  registerUrlHandler(handler: (url: string) => boolean): void;
   registerSidebarPanel(panel: {
     id: string;
     title: string;
@@ -1056,6 +1060,15 @@ export interface RegisteredFileOpenInterceptor {
   intercept: (path: string) => Promise<boolean>;
 }
 
+// An extension that can show a web address inside the app (the ports
+// extension's web preview). terminalLinks.ts's openUrl asks these, in order,
+// when a link is to open in Perch rather than the browser.
+export interface RegisteredUrlHandler {
+  extensionId: string;
+  handle: (url: string) => boolean;
+}
+
+export const extensionUrlHandlers: RegisteredUrlHandler[] = [];
 export const extensionCommands: RegisteredCommand[] = [];
 export const extensionFileViewers: RegisteredFileViewer[] = [];
 export const extensionFileOpenInterceptors: RegisteredFileOpenInterceptor[] = [];
@@ -1721,6 +1734,10 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       extensionFileOpenInterceptors.push({ extensionId: ext.id, intercept });
       notify();
     },
+    registerUrlHandler(handle) {
+      extensionUrlHandlers.push({ extensionId: ext.id, handle });
+      notify();
+    },
     registerSidebarPanel(panel) {
       const namespacedId = `ext.${ext.id}.${panel.id}`;
       const location = panel.location ?? "tab";
@@ -2238,6 +2255,9 @@ function deactivateClientExtension(extId: string): void {
   }
   for (let i = extensionFileOpenInterceptors.length - 1; i >= 0; i--) {
     if (extensionFileOpenInterceptors[i].extensionId === extId) extensionFileOpenInterceptors.splice(i, 1);
+  }
+  for (let i = extensionUrlHandlers.length - 1; i >= 0; i--) {
+    if (extensionUrlHandlers[i].extensionId === extId) extensionUrlHandlers.splice(i, 1);
   }
   for (let i = extensionSidebarPanels.length - 1; i >= 0; i--) {
     if (extensionSidebarPanels[i].id.startsWith(prefix)) extensionSidebarPanels.splice(i, 1);

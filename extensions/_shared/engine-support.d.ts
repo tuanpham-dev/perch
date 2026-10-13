@@ -25,7 +25,7 @@ declare module "@perch/engine-support" {
   export function findCandidates(text: string): Candidate[];
 
   export function isOpenGesture(event: MouseEvent): boolean;
-  export function openUrl(url: string): void;
+  export function openUrl(url: string, opts?: { secondary?: boolean }): void;
   export const MAX_STITCH_LINES: number;
 
   export function markSyntheticSelectStart(event: MouseEvent): void;

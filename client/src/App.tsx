@@ -43,6 +43,7 @@ import {
   useExtensionRegistry,
   useExtensionRegistryVersion,
   extensionPanelViews,
+  extensionUrlHandlers,
   setPanelViewHandlers,
   type PanelViewContext,
 } from "./extensions";
@@ -56,6 +57,7 @@ import { useGlobalKeybindings } from "./hooks/useGlobalKeybindings";
 import { COMMANDS, formatBinding } from "./keybindings";
 import { DEFAULT_SETTINGS, TAB_BAR_SCOPES } from "./settings";
 import { evaluateWhen } from "./whenClause";
+import { setInAppUrlOpener, setOpenUrlsInAppByDefault } from "./terminalLinks";
 import { useBottomPanel } from "./hooks/useBottomPanel";
 import { useOpenTarget } from "./hooks/useOpenTarget";
 import { useSessionActions } from "./hooks/useSessionActions";
@@ -2247,6 +2249,24 @@ export default function App() {
   // The installed app's own title bar, once its browser title bar is hidden
   // (plans/pwa-custom-title-bar.md). Never on a phone: the overlay is a
   // desktop-only browser feature, and the check keeps emulation honest.
+  // Web links from a terminal: the browser, or a web preview tab an
+  // extension provides (terminalLinks.ts's openUrl).
+  useEffect(() => {
+    setOpenUrlsInAppByDefault(settings.webPreviewTerminalLinks);
+  }, [settings.webPreviewTerminalLinks]);
+  useEffect(() => {
+    setInAppUrlOpener((url) =>
+      [...extensionUrlHandlers].some((h) => {
+        try {
+          return h.handle(url);
+        } catch {
+          return false;
+        }
+      }),
+    );
+    return () => setInAppUrlOpener(null);
+  }, []);
+
   const updates = useUpdates(`${settings.updateChannel}:${settings.checkForUpdates}`);
   const updateBanner =
     updates.status?.available && updates.status.latest && updates.status.latest.version !== settings.dismissedUpdate

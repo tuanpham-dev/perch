@@ -166,6 +166,34 @@ export function isOpenGesture(event: MouseEvent): boolean {
   return event.ctrlKey || event.metaKey;
 }
 
-export function openUrl(url: string): void {
+// Web links can open inside the app instead of the browser, in a web
+// preview tab an extension provides (the ports extension, through
+// registerUrlHandler). App.tsx wires the opener and the user's default here,
+// which keeps this module free of the extension registry.
+let inAppOpener: ((url: string) => boolean) | null = null;
+let inAppByDefault = false;
+
+export function setInAppUrlOpener(opener: ((url: string) => boolean) | null): void {
+  inAppOpener = opener;
+}
+
+export function setOpenUrlsInAppByDefault(inApp: boolean): void {
+  inAppByDefault = inApp;
+}
+
+// Opens url in the app, if something there can. False when nothing could.
+export function openUrlInApp(url: string): boolean {
+  if (!/^https?:\/\//i.test(url) || !inAppOpener) return false;
+  try {
+    return inAppOpener(url);
+  } catch {
+    return false;
+  }
+}
+
+// secondary (Ctrl/Cmd+Shift+click) picks whichever of the browser and the
+// app the user's default doesn't.
+export function openUrl(url: string, opts?: { secondary?: boolean }): void {
+  if (inAppByDefault !== !!opts?.secondary && openUrlInApp(url)) return;
   window.open(url, "_blank", "noopener,noreferrer");
 }

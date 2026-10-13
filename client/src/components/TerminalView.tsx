@@ -12,6 +12,7 @@ import {
   useExtensionRegistryVersion,
   type TerminalAccessoryContext,
   type TerminalCommandEvent,
+  extensionUrlHandlers,
 } from "../extensions";
 import {
   isSyntheticSelectStart,
@@ -37,7 +38,7 @@ import {
   focusReport,
   WheelLineAccumulator,
 } from "../mouseReports";
-import { isOpenGesture, joinWrappedPath, openUrl } from "../terminalLinks";
+import { isOpenGesture, joinWrappedPath, openUrl, openUrlInApp } from "../terminalLinks";
 import type { MenuItem } from "../types";
 import { oversizeReason, uploadMaxBytes } from "../upload";
 
@@ -2555,6 +2556,9 @@ export default function TerminalView({
       const items: MenuItem[] = [];
       if (link?.kind === "url") {
         items.push({ label: "Open Link", onClick: () => openUrl(link.target) });
+        if (/^https?:\/\//i.test(link.target) && extensionUrlHandlers.length > 0) {
+          items.push({ label: "Open Link in Web Preview", onClick: () => void openUrlInApp(link.target) });
+        }
         items.push({
           label: "Copy Link",
           onClick: () => {

@@ -673,6 +673,25 @@ content-sniffing a file server-side. There is no id and nothing to refresh;
 it's removed on deactivation. Reference: `file-guard` (binary and oversized
 files get a guard tab instead of nvim).
 
+### URL handlers — `registerUrlHandler`
+
+```ts
+ctx.registerUrlHandler(
+  (url: string) => boolean,   // true = opened in the app, open nothing else
+);
+```
+
+Offers to show an `http(s)` address inside the app. Core asks handlers, in
+registration order, when a web link is to open in Perch rather than the
+browser: a terminal Ctrl/Cmd+click with **Settings → Behavior → Open terminal
+links in a web preview tab** on (Ctrl/Cmd+Shift+click with it off), or the
+terminal menu's *Open Link in Web Preview*. Return `true` once you've opened
+something, typically your own `extensions: []` viewer through
+`ctx.app.openViewerTab`; return `false` to pass. When every handler passes or
+throws, the link opens in the browser, so a broken handler never makes links
+unopenable. Synchronous, and called on the click, so keep it cheap. Removed
+on deactivation. Reference: `ports` (its web preview tab).
+
 ### Sidebar panels — `registerSidebarPanel`
 
 ```ts

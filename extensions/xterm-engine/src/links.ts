@@ -60,7 +60,7 @@ export interface XtermDetectedLink extends XtermILink {
 export interface XtermTerminalLinksHandlers {
   resolvePaths: (paths: string[], cells?: (ScreenCell | null)[]) => Promise<(string | null)[]>;
   readPaneLines?: (row: number) => Promise<PaneLine[]>;
-  onOpenUrl: (url: string) => void;
+  onOpenUrl: (url: string, opts?: { secondary?: boolean }) => void;
   onOpenFile: (path: string, line?: number) => void;
   onOpenFileSecondary: (path: string, line?: number) => void;
   // Fired with the ILink under the pointer (or null on leave) — same shape
@@ -253,7 +253,7 @@ export function buildXtermLinkProvider(
                 activate(event) {
                   if (!isOpenGesture(event)) return;
                   if (kind === "url") {
-                    handlers.onOpenUrl(target);
+                    handlers.onOpenUrl(target, { secondary: event.shiftKey });
                   } else if (event.shiftKey) {
                     handlers.onOpenFileSecondary(target, line);
                   } else {

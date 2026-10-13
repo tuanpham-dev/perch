@@ -201,7 +201,119 @@ function CarryOverList() {
   );
 }
 
-export default function BehaviorSection() {
+// Hosts the web preview's server may open although they're private or
+// local (a staging box on the LAN). Same list shape as CarryOverList.
+function WebPreviewHostsList() {
+  const { settings, set } = useSettingsContext();
+  const [draft, setDraft] = useState("");
+  const hosts = settings.webPreviewAllowedHosts;
+
+  const add = () => {
+    const entry = draft.trim().toLowerCase();
+    if (!entry) return;
+    setDraft("");
+    if (!hosts.includes(entry)) set("webPreviewAllowedHosts", [...hosts, entry]);
+  };
+
+  return (
+    <div className="settings-row">
+      <span className="settings-label">Private hosts the web preview may open</span>
+      <div className="settings-hint">
+        The web preview reaches sites from the Perch server, and refuses private and local addresses
+        (192.168.x.x, 10.x.x.x, localhost) so a page can&apos;t use it to reach the server&apos;s own network.
+        List a host (staging.lan), a wildcard (*.corp.example) or a range (10.1.0.0/16) to allow it. Local
+        dev servers don&apos;t need this: they open through PORTS.
+      </div>
+      {hosts.length > 0 && (
+        <div className="settings-entry-list">
+          {hosts.map((h) => (
+            <div key={h} className="settings-entry">
+              <div className="settings-entry-head">
+                <span className="settings-entry-path" title={h}>
+                  {h}
+                </span>
+                <button
+                  className="icon-button"
+                  title="Remove"
+                  aria-label={`Remove ${h}`}
+                  onClick={() => set("webPreviewAllowedHosts", hosts.filter((q) => q !== h))}
+                >
+                  <Icon name="trash" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="settings-add-row">
+        <input
+          id="web-preview-allowed-host-input"
+          className="dialog-input"
+          placeholder="staging.lan"
+          aria-label="Private host the web preview may open"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button className="dialog-button secondary" onClick={add} disabled={!draft.trim()}>
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClearSiteDataRow({ confirmDialog }: { confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean> }) {
+  const [status, setStatus] = useState<"idle" | "busy" | "done" | string>("idle");
+
+  const clear = async () => {
+    if (confirmDialog && !(await confirmDialog("Sign out of every site in the web preview and delete their cookies?", "Clear All"))) {
+      return;
+    }
+    setStatus("busy");
+    try {
+      const res = await fetch("/api/web-preview/clear", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      setStatus("done");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div className="settings-row">
+      <span className="settings-label">Web preview site data</span>
+      <div className="settings-hint">
+        Sites you sign in to in a web preview keep their cookies on the Perch server, so you stay signed in
+        after a restart. Clearing signs you out of all of them.
+      </div>
+      <div className="settings-add-row">
+        <button className="dialog-button secondary" onClick={() => void clear()} disabled={status === "busy"}>
+          Clear All Site Data
+        </button>
+        {status === "done" && <span className="settings-hint">Cleared.</span>}
+      </div>
+      {status !== "idle" && status !== "busy" && status !== "done" && (
+        <div className="settings-hint settings-error">Couldn&apos;t clear site data: {status}</div>
+      )}
+    </div>
+  );
+}
+
+export default function BehaviorSection({
+  confirmDialog,
+}: {
+  confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean>;
+}) {
   const { settings, set } = useSettingsContext();
 
   return (
@@ -286,6 +398,23 @@ export default function BehaviorSection() {
           <option value="user">Every port my user owns</option>
         </select>
       </label>
+
+      <label className="settings-row checkbox-row">
+        <input
+          type="checkbox"
+          checked={settings.webPreviewTerminalLinks}
+          onChange={(e) => set("webPreviewTerminalLinks", e.target.checked)}
+        />
+        <span>Open terminal links in a web preview tab</span>
+      </label>
+      <div className="settings-hint">
+        Ctrl/Cmd+click on a web address in a terminal opens it inside Perch, where you can pick elements and
+        comment on them for an agent. Ctrl/Cmd+Shift+click opens it in the browser instead. With this off, the
+        two are the other way round.
+      </div>
+
+      <WebPreviewHostsList />
+      <ClearSiteDataRow confirmDialog={confirmDialog} />
 
       <label className="settings-row checkbox-row">
         <input

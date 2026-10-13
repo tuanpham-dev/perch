@@ -225,6 +225,13 @@ export interface AppSettings {
   //   "launched" anything a terminal started, even after that terminal closed
   //   "user"     every listening port your user account owns
   portScope: "open" | "launched" | "user";
+  // Ctrl/Cmd+click on a web link in a terminal opens it in a web preview tab
+  // instead of the browser. Ctrl/Cmd+Shift+click does the other one.
+  webPreviewTerminalLinks: boolean;
+  // Hosts, wildcards ("*.corp.example") and ranges ("10.1.0.0/16") the web
+  // preview's server may reach although they're private or local. Read by the
+  // server (webProxy.ts); everything else private stays blocked.
+  webPreviewAllowedHosts: string[];
   // The API providers the user has added, in their own order - a keyed API
   // for the jobs worth paying for, or a custom command. CLIs are not stored
   // here: every agent that can answer a single prompt is offered as a
@@ -387,6 +394,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   worktreeLocation: "{repo}/.worktrees/{branch}",
   worktreeCarryOver: [],
   portScope: "launched",
+  webPreviewTerminalLinks: false,
+  webPreviewAllowedHosts: [],
   aiProfiles: [],
   aiProfileId: "",
   aiDefaultModel: "",
@@ -446,6 +455,9 @@ export function migrateSettings(settings: AppSettings): AppSettings {
   // A hand-edited or older document could hold anything here.
   next.worktreeCarryOver = Array.isArray(next.worktreeCarryOver)
     ? next.worktreeCarryOver.filter((p): p is string => typeof p === "string")
+    : [];
+  next.webPreviewAllowedHosts = Array.isArray(next.webPreviewAllowedHosts)
+    ? next.webPreviewAllowedHosts.filter((p): p is string => typeof p === "string")
     : [];
   if (next.colorTheme === "") next.colorTheme = DEFAULT_SETTINGS.colorTheme;
   if (next.iconTheme === "") next.iconTheme = DEFAULT_SETTINGS.iconTheme;

@@ -131,7 +131,9 @@ export interface TerminalEngineOptions {
   // engine can't stitch them from its own buffer. Optional: an engine or
   // host without it just doesn't link paths wrapped inside split panes.
   readPaneLines?: (row: number) => Promise<PaneLine[]>;
-  onOpenUrl: (url: string) => void;
+  // secondary: Ctrl/Cmd+Shift+click, which opens the link the other way
+  // (browser vs. web preview, see terminalLinks.ts's openUrl).
+  onOpenUrl: (url: string, opts?: { secondary?: boolean }) => void;
   onOpenFile: (path: string, line?: number) => void;
   onOpenFileSecondary: (path: string, line?: number) => void;
   // A program in the terminal asked to set the clipboard (OSC 52). The host

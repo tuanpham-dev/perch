@@ -183,7 +183,7 @@ export async function createXtermEngine(
     if (!(event.ctrlKey || event.metaKey)) return;
     const link = osc8Link(text);
     if (link.kind === "path") onOpenFile(link.target);
-    else onOpenUrl(link.target);
+    else onOpenUrl(link.target, { secondary: event.shiftKey });
   };
 
   // Same file:-vs-everything-else split activateOsc8 acts on, as data — so
