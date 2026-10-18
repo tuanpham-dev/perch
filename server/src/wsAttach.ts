@@ -14,7 +14,7 @@ import { findWindow, isWindowTabName, listSessions } from "./terminals.js";
 // Closing the socket only detaches: the terminal keeps running.
 
 interface ClientMsg {
-  type: "input" | "resize" | "activate" | "hscroll" | "ping";
+  type: "input" | "resize" | "activate" | "hscroll" | "ping" | "history";
   data?: string;
   cols?: number;
   rows?: number;
@@ -48,6 +48,9 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
   const parseColor = (v: string | null): string | undefined =>
     v && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : undefined;
   const colors = { foreground: parseColor(url.searchParams.get("fg")), background: parseColor(url.searchParams.get("bg")) };
+  // A tail-first viewer gets recent history on attach and asks for the rest
+  // ("history") when it scrolls up to it.
+  const tail = url.searchParams.get("tail") === "1";
   const pinned = isWindowTabName(target);
   const windowId = pinned ? target.slice(1) : null;
 
@@ -135,6 +138,8 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
       handle.resize(msg.cols!, msg.rows!);
     } else if (msg.type === "activate") {
       handle.activate();
+    } else if (msg.type === "history") {
+      handle.loadFullHistory?.();
     } else if (msg.type === "hscroll" && Number.isFinite(msg.amount)) {
       const where = windowId ? { windowId } : { session: target };
       void scrollHorizontal(where, msg.amount!).catch(() => {});
@@ -162,11 +167,11 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
   ws.on("error", end);
 
   getMultiplexer()
-    .attach(target, { pinned, cols, rows, colors }, {
+    .attach(target, { pinned, cols, rows, colors, tail }, {
       output: (data) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(data);
       },
-      replayed: () => send({ type: "replayed" }),
+      replayed: (partial) => send(partial ? { type: "replayed", partial: true } : { type: "replayed" }),
       windowSwitched: (index) => send({ type: "windowSwitched", windowIndex: index }),
       resized: (c, r) => send({ type: "resize", cols: c, rows: r }),
       // "exit" tells the page the terminal is gone and its tab can close.

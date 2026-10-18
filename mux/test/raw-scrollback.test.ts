@@ -68,3 +68,49 @@ test('whatever the chunking, the bytes are the stream tail cut at a newline with
     }
   }
 });
+
+test('tail returns the whole log when it fits', () => {
+  const rs = new RawScrollback(4096);
+  rs.push(Buffer.from('one\ntwo\n', 'latin1'));
+  const { bytes, partial } = rs.tail(1024);
+  assert.equal(bytes.toString('latin1'), 'one\ntwo\n');
+  assert.equal(partial, false);
+});
+
+test('tail cuts at a prompt mark early in range', () => {
+  const rs = new RawScrollback(4096);
+  for (let i = 0; i < 50; i++) rs.push(Buffer.from(`old-${i}\n`, 'latin1'));
+  rs.push(Buffer.from('\x1b[31mred\n\x1b]133;A\x07$ ls\n' + 'file-name-here\n'.repeat(8), 'latin1'));
+  const { bytes, partial } = rs.tail(160);
+  assert.equal(partial, true);
+  assert.ok(bytes.toString('latin1').startsWith('\x1b]133;A\x07$ ls'), 'starts at the prompt');
+});
+
+test('tail ignores a prompt mark late in range', () => {
+  const rs = new RawScrollback(4096);
+  for (let i = 0; i < 50; i++) rs.push(Buffer.from(`line-${String(i).padStart(3, '0')}\n`, 'latin1'));
+  rs.push(Buffer.from('\x1b]133;A\x07$ ', 'latin1'));
+  const { bytes } = rs.tail(100);
+  const out = bytes.toString('latin1');
+  assert.ok(out.startsWith('line-'), 'starts on a whole line, not at the final prompt');
+  assert.ok(out.length > 75, 'keeps most of the tail');
+});
+
+test('tail falls back to just after a newline', () => {
+  const rs = new RawScrollback(4096);
+  for (let i = 0; i < 50; i++) rs.push(Buffer.from(`line-${String(i).padStart(3, '0')}\n`, 'latin1'));
+  const { bytes, partial } = rs.tail(30);
+  assert.equal(partial, true);
+  const out = bytes.toString('latin1');
+  assert.ok(out.length <= 30);
+  assert.ok(out.startsWith('line-'), 'starts on a whole line');
+  assert.match(out, /line-049\n$/);
+});
+
+test('tail of one huge line is the last bytes', () => {
+  const rs = new RawScrollback(4096);
+  rs.push(Buffer.from('x'.repeat(500), 'latin1'));
+  const { bytes, partial } = rs.tail(100);
+  assert.equal(bytes.length, 100);
+  assert.equal(partial, true);
+});

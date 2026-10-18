@@ -321,13 +321,19 @@ export class Window {
    * Returns a Buffer, never a string: the raw sidecar holds real bytes, and
    * handing them out as a latin1 string would let the frame encoder re-encode
    * them as UTF-8 and corrupt every non-ASCII glyph.
+   *
+   * With `tailBytes`, the raw replay is only the log's last that many bytes
+   * (see RawScrollback.tail), and `partial` says whether earlier history was
+   * left out. The serialize path is always whole.
    */
-  replayPayload(scrollbackLines: number, refreshPrefix: string): Buffer {
-    const raw = this.#raw.bytes();
-    if (platform.rawReplaySafe && raw.length > 0 && !this.#raw.onAltScreen) {
-      return Buffer.concat([Buffer.from(RESET_PREFIX, 'latin1'), raw]);
+  replayPayload(scrollbackLines: number, refreshPrefix: string, tailBytes = 0): { data: Buffer; partial: boolean } {
+    if (platform.rawReplaySafe && !this.#raw.onAltScreen) {
+      const { bytes, partial } = tailBytes > 0 ? this.#raw.tail(tailBytes) : { bytes: this.#raw.bytes(), partial: false };
+      // RESET_PREFIX resets attributes too, so a tail cut after colors were
+      // set still starts from plain text.
+      if (bytes.length > 0) return { data: Buffer.concat([Buffer.from(RESET_PREFIX, 'latin1'), bytes]), partial };
     }
-    return Buffer.from(refreshPrefix + this.serializeState(scrollbackLines, false), 'utf8');
+    return { data: Buffer.from(refreshPrefix + this.serializeState(scrollbackLines, false), 'utf8'), partial: false };
   }
 
   /** Text of the viewport plus the last `extraScrollback` history lines:

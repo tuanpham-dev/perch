@@ -150,7 +150,7 @@ export function endsAttach(event: ServerEvent): boolean {
 
 async function attach(
   target: string,
-  opts: { pinned: boolean; cols: number; rows: number; colors?: ViewerColors },
+  opts: { pinned: boolean; cols: number; rows: number; colors?: ViewerColors; tail?: boolean },
   handlers: AttachHandlers,
 ): Promise<AttachHandle> {
   const conn = await connect();
@@ -162,7 +162,7 @@ async function attach(
   };
   conn.onOutput = (data) => handlers.output(data);
   conn.onEvent = (event) => {
-    if (event.event === "replayed") handlers.replayed();
+    if (event.event === "replayed") handlers.replayed(event.partial === true);
     else if (event.event === "window-switch") handlers.windowSwitched(event.index);
     else if (event.event === "resize") handlers.resized(event.cols, event.rows);
     else if (endsAttach(event)) close(event.event);
@@ -170,12 +170,12 @@ async function attach(
   conn.onClose = () => close("daemon-closed");
   try {
     if (opts.pinned) {
-      await conn.request({ kind: "window.attach", target, cols: opts.cols, rows: opts.rows, colors: opts.colors });
+      await conn.request({ kind: "window.attach", target, cols: opts.cols, rows: opts.rows, colors: opts.colors, tail: opts.tail });
     } else {
       // A session attach names the session; "@id" and "sess:2" forms resolve
       // to their session through a listing.
       const session = target.startsWith("@") || target.includes(":") ? await sessionOf(target) : target;
-      await conn.request({ kind: "session.attach", session, cols: opts.cols, rows: opts.rows, colors: opts.colors });
+      await conn.request({ kind: "session.attach", session, cols: opts.cols, rows: opts.rows, colors: opts.colors, tail: opts.tail });
     }
   } catch (err) {
     closed = true;
@@ -186,6 +186,7 @@ async function attach(
     write: (data) => conn.sendInput(typeof data === "string" ? Buffer.from(data, "utf8") : data),
     resize: (cols, rows) => void conn.request({ kind: "resize", cols, rows }).catch(() => {}),
     activate: () => void conn.request({ kind: "activate" }).catch(() => {}),
+    loadFullHistory: () => void conn.request({ kind: "history.full" }).catch(() => {}),
     close: () => {
       closed = true;
       conn.close();

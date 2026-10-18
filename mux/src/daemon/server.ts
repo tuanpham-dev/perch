@@ -38,6 +38,8 @@ type Conn = {
   sink: OutputSink;
   /** Receives bell and sessions-changed events (see events.subscribe). */
   listening: boolean;
+  /** The viewer asked for recent history first (see TAIL_REPLAY_BYTES). */
+  tail: boolean;
 };
 
 const DEFAULT_COLS = 80;
@@ -45,6 +47,9 @@ const DEFAULT_ROWS = 24;
 // Reset attributes, leave any alt screen, show cursor, clear screen and client
 // scrollback — the serialized replay that follows assumes a blank terminal.
 const REFRESH_PREFIX = '\x1b[0m\x1b[?1049l\x1b[?25h\x1b[H\x1b[2J\x1b[3J';
+// How much of the raw log a tail-first viewer gets on attach; it asks for the
+// rest (history.full) only when it scrolls up to it.
+const TAIL_REPLAY_BYTES = 64 * 1024;
 
 function defaultWindowName(command?: string): string {
   if (!command) return 'shell';
@@ -116,6 +121,7 @@ export class DaemonServer {
       lastActiveAt: 0,
       colors: null,
       listening: false,
+      tail: false,
       sink: { writeOutput: (data) => writeFrame(socket, FRAME_OUTPUT, data) },
     };
     socket.on('data', (chunk: Buffer) => {
@@ -239,6 +245,7 @@ export class DaemonServer {
         conn.cols = req.cols;
         conn.rows = req.rows;
         conn.colors = req.colors ?? null;
+        conn.tail = req.tail === true;
         conn.lastActiveAt = Date.now(); // a fresh attach is the active view
         let set = this.#attached.get(session.name);
         if (!set) { set = new Set(); this.#attached.set(session.name, set); }
@@ -262,6 +269,7 @@ export class DaemonServer {
         conn.cols = req.cols;
         conn.rows = req.rows;
         conn.colors = req.colors ?? null;
+        conn.tail = req.tail === true;
         conn.lastActiveAt = Date.now(); // a fresh attach is the active view
         let set = this.#attached.get(session.name);
         if (!set) { set = new Set(); this.#attached.set(session.name, set); }
@@ -274,6 +282,18 @@ export class DaemonServer {
           window.subscribe(conn.sink);
         });
         return { session: session.name, index, name: window.displayName(), windowId: window.id };
+      }
+      case 'history.full': {
+        if (!conn.attachedSession) return {};
+        const session = this.store.sessions.get(conn.attachedSession);
+        if (!session || session.windows.length === 0) return {};
+        const window = conn.pinnedWindowId
+          ? session.windows.find((w) => w.id === conn.pinnedWindowId)
+          : this.store.currentWindow(session);
+        // Written in one go, so no live output lands inside it; the reset at
+        // its start clears the tail it replaces.
+        if (window && !window.exited) this.#sendRefresh(conn, window, true);
+        return {};
       }
       case 'session.detach': {
         this.#detachConn(conn);
@@ -665,14 +685,17 @@ export class DaemonServer {
     return null;
   }
 
-  #sendRefresh(conn: Conn, window: Window): void {
+  #sendRefresh(conn: Conn, window: Window, full = false): void {
     // replayPayload prefers a byte-exact raw replay (preserving OSC 8 links and
     // OSC 133 marks) and falls back to the serialize path (with REFRESH_PREFIX)
-    // on the alt screen or when the sidecar is empty.
-    conn.socket.write(encodeFrame(FRAME_OUTPUT, window.replayPayload(this.config.persistScrollbackLines, REFRESH_PREFIX)));
+    // on the alt screen or when the sidecar is empty. A tail-first viewer gets
+    // only the log's end until it asks for the rest.
+    const tailBytes = conn.tail && !full ? TAIL_REPLAY_BYTES : 0;
+    const { data, partial } = window.replayPayload(this.config.persistScrollbackLines, REFRESH_PREFIX, tailBytes);
+    conn.socket.write(encodeFrame(FRAME_OUTPUT, data));
     // Ordered after the payload on the same socket, so a viewer can tell
     // exactly where replayed history ends and live output begins.
-    conn.socket.write(encodeControl({ event: 'replayed', session: conn.attachedSession ?? '' } satisfies ServerEvent));
+    conn.socket.write(encodeControl({ event: 'replayed', session: conn.attachedSession ?? '', ...(partial ? { partial } : {}) } satisfies ServerEvent));
   }
 
   /** A session or window was created, removed, renamed or reselected. */

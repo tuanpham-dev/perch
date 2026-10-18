@@ -19,6 +19,8 @@
 //      alt-screen state by scanning for the DEC private mode set/reset codes.
 
 const NL = 0x0a;
+// A shell integration's prompt-start mark: a tail cut here begins at a prompt.
+const PROMPT_MARK = Buffer.from('\x1b]133;A', 'latin1');
 
 // DEC private modes that switch to/from the alternate screen buffer. We match
 // the full CSI sequences as byte patterns in the stream.
@@ -60,6 +62,26 @@ export class RawScrollback {
       this.#length = this.#joined.length;
     }
     return this.#joined;
+  }
+
+  /**
+   * At most the last `maxBytes` of the log, for a viewer that wants recent
+   * history first. The cut lands where the parser is in ground state: at a
+   * shell prompt mark (OSC 133;A) in the window's first quarter, where a
+   * shell has also reset whatever its last command left behind; else just
+   * after the first newline; else (one huge line) at the window's start. Only
+   * the first quarter, so a long command's output with its only prompt at the
+   * end still yields most of a tail. `partial` says whether anything earlier
+   * was left out.
+   */
+  tail(maxBytes: number): { bytes: Buffer; partial: boolean } {
+    const all = this.bytes();
+    if (all.length <= maxBytes) return { bytes: all, partial: false };
+    const window = all.subarray(all.length - maxBytes);
+    const prompt = window.subarray(0, Math.ceil(window.length / 4) + PROMPT_MARK.length).indexOf(PROMPT_MARK);
+    if (prompt !== -1) return { bytes: window.subarray(prompt), partial: true };
+    const nl = window.indexOf(NL);
+    return { bytes: nl === -1 ? window : window.subarray(nl + 1), partial: true };
   }
 
   /** Append a PTY output chunk, updating alt-screen state and trimming to cap. */

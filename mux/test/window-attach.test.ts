@@ -39,6 +39,7 @@ class Client {
   #sock;
   #reader = new FrameReader();
   output = '';
+  events: { event: string; partial?: boolean }[] = [];
   ended = false;
   #id = 1;
   constructor(path: string) { this.#sock = connect(path); this.#sock.once('close', () => { this.ended = true; }); }
@@ -50,12 +51,16 @@ class Client {
     this.#sock.on('data', (chunk: Buffer) => {
       for (const f of this.#reader.push(chunk)) {
         if (f.type === FRAME_OUTPUT) this.output += f.payload.toString('utf8');
+        else if (f.type === FRAME_CONTROL) {
+          const msg = JSON.parse(f.payload.toString('utf8'));
+          if (typeof msg.event === 'string') this.events.push(msg);
+        }
       }
     });
   }
   request(req: object): void { this.#sock.write(encodeControl({ id: this.#id++, ...req })); }
   attachSession(session: string): void { this.#listen(); this.request({ kind: 'session.attach', session, cols: 80, rows: 24 }); }
-  attachWindow(target: string): void { this.#listen(); this.request({ kind: 'window.attach', target, cols: 80, rows: 24 }); }
+  attachWindow(target: string, tail = false): void { this.#listen(); this.request({ kind: 'window.attach', target, cols: 80, rows: 24, tail }); }
   type(data: string): void { this.#sock.write(encodeFrame(FRAME_INPUT, Buffer.from(data, 'utf8'))); }
   close(): void { this.#sock.destroy(); }
 }
@@ -83,6 +88,38 @@ test('window.attach pins a connection to one window; each sees only its own outp
     assert.doesNotMatch(b.output, /MARKER_ALPHA_0/, 'window-1 client does NOT see window-0 output');
 
     a.close(); b.close();
+  } finally {
+    killDaemons(env);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a tail attach replays only recent history until history.full', async () => {
+  const { env, dir } = makeEnv();
+  try {
+    sp(env, 'new', 'tailtest');
+    await sleep(500);
+    const path = socketPathOf(env);
+    const w = new Client(path); await w.ready(); w.attachWindow('tailtest:0');
+    await sleep(300);
+    // About 190 KB of output: well past the 64 KB tail.
+    w.type('seq -f "row-%06g" 1 20000; echo SEQ_DONE\n');
+    for (let i = 0; i < 50 && !/SEQ_DONE\r?\n/.test(w.output); i++) await sleep(100);
+    w.close();
+
+    const t = new Client(path); await t.ready(); t.attachWindow('tailtest:0', true);
+    await sleep(500);
+    assert.ok(t.output.length <= 65 * 1024, `tail replay is at most 64 KB (got ${t.output.length})`);
+    assert.match(t.output, /row-020000/, 'tail has the newest lines');
+    assert.doesNotMatch(t.output, /row-000001\r?\n/, 'tail leaves out the oldest lines');
+    assert.deepEqual(t.events.filter((e) => e.event === 'replayed').map((e) => e.partial), [true], 'replayed says partial');
+
+    t.request({ kind: 'history.full' });
+    await sleep(500);
+    assert.match(t.output, /row-0(0[0-9]{4})\r?\n[\s\S]*row-020000/, 'full replay follows with older lines');
+    assert.equal(t.output.length > 128 * 1024, true, 'full replay is the whole log');
+    assert.deepEqual(t.events.filter((e) => e.event === 'replayed').map((e) => e.partial), [true, undefined], 'second replay is complete');
+    t.close();
   } finally {
     killDaemons(env);
     rmSync(dir, { recursive: true, force: true });

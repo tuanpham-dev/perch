@@ -548,6 +548,36 @@ export default function TerminalView({
       // they land in the shell as typed junk (and garble a resume command).
       let replayDone = false;
       const heldInput: string[] = [];
+      // Each attach replays only recent history (?tail=1); the "replayed"
+      // frame says whether earlier history was left out. The rest is asked
+      // for once, when the view scrolls up to the top, a search starts, or a
+      // prompt jump runs out of prompts. While it loads, `fromBottom` keeps
+      // the view on the same lines and `afterHistory` waits to run.
+      let historyPartial = false;
+      let historyLoading: { fromBottom: number; afterHistory: (() => void)[] } | null = null;
+      const loadFullHistory = (then?: () => void) => {
+        if (!historyPartial || ws.readyState !== WebSocket.OPEN) {
+          then?.();
+          return;
+        }
+        if (!historyLoading) {
+          const { viewportY, length } = engine.getScrollState();
+          historyLoading = { fromBottom: length - viewportY, afterHistory: [] };
+          // The full replay can hold capability queries too: input waits for
+          // it exactly as it does for the attach replay.
+          replayDone = false;
+          ws.send(JSON.stringify({ type: "history" }));
+        }
+        if (then) historyLoading.afterHistory.push(then);
+      };
+      const historyLoaded = () => {
+        const loading = historyLoading;
+        historyLoading = null;
+        if (!loading) return;
+        const { length } = engine.getScrollState();
+        engine.scrollToLine(Math.max(0, length - loading.fromBottom));
+        for (const then of loading.afterHistory) then();
+      };
       const sendInput = (data: string) => {
         if (ws.readyState !== WebSocket.OPEN) return;
         if (!replayDone) {
@@ -971,7 +1001,12 @@ export default function TerminalView({
           renderThumb();
         });
       };
-      const unsubScrollChange = engine.onScrollChange(scheduleThumb);
+      // Reaching the top of a tail-only buffer fetches the rest of it.
+      const unsubScrollChange = engine.onScrollChange(() => {
+        scheduleThumb();
+        if (!historyPartial || historyLoading || !replayDone || !engine.isScrolledUp()) return;
+        if (engine.getScrollState().viewportY <= engine.getScrollState().rows) loadFullHistory();
+      });
       scrollQueryRef.current = scheduleThumb;
 
       revealRef.current = () => {
@@ -1014,6 +1049,8 @@ export default function TerminalView({
         // those — answers that must not reach the shell as typed keys, and
         // real keystrokes that must not interleave with them.
         replayDone = false;
+        historyPartial = false;
+        historyLoading = null;
         // Send the real grid size along so the attach starts at it (see
         // wsAttach.ts): a fresh attach at the default 80x24 would size the
         // window to 80x24 until the post-open resize message lands,
@@ -1032,7 +1069,7 @@ export default function TerminalView({
           (theme.foreground ? `&fg=${encodeURIComponent(theme.foreground)}` : "") +
           (theme.background ? `&bg=${encodeURIComponent(theme.background)}` : "");
         ws = new WebSocket(
-          `${proto}://${location.host}/ws/attach?session=${encodeURIComponent(attachNameRef.current)}${size}${colors}`,
+          `${proto}://${location.host}/ws/attach?session=${encodeURIComponent(attachNameRef.current)}&tail=1${size}${colors}`,
         );
         // Terminal output rides binary WS frames straight from the PTY (see
         // wsAttach.ts) — everything else stays JSON text. Set per-socket
@@ -1072,9 +1109,12 @@ export default function TerminalView({
             engine.setWindowsPty?.(Number.isFinite(msg.windowsBuild) ? msg.windowsBuild : 0);
           } else if (msg.type === "replayed") {
             const socket = ws;
+            const partial = msg.partial === true;
             const release = () => {
               if (ws !== socket || replayDone) return;
               replayDone = true;
+              historyPartial = partial;
+              historyLoaded();
               for (const data of heldInput.splice(0)) ws.send(JSON.stringify({ type: "input", data }));
             };
             if (engine.whenWritten) engine.whenWritten(release);
@@ -1194,6 +1234,11 @@ export default function TerminalView({
         const read = engine.readBufferLine;
         const select = engine.selectBufferRange;
         if (!read || !select) return;
+        if (action === "start" && historyPartial) {
+          // Search what the whole history holds, not just the tail.
+          loadFullHistory(() => sendSearchRef.current?.(action, query));
+          return;
+        }
         if (action === "start") {
           const { length } = engine.getScrollState();
           const lines: string[] = [];
@@ -1251,6 +1296,8 @@ export default function TerminalView({
         if (!lines) return;
         const target = jumpTarget(lines, engine.getScrollState().viewportY, direction);
         if (target !== null) engine.scrollToLine(target);
+        // Out of prompts above: the earlier ones are in history not loaded yet.
+        else if (direction === -1 && historyPartial) loadFullHistory(() => jumpToPrompt(-1));
       };
 
       // ghostty-web's custom key handler semantics are INVERTED from

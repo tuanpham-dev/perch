@@ -75,8 +75,9 @@ export type MuxEvent =
 export interface AttachHandlers {
   output(data: Buffer): void;
   // History replay is done; input sent before this reaches a shell that
-  // never asked for it.
-  replayed(): void;
+  // never asked for it. `partial`: the replay was a tail (attach `tail`) and
+  // earlier history exists, which loadFullHistory replays.
+  replayed(partial?: boolean): void;
   // A session attach followed its session to another window.
   windowSwitched(index: number): void;
   resized(cols: number, rows: number): void;
@@ -96,6 +97,9 @@ export interface AttachHandle {
   resize(cols: number, rows: number): void;
   // This viewer became the one the user is looking at.
   activate(): void;
+  // Replays the window again with its whole history, after a tail attach.
+  // Optional: an engine without it always replays everything.
+  loadFullHistory?(): void;
   close(): void;
 }
 
@@ -124,7 +128,8 @@ export interface Multiplexer {
   // session, following its current window.
   attach(
     target: string,
-    opts: { pinned: boolean; cols: number; rows: number; colors?: ViewerColors },
+    // `tail`: replay only recent history first (see AttachHandlers.replayed).
+    opts: { pinned: boolean; cols: number; rows: number; colors?: ViewerColors; tail?: boolean },
     handlers: AttachHandlers,
   ): Promise<AttachHandle>;
   // Daemon-wide events. Returns an unsubscribe.

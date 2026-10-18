@@ -9,8 +9,12 @@ export type Request =
   | { id: number; kind: 'session.list' }
   | { id: number; kind: 'session.kill'; session: string }
   | { id: number; kind: 'session.rename'; session: string; to: string }
-  | { id: number; kind: 'session.attach'; session: string; cols: number; rows: number; colors?: ViewerColors }
-  | { id: number; kind: 'window.attach'; target: string; cols: number; rows: number; colors?: ViewerColors }
+  // `tail`: replay only recent history first; the viewer asks for the rest
+  // with history.full (the replayed event says whether anything was left out).
+  | { id: number; kind: 'session.attach'; session: string; cols: number; rows: number; colors?: ViewerColors; tail?: boolean }
+  | { id: number; kind: 'window.attach'; target: string; cols: number; rows: number; colors?: ViewerColors; tail?: boolean }
+  // Replay the attached window again with its whole history.
+  | { id: number; kind: 'history.full' }
   | { id: number; kind: 'session.detach' }
   /** This connection became the user's active view — it drives the window size. */
   | { id: number; kind: 'activate' }
@@ -56,7 +60,8 @@ export type ServerEvent =
   // replayed history ends, because replaying raw bytes replays any capability
   // QUERIES the history contains, and a terminal answers those — the answers
   // would arrive at the shell as typed input.
-  | { event: 'replayed'; session: string }
+  // `partial`: the replay was a tail and earlier history exists.
+  | { event: 'replayed'; session: string; partial?: boolean }
   // To events.subscribe listeners only.
   | { event: 'bell'; session: string; windowId: string }
   | { event: 'sessions-changed' };
