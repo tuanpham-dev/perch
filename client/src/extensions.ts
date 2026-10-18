@@ -9,7 +9,16 @@
 // result (see makeContext) — that's read-only exposure of iconThemes.ts's
 // own resolver, not extension involvement in loading/activating themes.
 import * as ReactNS from "react";
-import { extensionApiBase, extensionFileUrl, fetchAgentWindows, fetchExtensions, type AgentWindowDto } from "./api";
+import {
+  deleteDraft,
+  extensionApiBase,
+  extensionFileUrl,
+  fetchAgentWindows,
+  fetchExtensions,
+  getDraft,
+  putDraft,
+  type AgentWindowDto,
+} from "./api";
 import type { CreateTerminalEngine } from "./engines/types";
 import { loadCodiconItems } from "./lib/codiconCatalog";
 import type { PickItem } from "./lib/pickFilter";
@@ -695,6 +704,19 @@ export interface ExtensionContext {
     // and the value persists.
     set(key: string, value: unknown): void;
     onDidChange(cb: () => void): () => void;
+  };
+  // Server-side storage for this extension's unsaved edits (a dirty editor
+  // buffer, a CSV grid), keyed by any string — usually the file path. It
+  // survives a reload, a crash and an extension update, and is shared by
+  // every device signed in to this server, so a tab reopened anywhere can
+  // restore what the user hadn't saved. `value` is any JSON; get() resolves
+  // null when nothing is stored. `keepalive` lets a write issued from
+  // pagehide outlive the page (small bodies only — see putDraft). Scoped to
+  // this extension; cleared when it is uninstalled.
+  drafts: {
+    get(key: string): Promise<{ value: unknown; savedAt: number } | null>;
+    set(key: string, value: unknown, opts?: { keepalive?: boolean }): Promise<void>;
+    delete(key: string, opts?: { keepalive?: boolean }): Promise<void>;
   };
 }
 
@@ -2144,6 +2166,11 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         listeners.add(cb);
         return () => listeners.delete(cb);
       },
+    },
+    drafts: {
+      get: (key) => getDraft(ext.id, key),
+      set: (key, value, opts) => putDraft(ext.id, key, value, opts),
+      delete: (key, opts) => deleteDraft(ext.id, key, opts),
     },
     assetUrl(relPath) {
       return extensionFileUrl(ext.id, relPath);

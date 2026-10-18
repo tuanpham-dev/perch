@@ -14,6 +14,7 @@ import "./style.css";
 import { fetchFileText, saveFileText } from "../../_shared/fileApi";
 import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
+import { createDraftClient, hashText, type DraftClient, type DraftsApi } from "../../_shared/drafts";
 import type { MenuItem } from "../../_shared/types";
 import Icon from "../../_shared/Icon";
 import { calcColWidths, EditableCell, EditableHeaderCell, escapeRegex, getBounds, inBounds } from "./Grid";
@@ -33,6 +34,36 @@ let extSettings: SettingsApi | null = null;
 function readClickAction(): "edit" | "preview" {
   return extSettings?.get("csv.clickAction") === "preview" ? "preview" : "edit";
 }
+
+// Unsaved grid edits, backed up server-side (ctx.drafts) while the grid is
+// dirty and restored the next time the file opens — after a reload, a crash,
+// an extension update, or on another device. Null on a host without drafts.
+let drafts: DraftClient | null = null;
+// Set by deactivate(), which the host calls before it unmounts the viewers:
+// that unmount is an update or a disable, so it must keep the backup rather
+// than drop it the way a closed tab does.
+let deactivating = false;
+
+interface CsvDraft {
+  // The grid serialized exactly as Save would write it.
+  text: string;
+  hasHeader: boolean;
+  delimiter: string;
+  // The delimiter `text` was written with — "auto" can't re-detect reliably
+  // on, say, a one-column grid.
+  activeDelimiter: string;
+  // hashText() of the on-disk text the edits were made against.
+  base: string;
+}
+
+function asCsvDraft(value: unknown): CsvDraft | null {
+  const d = value as Partial<CsvDraft> | null;
+  if (!d || typeof d.text !== "string" || typeof d.base !== "string") return null;
+  if (typeof d.hasHeader !== "boolean" || typeof d.delimiter !== "string" || typeof d.activeDelimiter !== "string") return null;
+  return d as CsvDraft;
+}
+
+const DRAFT_DELAY_MS = 500;
 
 interface Props {
   filePath: string;
@@ -125,9 +156,36 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
   const [formulaBarDraft, setFormulaBarDraft] = useState("");
   const formulaRef = useRef<HTMLTextAreaElement>(null);
 
+  // ── Drafts (unsaved-edit backup) ───────────────────────────────────────
+
+  // The on-disk text the grid was last loaded from or saved as: the baseline
+  // a draft's `base` fingerprints.
+  const diskTextRef = useRef<string | null>(null);
+  // A draft read alongside the file, applied once that file has parsed.
+  const pendingRestoreRef = useRef<CsvDraft | null>(null);
+  // Whether a draft this view wrote or restored may be on the server. Only
+  // then does going clean or closing delete it — a clean tab of the same file
+  // on another device must not wipe edits still pending over there.
+  const hasDraftRef = useRef(false);
+  // Off until the first load settles, so the backup effect can't act (and
+  // delete a draft) before it has been read.
+  const [draftsReady, setDraftsReady] = useState(false);
+  const [restored, setRestored] = useState<{ diskChanged: boolean } | null>(null);
+
   useEffect(() => {
-    fetchFileText(filePath)
-      .then(setContent)
+    Promise.all([fetchFileText(filePath), drafts?.read(filePath) ?? null])
+      .then(([text, stored]) => {
+        diskTextRef.current = text;
+        const draft = asCsvDraft(stored);
+        if (draft) {
+          // The grid's parse options come back with it; the content effect
+          // below runs once with all three updates batched.
+          pendingRestoreRef.current = draft;
+          setHasHeader(draft.hasHeader);
+          setDelimiter(draft.delimiter);
+        }
+        setContent(text);
+      })
       .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
@@ -184,9 +242,22 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
     applyParsed(result.data as string[][], result.meta.delimiter, errs.length ? errs[0].message : null);
   }
 
+  // Replaces the freshly parsed disk content with a backed-up draft of it.
+  function restoreDraft(draft: CsvDraft, diskText: string) {
+    const result = Papa.parse<string[]>(draft.text, { delimiter: draft.activeDelimiter, skipEmptyLines: true, header: false });
+    applyParsed(result.data as string[][], draft.activeDelimiter, null);
+    setDirtyState(true);
+    hasDraftRef.current = true;
+    setRestored({ diskChanged: draft.base !== hashText(diskText) });
+  }
+
   useEffect(() => {
     if (content === null) return;
     parseAndApply(content);
+    const draft = pendingRestoreRef.current;
+    pendingRestoreRef.current = null;
+    if (draft) restoreDraft(draft, content);
+    setDraftsReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, hasHeader, delimiter]);
 
@@ -201,8 +272,10 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
     setLoadError(null);
     try {
       const text = await fetchFileText(filePath);
+      diskTextRef.current = text;
       setContent(text);
       parseAndApply(text);
+      setRestored(null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -236,23 +309,32 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
   // Going clean (saved, or undone back to the loaded state) makes the
   // banner's "you have unsaved changes" claim false — drop it.
   useEffect(() => {
-    if (!dirty) setShowReloadPrompt(false);
+    if (!dirty) {
+      setShowReloadPrompt(false);
+      setRestored(null);
+    }
   }, [dirty]);
 
   // ── Save ───────────────────────────────────────────────────────────────
+
+  // The grid as Save writes it. Original row order — sort (below) is a
+  // view-only transform via sortedWithIdx, `rows` itself is never reordered
+  // by it, so this never silently rewrites the file just because a sort is
+  // active.
+  function serializeGrid(): { text: string; activeDelimiter: string } {
+    const activeDelimiter = delimiter === "auto" ? detectedDelimiterRef.current : delimiter;
+    const { newline, trailing } = lineFormatRef.current;
+    const text = Papa.unparse(hasHeader ? [headers, ...rows] : rows, { delimiter: activeDelimiter, newline }) + (trailing ? newline : "");
+    return { text, activeDelimiter };
+  }
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     setSaveError(null);
     try {
-      // Original row order — sort (below) is a view-only transform via
-      // sortedWithIdx, `rows` itself is never reordered by it, so this
-      // never silently rewrites the file just because a sort is active.
-      const activeDelimiter = delimiter === "auto" ? detectedDelimiterRef.current : delimiter;
-      const { newline, trailing } = lineFormatRef.current;
-      const csvText =
-        Papa.unparse(hasHeader ? [headers, ...rows] : rows, { delimiter: activeDelimiter, newline }) + (trailing ? newline : "");
+      const { text: csvText } = serializeGrid();
       await saveFileText(filePath, csvText);
+      diskTextRef.current = csvText;
       setDirtyState(false);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -260,6 +342,49 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
       setSaving(false);
     }
   }, [filePath, hasHeader, headers, rows, delimiter]);
+
+  // Backs the grid up on a short debounce while dirty, and drops the backup
+  // once clean (saved, reloaded, re-parsed). The latest pending flush is kept
+  // in a ref so pagehide and unmount can run it early.
+  const flushDraftRef = useRef<((opts?: { keepalive?: boolean }) => void) | null>(null);
+  useEffect(() => {
+    const client = drafts;
+    if (!draftsReady || !client) return;
+    const flush = (opts?: { keepalive?: boolean }) => {
+      flushDraftRef.current = null;
+      if (dirty) {
+        const { text, activeDelimiter } = serializeGrid();
+        const draft: CsvDraft = { text, hasHeader, delimiter, activeDelimiter, base: hashText(diskTextRef.current ?? "") };
+        client.write(filePath, draft, opts);
+        hasDraftRef.current = true;
+      } else if (hasDraftRef.current) {
+        client.clear(filePath, opts);
+        hasDraftRef.current = false;
+      }
+    };
+    flushDraftRef.current = flush;
+    const timer = setTimeout(flush, DRAFT_DELAY_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftsReady, dirty, headers, rows, hasHeader, delimiter, filePath]);
+
+  useEffect(() => {
+    // A reload inside the debounce window would otherwise lose the last edit.
+    const onPageHide = () => flushDraftRef.current?.({ keepalive: true });
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      if (deactivating) {
+        // An update or a disable: keep the edits for the next activation.
+        flushDraftRef.current?.();
+      } else if (hasDraftRef.current) {
+        // The host keeps open tabs mounted (split moves included), so this
+        // is a close, past its unsaved-changes confirm: the edits are gone.
+        drafts?.clear(filePath);
+        hasDraftRef.current = false;
+      }
+    };
+  }, [filePath]);
 
   // ── Sort (view-only) ───────────────────────────────────────────────────
 
@@ -1020,6 +1145,22 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
 
           {parseWarning && <div className="csv-warning">{parseWarning}</div>}
 
+          {restored && (
+            <div className="csv-reload-banner">
+              <span className="csv-reload-banner-text">
+                {restored.diskChanged
+                  ? "Restored unsaved changes. The file has changed on disk since - saving will overwrite that."
+                  : "Restored unsaved changes from your last session."}
+              </span>
+              <button className="csv-text-button" onClick={() => void reloadFromDisk()}>
+                Discard
+              </button>
+              <button className="icon-button" title="Keep my changes" onClick={() => setRestored(null)}>
+                <Icon name="close" />
+              </button>
+            </div>
+          )}
+
           {showReloadPrompt && (
             <div className="csv-reload-banner">
               <span className="csv-reload-banner-text">
@@ -1214,8 +1355,11 @@ export function activate(ctx: {
   }) => void;
   assetUrl: (relPath: string) => string;
   settings: SettingsApi;
+  drafts?: DraftsApi;
 }) {
   extSettings = ctx.settings;
+  drafts = ctx.drafts ? createDraftClient(ctx.drafts) : null;
+  deactivating = false;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   ctx.registerFileViewer({
     id: "csvViewer",
@@ -1230,6 +1374,7 @@ export function activate(ctx: {
 }
 
 export function deactivate() {
+  deactivating = true;
   removeStylesheet?.();
   removeStylesheet = null;
   extSettings = null;

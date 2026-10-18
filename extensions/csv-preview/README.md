@@ -4,7 +4,7 @@ An editable spreadsheet-style grid for `.csv`/`.tsv` files, opened as a preview 
 
 ## Contributes
 
-- **File viewer:** `.csv`/`.tsv` files open as an editable grid from the FILES tree's hover icon or "Preview" context-menu item (powered by [PapaParse](https://www.papaparse.com/)) — add/remove rows and columns, edit cells inline, and save back to the file.
+- **File viewer:** `.csv`/`.tsv` files open as an editable grid from the FILES tree's hover icon or "Preview" context-menu item (powered by [PapaParse](https://www.papaparse.com/)) — add/remove rows and columns, edit cells inline, and save back to the file. Unsaved grid edits are backed up to the server, so a page reload or a crash doesn't lose them: reopening the file, on any device, restores them with a **Discard** option.
 
 ## Settings
 

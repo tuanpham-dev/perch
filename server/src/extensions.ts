@@ -61,6 +61,7 @@ import {
   writeExtensionSecret,
 } from "./settingsStore.js";
 import { configDir } from "./configDir.js";
+import { draftStore } from "./drafts.js";
 import { extractZip } from "./zip.js";
 import { registerEngine, type EngineRegistration } from "./multiplexer.js";
 
@@ -671,6 +672,8 @@ export async function uninstallExtension(id: string): Promise<void> {
     // un-undoable. Here the folder is actually gone, and leaving a live
     // credential behind for it has no upside.
     await clearExtensionSecrets(id);
+    // Same for its unsaved drafts: nothing is left to restore them into.
+    await draftStore.clearExtension(id);
   }
   await writeState(state);
 }

@@ -7,6 +7,7 @@ import path from "node:path";
 import express from "express";
 import { WebSocketServer } from "ws";
 import { agentHookBodyParser, ensureAgentHookShim } from "./agentHooks.js";
+import { draftsRouter } from "./drafts.js";
 import { resumeRestoredAgents } from "./agentResume.js";
 import { applyTerminalSettings } from "./terminalSettings.js";
 import { api } from "./api.js";
@@ -217,6 +218,9 @@ const tunnelCli = path.resolve(import.meta.dirname, "../../cli/tunnel.mjs");
 app.get("/tunnel.mjs", (_req, res) => {
   res.type("text/javascript").sendFile(tunnelCli);
 });
+// Drafts (unsaved editor edits, server/src/drafts.ts) bring their own
+// larger-limit JSON parser, for the same reason.
+app.use("/api/drafts", draftsRouter);
 
 // Which Perch this is, for the desktop app's launcher and its compatibility
 // check (plans/app-versioning.md R2). Public like /tunnel.mjs - outside /api,

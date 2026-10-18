@@ -43,6 +43,7 @@ to read).
   - [`ctx.serverFetch` / `ctx.assetUrl`](#ctxserverfetch--ctxasseturl)
   - [`ctx.serverEventSource`](#ctxservereventsource)
   - [`ctx.settings`](#ctxsettings)
+  - [`ctx.drafts`](#ctxdrafts)
 - [Server API](#server-api)
 - [Agent hooks](#agent-hooks)
 - [Sharing the host runtime](#sharing-the-host-runtime)
@@ -1684,6 +1685,47 @@ another device; it passes no arguments — re-`get` whatever you care
 about). Only write keys you declared.
 
 `ctx.React` is the host's own React instance, for no-build extensions.
+
+### `ctx.drafts`
+
+```ts
+ctx.drafts.get(key: string): Promise<{ value: unknown; savedAt: number } | null>
+ctx.drafts.set(key: string, value: unknown, opts?: { keepalive?: boolean }): Promise<void>
+ctx.drafts.delete(key: string, opts?: { keepalive?: boolean }): Promise<void>
+```
+
+Server-side storage for a viewer's **unsaved edits**: the "hot exit" store.
+Back a dirty buffer up here, and a page reload, a crashed browser or an update
+of your own extension no longer loses it. Because the store lives on the server,
+a tab reopened on another device restores it too. Keys are any string
+(normally the file path) and values any JSON. Each draft is one file under
+`~/.config/perch/drafts/<extensionId>/`, scoped to your extension and removed
+when it is uninstalled. Bodies up to 16 MB are accepted.
+
+The pattern the bundled viewers follow (`csv-preview`; `text-editor` and
+`prompts` in the extensions registry):
+
+- **Restore on load.** Read the draft alongside the file. If one exists, show
+  its content, mark the tab dirty with `setDirty(true)`, and offer to discard it.
+  Store a fingerprint of the on-disk text the edits started from, so the
+  restore can warn when the file has changed since.
+- **Write on a short debounce while dirty, delete once clean.** Issue requests
+  for one key in order (`extensions/_shared/drafts.ts` chains them). Otherwise
+  a slow write can land after the delete that followed a save.
+- **Flush on `pagehide`** with `keepalive: true`, so the last keystrokes before
+  a reload are kept. Browsers cap keepalive bodies at 64 KB; a bigger draft is
+  sent as a normal request, which a closing page may cut off. That is why the
+  debounce is the primary path.
+- **Delete on unmount, but not on deactivate.** The host keeps every open tab
+  mounted, moves between split groups included, so a viewer unmounting means
+  its tab was closed after the host's unsaved-changes confirm. The exception is
+  your own `deactivate()`, which the host calls just before unmounting your
+  viewers: keep the draft then.
+- **Delete only drafts this view wrote or restored.** A clean tab of the same
+  file on another device must not wipe edits still pending there.
+
+Absent on older hosts. Feature-detect it with `ctx.drafts?.` and treat a
+missing store as "edits live as long as the tab".
 
 ---
 

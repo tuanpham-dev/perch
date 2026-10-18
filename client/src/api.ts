@@ -954,6 +954,43 @@ export function extensionApiBase(id: string): string {
   return `/api/ext/${encodeURIComponent(id)}`;
 }
 
+// ---- Drafts (server/src/drafts.ts) ----
+// An extension's unsaved edits, stored server-side by (extension, key) so
+// they survive a reload and follow the user across devices. Exposed to
+// extensions as ctx.drafts.
+
+export interface StoredDraft {
+  value: unknown;
+  savedAt: number;
+}
+
+const draftUrl = (extId: string, key?: string) =>
+  `/api/drafts/${encodeURIComponent(extId)}${key === undefined ? "" : `?key=${encodeURIComponent(key)}`}`;
+
+export async function getDraft(extId: string, key: string): Promise<StoredDraft | null> {
+  return (await request<StoredDraft | null>(draftUrl(extId, key), { cache: "no-store" })) ?? null;
+}
+
+// Browsers cap a keepalive request's body at 64KB (summed over every one in
+// flight); past that the fetch rejects outright, so a big draft goes as a
+// plain request — which a closing page may cut off, the reason editors also
+// back up on a short debounce rather than only at unload.
+const KEEPALIVE_MAX_BODY = 60 * 1024;
+
+export async function putDraft(extId: string, key: string, value: unknown, opts: { keepalive?: boolean } = {}): Promise<void> {
+  const body = JSON.stringify({ key, value });
+  await request(draftUrl(extId), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: opts.keepalive === true && body.length <= KEEPALIVE_MAX_BODY,
+  });
+}
+
+export async function deleteDraft(extId: string, key: string, opts: { keepalive?: boolean } = {}): Promise<void> {
+  await request(draftUrl(extId, key), { method: "DELETE", keepalive: opts.keepalive === true });
+}
+
 // Shell integration status (plans/warp-features.md) — the Settings card's
 // "is it sourced anywhere" signal plus the canonical rc snippet.
 export function fetchShellIntegrationStatus(): Promise<{
