@@ -3,6 +3,7 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
 import type { Duplex } from "node:stream";
 import zlib from "node:zlib";
+import { portFromProxyHost } from "./security.js";
 import { readSettingsDoc } from "./settingsStore.js";
 import { type CookieStore, type SameSiteContext, webPreviewCookies } from "./webProxyCookies.js";
 import { type AllowList, BlockedAddressError, assertLiteralAllowed, guardedLookup, parseAllowList } from "./webProxyGuard.js";
@@ -215,6 +216,10 @@ const APP_PATH_RE = /^\/(api|ws|proxy|absproxy|web)(\/|$)/;
 // Recognized by what only such a frame sends: a frame navigation arriving
 // cross-site. The app's own pages load same-origin.
 function isStrayFrameNavigation(req: IncomingMessage): boolean {
+  // A PROXY_DOMAIN host ("<port>.<domain>") is a dev server's own origin,
+  // and its frame can be cross-site to the app (a proxy domain that isn't
+  // under the app's own): that's the dev server loading, not a preview page.
+  if (portFromProxyHost(req.headers.host) !== null) return false;
   const dest = headerValue(req.headers["sec-fetch-dest"]);
   if (dest !== "iframe" && dest !== "frame") return false;
   if (headerValue(req.headers["sec-fetch-site"]) !== "cross-site") return false;

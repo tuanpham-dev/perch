@@ -102,8 +102,15 @@ app.use((req, res, next) => {
   // another origin (the app and /proxy/<port> are same-origin), so it's
   // refused before any route or proxied dev server sees it. A tunnel in
   // front that lets preflights through unauthenticated (--allow-cors-
-  // preflight, for the web preview above) then reaches nothing else.
-  if (req.method === "OPTIONS" && req.headers["access-control-request-method"]) {
+  // preflight, for the web preview above) then reaches nothing else. The
+  // exception is a PROXY_DOMAIN host: each dev server is its own origin
+  // there, and a frontend on one port calling its API on another is a
+  // cross-origin call whose preflight the dev server answers.
+  if (
+    req.method === "OPTIONS" &&
+    req.headers["access-control-request-method"] &&
+    portFromProxyHost(req.headers.host) === null
+  ) {
     res.status(403).end();
     return;
   }

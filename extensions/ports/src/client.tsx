@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -56,6 +57,34 @@ interface ActiveContext {
 
 function readClickAction(): "app" | "browser" {
   return extSettings?.get("ports.clickAction") === "browser" ? "browser" : "app";
+}
+
+// A secondary click on a port's open action (Ctrl/Cmd+click, or the middle
+// button) opens it the other way: in Perch's own web preview tab where a
+// click opens the browser, and the reverse.
+function isSecondaryClick(e: ReactMouseEvent): boolean {
+  return e.button === 1 || e.ctrlKey || e.metaKey;
+}
+
+function openPortInApp(port: number): void {
+  openViewerTab?.("portProxy", `port:${port}`, { title: `Port ${port}` });
+}
+
+// Click and middle-click handlers for an open action whose plain click
+// opens the browser. The middle button's own autoscroll is kept from
+// starting.
+function openActionProps(openInBrowser: () => void, port: number) {
+  return {
+    onClick: (e: ReactMouseEvent) => (isSecondaryClick(e) ? openPortInApp(port) : openInBrowser()),
+    onAuxClick: (e: ReactMouseEvent) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      openPortInApp(port);
+    },
+    onMouseDown: (e: ReactMouseEvent) => {
+      if (e.button === 1) e.preventDefault();
+    },
+  };
 }
 
 function readSendAutoSubmit(): boolean {
@@ -222,7 +251,10 @@ function buildCommand(origin: string, auth: TunnelAuth, mask: boolean): string {
 // Referer fallback or a domain — see core server/src/proxy.ts).
 function proxyUrl(port: number, proxyConfig: ProxyConfig): string {
   if (proxyConfig.domain) {
-    return `${window.location.protocol}//${port}.${proxyConfig.domain}/`;
+    // The subdomains are served by this same server, so on the same port
+    // the app was reached on (none for 80/443).
+    const appPort = window.location.port ? `:${window.location.port}` : "";
+    return `${window.location.protocol}//${port}.${proxyConfig.domain}${appPort}/`;
   }
   return `${window.location.origin}/proxy/${port}/`;
 }
@@ -427,14 +459,14 @@ function PortsPanel({ actionsTarget, showMenu, confirmDialog }: PanelProps) {
     window.open(proxyUrl(port, proxyConfig), "_blank", "noopener");
   };
 
-  const openInApp = (port: number) => {
-    openViewerTab?.("portProxy", `port:${port}`, { title: `Port ${port}` });
-  };
+  const openInApp = openPortInApp;
 
-  // The row's single quick-action button follows the clickAction setting;
-  // the context menu below always offers both explicitly regardless of it.
-  const onOpenPort = (port: number) => {
-    if (readClickAction() === "browser") openInBrowser(port);
+  // The row's single quick-action button follows the clickAction setting,
+  // and a secondary click does the other one; the context menu below always
+  // offers both explicitly regardless of it.
+  const onOpenPort = (port: number, e?: ReactMouseEvent) => {
+    const browser = readClickAction() === "browser";
+    if (browser !== (!!e && isSecondaryClick(e))) openInBrowser(port);
     else openInApp(port);
   };
 
@@ -527,7 +559,7 @@ function PortsPanel({ actionsTarget, showMenu, confirmDialog }: PanelProps) {
               <button
                 className="port-item"
                 title={p.pid ? `pid ${p.pid}` : undefined}
-                onClick={() => onOpenPort(p.port)}
+                onClick={(e) => onOpenPort(p.port, e)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   nav.focusRow(portRowId(p.port));
@@ -549,9 +581,13 @@ function PortsPanel({ actionsTarget, showMenu, confirmDialog }: PanelProps) {
               <div className="port-actions">
                 <button
                   className="icon-button port-action-button"
-                  title={clickAction === "browser" ? "Open in browser" : "Open in app"}
+                  title={
+                    clickAction === "browser"
+                      ? "Open in browser (Ctrl+click: in Perch)"
+                      : "Open in app (Ctrl+click: in the browser)"
+                  }
                   tabIndex={-1}
-                  onClick={() => onOpenPort(p.port)}
+                  onClick={(e) => onOpenPort(p.port, e)}
                 >
                   <Icon name={clickAction === "browser" ? "link-external" : "open-preview"} />
                 </button>
@@ -785,10 +821,10 @@ function PortsTableView({ context }: PanelViewProps) {
                     className="ports-table-link"
                     title={
                       forwarded.has(p.port)
-                        ? `Forwarded - open http://localhost:${p.port}/`
-                        : `Open port ${p.port}`
+                        ? `Forwarded - open http://localhost:${p.port}/ (Ctrl+click: in Perch)`
+                        : `Open port ${p.port} (Ctrl+click: in Perch)`
                     }
-                    onClick={() => openPort(p.port)}
+                    {...openActionProps(() => openPort(p.port), p.port)}
                   >
                     {forwarded.has(p.port) && <Icon name="plug" className="port-forwarded-dot" />}
                     {p.port}
@@ -824,10 +860,17 @@ function PortsTableView({ context }: PanelViewProps) {
                   <div className="ports-table-action-row">
                   <button
                     className="icon-button port-action-button"
-                    title={forwarded.has(p.port) ? "Open at localhost" : "Open"}
-                    onClick={() => openPort(p.port)}
+                    title={`${forwarded.has(p.port) ? "Open at localhost" : "Open"} (Ctrl+click: in Perch)`}
+                    {...openActionProps(() => openPort(p.port), p.port)}
                   >
                     <Icon name="link-external" />
+                  </button>
+                  <button
+                    className="icon-button port-action-button"
+                    title="Open in Perch"
+                    onClick={() => openPortInApp(p.port)}
+                  >
+                    <Icon name="open-preview" />
                   </button>
                   <button
                     className="icon-button port-action-button"
@@ -1016,25 +1059,33 @@ function PortsStatusPopover({ context }: StatusItemProps) {
               className="port-item"
               title={
                 forwarded.has(p.port)
-                  ? `Forwarded - open http://localhost:${p.port}/`
-                  : `Open port ${p.port}`
+                  ? `Forwarded - open http://localhost:${p.port}/ (Ctrl+click: in Perch)`
+                  : `Open port ${p.port} (Ctrl+click: in Perch)`
               }
-              onClick={() => openPort(p.port)}
+              {...openActionProps(() => openPort(p.port), p.port)}
             >
               {forwarded.has(p.port) && <Icon name="plug" className="port-forwarded-dot" />}
               <span className="port-number">{p.port}</span>
               {p.process && <span className="port-process">{p.process}</span>}
               <SessionBadge port={p} />
             </button>
-            {/* The same three row actions the panel offers. */}
+            {/* The same row actions the PORTS view offers. */}
             <div className="port-actions">
               <button
                 className="icon-button port-action-button"
-                title={forwarded.has(p.port) ? "Open at localhost" : "Open"}
+                title={`${forwarded.has(p.port) ? "Open at localhost" : "Open"} (Ctrl+click: in Perch)`}
                 tabIndex={-1}
-                onClick={() => openPort(p.port)}
+                {...openActionProps(() => openPort(p.port), p.port)}
               >
                 <Icon name="link-external" />
+              </button>
+              <button
+                className="icon-button port-action-button"
+                title="Open in Perch"
+                tabIndex={-1}
+                onClick={() => openPortInApp(p.port)}
+              >
+                <Icon name="open-preview" />
               </button>
               <button
                 className="icon-button port-action-button"
@@ -1148,10 +1199,12 @@ export function activate(ctx: ExtensionContext): void {
   });
   configureBrowser({
     fetchListeningPorts: () => fetchPorts(),
-    localProxyBase: async (port) => {
-      const config = await fetchProxyConfig().catch(() => NO_PROXY_CONFIG);
-      return { base: proxyUrl(port, config), crossOrigin: config.domain !== null };
-    },
+    // Always the app-origin path, even with a PROXY_DOMAIN configured: a
+    // "<port>.<domain>" subdomain is another origin, where the tab can't
+    // follow the page's address, step back or forward, or pick elements.
+    // Opening in the browser keeps the subdomain, where every app works
+    // unmodified.
+    localProxyBase: async (port) => ({ base: proxyUrl(port, NO_PROXY_CONFIG), crossOrigin: false }),
     openUrlTab: (url) => openUrlTab(url),
     resolveCwd: () => getActiveContext?.()?.cwd ?? null,
     readSendAutoSubmit,

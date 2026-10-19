@@ -1,6 +1,7 @@
 import net from "node:net";
 import { WebSocket } from "ws";
 import { getTunnelablePorts } from "./ports.js";
+import { connectLoopback } from "./proxy.js";
 
 // Frame format shared with cli/tunnel.mjs (kept in sync manually — the CLI
 // must stay a single dependency-free file, so this codec can't be imported):
@@ -185,7 +186,8 @@ export function handleTunnel(ws: WebSocket, client: string | null): void {
     // mid-check) — re-check now that the async gap has closed.
     if (channels.has(id) || ws.readyState !== WebSocket.OPEN) return;
 
-    const socket = net.connect(port, "127.0.0.1");
+    // Either loopback address: a dev server may listen on only ::1.
+    const socket = connectLoopback(port);
     const ch: Channel = { socket, connected: false, sendCredit: WINDOW_SIZE, unacked: 0, drainScheduled: false };
     channels.set(id, ch);
 

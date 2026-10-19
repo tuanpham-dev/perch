@@ -83,7 +83,37 @@ function forwardedHeaders(req: IncomingMessage, port: number): http.OutgoingHttp
   return headers;
 }
 
-// Proxies a single HTTP request to 127.0.0.1:port, streaming both
+// A dev server on this machine may listen on only one of the loopback
+// addresses: Vite, for one, binds "localhost", which is often just ::1. So
+// connections to a local port are offered both, IPv4 first, and Node moves
+// on to the next when one refuses (autoSelectFamily).
+const LOOPBACK_ADDRESSES = [
+  { address: "127.0.0.1", family: 4 },
+  { address: "::1", family: 6 },
+];
+
+const loopbackLookup = ((_host: string, opts: { all?: boolean }, cb: (...args: unknown[]) => void) => {
+  if (opts?.all) cb(null, LOOPBACK_ADDRESSES);
+  else cb(null, LOOPBACK_ADDRESSES[0].address, LOOPBACK_ADDRESSES[0].family);
+}) as unknown as net.LookupFunction;
+
+// Options that make a connection to a local port reach it on either
+// loopback address. For net.connect and http.request alike.
+export function loopbackTarget(port: number) {
+  return {
+    host: "localhost",
+    port,
+    lookup: loopbackLookup,
+    autoSelectFamily: true,
+    autoSelectFamilyAttemptTimeout: 250,
+  };
+}
+
+export function connectLoopback(port: number, onConnect?: () => void): net.Socket {
+  return net.connect(loopbackTarget(port), onConnect);
+}
+
+// Proxies a single HTTP request to a local port (either loopback address), streaming both
 // directions. `rest` is the path to request upstream (already
 // stripped/kept per parseProxyPath). In stripped (/proxy) mode, a
 // root-relative Location response header is rewritten to stay inside the
@@ -98,8 +128,9 @@ export function handleProxyRequest(
 ): void {
   const upstreamReq = http.request(
     {
-      host: "127.0.0.1",
-      port,
+      ...loopbackTarget(port),
+      // One-off connections: an agent would pool them under one address.
+      agent: false,
       method: req.method,
       path: rest || "/",
       headers: forwardedHeaders(req, port),
@@ -125,7 +156,7 @@ export function handleProxyRequest(
   req.pipe(upstreamReq);
 }
 
-// Proxies a WebSocket upgrade to 127.0.0.1:port. `rest` is the path (and
+// Proxies a WebSocket upgrade to a local port (either loopback address). `rest` is the path (and
 // query string) to send in the rebuilt upgrade request line.
 export function handleProxyUpgrade(
   req: IncomingMessage,
@@ -134,7 +165,7 @@ export function handleProxyUpgrade(
   port: number,
   rest: string,
 ): void {
-  const upstream = net.connect(port, "127.0.0.1", () => {
+  const upstream = connectLoopback(port, () => {
     const headerLines: string[] = [`${req.method} ${rest || "/"} HTTP/1.1`];
     for (const [key, value] of Object.entries(req.headers)) {
       if (value === undefined || key.toLowerCase() === "host") continue;
