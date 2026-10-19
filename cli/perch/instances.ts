@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { LOG_FILE, PID_FILE, REPO_DIR, RUNTIME_DIR, SELF } from './paths.ts';
+import { envFileValue, LOG_FILE, PID_FILE, REPO_DIR, RUNTIME_DIR, SELF } from './paths.ts';
 import { fail, info, ok } from './output.ts';
 import { alive, responding, sleep } from './run.ts';
 import { usableServiceManager } from './serviceManager.ts';
@@ -135,10 +135,13 @@ export function listInstances(): Instance[] {
     let managedBy: ManagedBy = 'external';
     if (servicePid !== null && (p.pid === servicePid || p.pgid === servicePid || sameTree(p.pid, servicePid))) managedBy = 'service';
     else if (tracked.has(p.pid) || tracked.has(p.pgid) || [...tracked.keys()].some((t) => sameTree(p.pid, t))) managedBy = 'fallback';
+    // The server loads server/.env without overriding its environment, so a
+    // value missing from the process's environment comes from there (a
+    // service started without PORT set reads it from the file).
     return {
       pid: p.pid,
-      port: envOf(p.pid, 'PORT') || '3001',
-      appName: envOf(p.pid, 'APP_NAME') || '-',
+      port: envOf(p.pid, 'PORT') || envFileValue('PORT') || '3001',
+      appName: envOf(p.pid, 'APP_NAME') || envFileValue('APP_NAME') || '-',
       managedBy,
     };
   });

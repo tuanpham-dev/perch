@@ -17,15 +17,16 @@ export const LOG_FILE = join(RUNTIME_DIR, 'perch.log');
 export const pidFileForPort = (port: string) => join(RUNTIME_DIR, `perch-${port}.pid`);
 export const logFileForPort = (port: string) => join(RUNTIME_DIR, `perch-${port}.log`);
 
+/** The last KEY= line in server/.env, unquoted, or "" when there is none. */
+export function envFileValue(key: string): string {
+  if (!existsSync(ENV_FILE)) return '';
+  const lines = readFileSync(ENV_FILE, 'utf8').split('\n').filter((l) => l.startsWith(`${key}=`));
+  return lines.at(-1)?.slice(key.length + 1).replace(/^["']|["']$/g, '').trim() ?? '';
+}
+
 /** Same order the server resolves it in: a PORT env var, then server/.env, then 3001. */
 export function readPort(): string {
-  if (process.env.PORT) return process.env.PORT;
-  if (existsSync(ENV_FILE)) {
-    const lines = readFileSync(ENV_FILE, 'utf8').split('\n').filter((l) => l.startsWith('PORT='));
-    const last = lines.at(-1)?.slice('PORT='.length).replace(/^["']|["']$/g, '').trim();
-    if (last) return last;
-  }
-  return '3001';
+  return process.env.PORT || envFileValue('PORT') || '3001';
 }
 
 /**
@@ -40,13 +41,7 @@ export function readPort(): string {
  * behind the gate rather than becoming reachable by any local process.
  */
 export function readAuthToken(): string {
-  if (process.env.AUTH_TOKEN) return process.env.AUTH_TOKEN;
-  if (existsSync(ENV_FILE)) {
-    const lines = readFileSync(ENV_FILE, 'utf8').split('\n').filter((l) => l.startsWith('AUTH_TOKEN='));
-    const last = lines.at(-1)?.slice('AUTH_TOKEN='.length).replace(/^["']|["']$/g, '').trim();
-    if (last) return last;
-  }
-  return '';
+  return process.env.AUTH_TOKEN || envFileValue('AUTH_TOKEN');
 }
 
 export const appUrl = (port = readPort()) => `http://127.0.0.1:${port}`;
