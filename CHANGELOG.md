@@ -3,6 +3,18 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.4.0 - 2026-10-19
+
+- **Grid tabs: several terminals of a project tiled in one tab,** the way
+  tmux's tiled layout does it. Right-click a project's chip for **New Grid**
+  or **Tile All Terminals**, use a terminal tab's **Move to Grid**, or drag a
+  terminal tab onto a grid tab. Drag the lines between rows and columns to
+  resize them, drag a cell's header onto another to swap them, and use each
+  header to zoom a cell, pop it out as its own tab, or close it (the
+  terminal keeps running). `Alt+Arrow` moves focus between cells while a
+  grid tab is active. Splitting a grid tab shows the same grid in both
+  panes, and phones stack the cells in one column.
+
 ## 0.3.0 - 2026-10-19
 
 - **Security: the web preview no longer sends your sign-in to the sites it
