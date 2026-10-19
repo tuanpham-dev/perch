@@ -24,6 +24,17 @@ function expandHome(p) {
   return p;
 }
 
+// The reverse, for a path sent back that the page compares against its own
+// paths: "~"-shortened again when the page sent a "~" path, as-is otherwise.
+function shortenHomeLike(sent, p) {
+  if (!/^~(?:[/\\]|$)/.test(sent)) return p;
+  const home = os.homedir().replace(/\\/g, "/");
+  const fwd = p.replace(/\\/g, "/");
+  if (fwd === home) return "~";
+  if (fwd.startsWith(`${home}/`)) return `~${fwd.slice(home.length)}`;
+  return p;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASKPASS_PATH = path.join(__dirname, "askpass.cjs");
 
@@ -506,7 +517,10 @@ export function activate({ router, log, host, getSettings, ai }) {
         return;
       }
       res.json({
-        root: repo.root,
+        // In the page's own form: the FILES tree's paths are "~"-shortened
+        // under the home folder, and the client matches each row against
+        // this root by prefix.
+        root: shortenHomeLike(req.query.cwd, repo.root),
         branch: repo.branch,
         statuses: Object.fromEntries(repo.statuses),
         dirStatuses: Object.fromEntries(repo.dirStatuses),
