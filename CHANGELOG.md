@@ -3,6 +3,34 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.3.0 - 2026-10-19
+
+- **Security: the web preview no longer sends your sign-in to the sites it
+  shows.** Behind a reverse proxy or tunnel that passes its basic-auth
+  credentials on to Perch (a tunnel's `--forward-auth`), 0.2.0 forwarded them
+  to every site opened in the web preview. If you used the web preview that
+  way, change that password.
+- **The web preview works behind a tunnel's basic auth.** With tunnel 0.5.0
+  or newer and `--allow-cors-preflight` on the tunnel, previews load without
+  asking for the password on every page: the page's own requests carry the
+  tunnel's session cookie, and fonts load from their own host where it
+  allows that. Perch refuses cross-origin preflights everywhere except the
+  preview's own routes.
+- **Unsaved edits survive.** An extension's unsaved edits are kept on the
+  server, so a reload, a crash or an update doesn't lose them, and another
+  device opening the same file gets them back. The CSV editor uses it, with a
+  notice offering to discard and a warning when the file changed on disk.
+  Extensions get it as `ctx.drafts`.
+- **Terminals open faster.** Opening a terminal replays its recent output
+  and says when earlier history was left out; scrolling to the top, a search
+  or jumping to an earlier prompt loads the rest.
+- **Git badges show in FILES for projects under your home folder.** Only the
+  branch pill showed before.
+- **Status bar popovers stay on screen** when their content grows after
+  opening, as system stats' readings do.
+- **`perch tui` finds a server that sets its port in `server/.env`,** such as
+  over ssh, instead of falling back to port 3001.
+
 ## 0.2.0 - 2026-10-13
 
 - **Preview any website inside Perch.** The PORTS tab is now a web preview
