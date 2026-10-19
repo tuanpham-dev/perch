@@ -937,6 +937,47 @@ The badge element itself is core's `.file-tree-git-badge`; your
 stylesheet. Reference: `git-scm` (`provideDecoration` +
 `statusModel.mjs`).
 
+### Quick diff — `registerQuickDiffProvider` / `ctx.quickDiff`
+
+```ts
+// A source-control extension supplies bases:
+ctx.registerQuickDiffProvider({
+  id: string,
+  provideBase: (path: string) => Promise<QuickDiffBase | null>,
+  watch?: (path: string, onChange: () => void) => () => void,
+});
+
+// An editor consumes them:
+ctx.quickDiff.getBase(path: string): Promise<QuickDiffBase | null>
+ctx.quickDiff.watch(path: string, onChange: () => void): () => void
+
+interface QuickDiffBase {
+  original: string;        // the text change marks are measured against
+  staged: string | null;   // what a commit would take now, if that applies
+  stage?: (content: string) => Promise<void>;
+}
+```
+
+The extension point behind an editor's change marks, the gutter bars VS Code
+calls quick diff. Paths are **absolute**. A provider answers `null` for a file
+it has no base for: outside its repository, not in the last commit, binary or
+too large. The editor then draws no marks. `getBase` asks providers in
+registration order and returns the first base; a provider that throws counts as
+`null`.
+
+`watch` is how a provider says a base may have moved (a commit, a checkout,
+staging from a terminal). The editor reacts by calling `getBase` again.
+`ctx.quickDiff.watch` also fires when a provider is enabled or disabled.
+
+`stage(content)` makes `content` the staged version of the file without
+touching the working file. It rejects with a readable `Error` message when the
+staged version changed after this base was read; fetch a fresh base and retry.
+
+Reference: `git-scm` provides HEAD as `original` and the index as `staged`;
+`text-editor` in the extensions registry draws the marks. Absent on older
+hosts, so feature-detect with `ctx.quickDiff?.` and
+`ctx.registerQuickDiffProvider?.`.
+
 ### Session decorations — `registerSessionDecorationProvider`
 
 ```ts

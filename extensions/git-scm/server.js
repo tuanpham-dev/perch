@@ -498,6 +498,83 @@ async function getRepoDecorations(anyDirInRepo) {
   return scan;
 }
 
+// ---- Quick diff (an editor's change marks) ----
+// The editor diffs a file's buffer against its last-committed text itself, so
+// that the marks follow unsaved typing; all this side does is hand over the
+// committed and staged texts and watch their blob ids. Texts are read with
+// `cat-file --filters`, which applies the same line-ending conversion and
+// smudge filters a checkout would: the base is what the working file would
+// look like unchanged, not the raw blob.
+const MAX_QUICK_DIFF_BYTES = 2 * 1024 * 1024;
+
+// The repository a file belongs to and its path inside it (forward slashes,
+// as git prints them), or null outside any repository. realpath first:
+// rev-parse reports the resolved top level, so a path reached through a
+// symlink would otherwise come out relative to the wrong place.
+async function resolveRepoFile(sentPath) {
+  let abs;
+  try {
+    abs = fs.realpathSync(expandHome(sentPath));
+  } catch {
+    return null;
+  }
+  const root = await repoRootOf(path.dirname(abs));
+  if (!root) return null;
+  const rel = path.relative(root, abs).split(path.sep).join("/");
+  if (!rel || rel.startsWith("../")) return null;
+  return { root, rel, abs };
+}
+
+// Blob ids of each path in HEAD and in the index (stage 0 only: a conflicted
+// path has no single staged version). Missing entries are absent from the map.
+async function quickDiffOids(root, rels) {
+  const head = new Map();
+  const index = new Map();
+  const mode = new Map();
+  if (rels.length === 0) return { head, index, mode };
+  try {
+    const out = await git(["--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", ...rels], root);
+    for (const rec of out.split("\0")) {
+      const m = /^\d+ blob ([0-9a-f]+)\t(.*)$/s.exec(rec);
+      if (m) head.set(m[2], m[1]);
+    }
+  } catch {
+    // No HEAD yet (a fresh repository): nothing is committed.
+  }
+  try {
+    const out = await git(["--literal-pathspecs", "ls-files", "-s", "-z", "--", ...rels], root);
+    for (const rec of out.split("\0")) {
+      const m = /^(\d+) ([0-9a-f]+) 0\t(.*)$/s.exec(rec);
+      if (m) {
+        index.set(m[3], m[2]);
+        mode.set(m[3], m[1]);
+      }
+    }
+  } catch {
+    // Leave the index side empty.
+  }
+  return { head, index, mode };
+}
+
+// git with `input` on stdin, for hash-object.
+function gitWithInput(args, cwd, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve(stdout);
+      else reject(new Error(stderr.trim() || `git ${args[0]} exited with ${code}`));
+    });
+    child.stdin.end(input);
+  });
+}
+
 export function activate({ router, log, host, getSettings, ai }) {
   // Core file mutations (write/rename/delete/paste/upload) must show up in
   // tree badges immediately, same as when the scan lived in core.
@@ -1539,6 +1616,94 @@ export function activate({ router, log, host, getSettings, ai }) {
         return;
       }
       res.json({ original, modified });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The committed and staged texts of one file, for an editor's change marks.
+  // `base: null` means "draw nothing": outside a repository, not committed
+  // yet, binary, or too large to diff in the page.
+  router.get("/quick-diff-base", async (req, res) => {
+    const sent = typeof req.query.path === "string" ? req.query.path : "";
+    if (!sent) {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    try {
+      const file = await resolveRepoFile(sent);
+      if (!file) return res.json({ base: null });
+      const { head, index, mode } = await quickDiffOids(file.root, [file.rel]);
+      const headOid = head.get(file.rel);
+      if (!headOid) return res.json({ base: null });
+      const size = Number((await git(["cat-file", "-s", headOid], file.root)).trim());
+      if (!(size <= MAX_QUICK_DIFF_BYTES)) return res.json({ base: null });
+      const headText = await git(["cat-file", "--filters", `HEAD:${file.rel}`], file.root);
+      if (looksBinary(Buffer.from(headText, "utf8"))) return res.json({ base: null });
+      const indexOid = index.get(file.rel) ?? null;
+      let staged = null;
+      if (indexOid === headOid) staged = headText;
+      else if (indexOid) staged = await git(["cat-file", "--filters", `:${file.rel}`], file.root);
+      res.json({
+        base: { head: headText, headOid, staged, indexOid, mode: mode.get(file.rel) ?? null },
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Current blob ids for files an editor has open, so the page can tell when
+  // a commit, checkout or staging done elsewhere moved one of their bases.
+  router.post("/quick-diff-oids", async (req, res) => {
+    const paths = requirePaths(req, res);
+    if (!paths) return;
+    try {
+      const byRoot = new Map();
+      for (const sent of paths) {
+        const file = await resolveRepoFile(sent);
+        if (!file) continue;
+        let group = byRoot.get(file.root);
+        if (!group) byRoot.set(file.root, (group = []));
+        group.push({ sent, rel: file.rel });
+      }
+      const oids = {};
+      for (const [root, group] of byRoot) {
+        const { head, index } = await quickDiffOids(root, group.map((g) => g.rel));
+        for (const { sent, rel } of group) oids[sent] = { head: head.get(rel) ?? null, index: index.get(rel) ?? null };
+      }
+      res.json({ oids });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Makes `content` the staged version of one file, leaving the working file
+  // alone — how an editor stages a single change. `indexOid` is the staged
+  // blob the page computed `content` from; if the index has moved since, the
+  // write is refused rather than overwriting staging done elsewhere.
+  router.post("/quick-diff-stage", async (req, res) => {
+    const { path: sent, content, indexOid } = req.body ?? {};
+    if (typeof sent !== "string" || typeof content !== "string" || typeof indexOid !== "string") {
+      res.status(400).json({ error: "path, content and indexOid are required" });
+      return;
+    }
+    try {
+      const file = await resolveRepoFile(sent);
+      if (!file) {
+        res.status(400).json({ error: "This file is not in a git repository." });
+        return;
+      }
+      const { index, mode } = await quickDiffOids(file.root, [file.rel]);
+      if (index.get(file.rel) !== indexOid) {
+        res.status(409).json({ error: "The staged version changed - try again." });
+        return;
+      }
+      // --path runs the file's clean filters (line endings, LFS) the way
+      // `git add` would, since `content` is in working-tree form.
+      const oid = (await gitWithInput(["hash-object", "-w", "--stdin", `--path=${file.rel}`], file.root, content)).trim();
+      await git(["update-index", "--cacheinfo", `${mode.get(file.rel)},${oid},${file.rel}`], file.root);
+      invalidateDecorationCaches();
+      res.json({ indexOid: oid });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

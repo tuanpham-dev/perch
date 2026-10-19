@@ -426,6 +426,16 @@ export interface ExtensionContext {
     provideWindowDecoration: (ctx: SessionDecorationContext) => SessionDecoration | undefined;
     onClick?: (anchorRect: DOMRect, ctx: SessionDecorationContext) => void;
   }): { refresh(): void };
+  // Supplies the "before" text of files for an editor's change marks (the
+  // gutter bars VS Code calls quick diff) — a source-control extension's
+  // half of ctx.quickDiff. provideBase answers null for a file it has no
+  // base for; watch reports that a file's base may have moved (a commit, a
+  // checkout, staging done elsewhere), so the editor asks again.
+  registerQuickDiffProvider(provider: {
+    id: string;
+    provideBase: (path: string) => Promise<QuickDiffBase | null>;
+    watch?: (path: string, onChange: () => void) => () => void;
+  }): void;
   // Supplies a terminal engine (the CreateTerminalEngine seam from
   // engines/types) — loadEngine activates the resolved engine's extension
   // on demand once the extension list is known. See engines/index.ts.
@@ -718,6 +728,33 @@ export interface ExtensionContext {
     set(key: string, value: unknown, opts?: { keepalive?: boolean }): Promise<void>;
     delete(key: string, opts?: { keepalive?: boolean }): Promise<void>;
   };
+  // An editor's half of quick diff: the base a file's change marks are
+  // measured against, from whichever provider has one (registration order
+  // decides; null when none does), and a subscription that fires when that
+  // base may have moved — including when a provider is enabled or disabled.
+  quickDiff: {
+    getBase(path: string): Promise<QuickDiffBase | null>;
+    watch(path: string, onChange: () => void): () => void;
+  };
+}
+
+// What a file looked like before: `original` is the text change marks are
+// measured against (git-scm: the last commit's), `staged` the version a
+// commit would take now (null when there is no such thing), and `stage`,
+// when present, makes `content` the staged version — rejecting with a
+// message when the staged version moved since this base was read.
+export interface QuickDiffBase {
+  original: string;
+  staged: string | null;
+  stage?: (content: string) => Promise<void>;
+}
+
+export interface RegisteredQuickDiffProvider {
+  // Namespaced ext.<extensionId>.<id>.
+  id: string;
+  extensionId: string;
+  provideBase(path: string): Promise<QuickDiffBase | null>;
+  watch?(path: string, onChange: () => void): () => void;
 }
 
 // A single row's decoration in the FILES tree — the visual vocabulary
@@ -1114,6 +1151,7 @@ export const extensionSidebarTabs: RegisteredSidebarTab[] = [];
 export const extensionSidebarTabMenuItems: RegisteredSidebarTabMenuItem[] = [];
 export const extensionFileDecorationProviders: RegisteredFileDecorationProvider[] = [];
 export const extensionSessionDecorationProviders: RegisteredSessionDecorationProvider[] = [];
+export const extensionQuickDiffProviders: RegisteredQuickDiffProvider[] = [];
 export const extensionTerminalEngines: RegisteredTerminalEngine[] = [];
 export const extensionEditors: RegisteredEditor[] = [];
 export const extensionQuickSwitcherProviders: RegisteredQuickSwitcherProvider[] = [];
@@ -1166,6 +1204,59 @@ export function getRootDecorations(rootPath: string): RootDecoration[] {
     if (d) out.push(d);
   }
   return out;
+}
+
+// The first provider's base for `path`. One that throws (a server hook that
+// is down, say) counts as having none, so the next provider still gets asked.
+export async function getQuickDiffBase(path: string): Promise<QuickDiffBase | null> {
+  for (const p of [...extensionQuickDiffProviders]) {
+    try {
+      const base = await p.provideBase(path);
+      if (base) return base;
+    } catch {
+      // fall through to the next provider
+    }
+  }
+  return null;
+}
+
+// Every open watch, so a provider arriving or leaving can be wired in or out
+// of it — and its owner told, since the base it has may now be wrong.
+interface QuickDiffWatch {
+  path: string;
+  onChange: () => void;
+  unsubs: Map<RegisteredQuickDiffProvider, () => void>;
+}
+const quickDiffWatches = new Set<QuickDiffWatch>();
+
+function wireQuickDiffWatch(w: QuickDiffWatch): void {
+  for (const p of extensionQuickDiffProviders) {
+    if (!w.unsubs.has(p) && p.watch) w.unsubs.set(p, p.watch(w.path, w.onChange));
+  }
+  for (const [p, unsub] of w.unsubs) {
+    if (!extensionQuickDiffProviders.includes(p)) {
+      unsub();
+      w.unsubs.delete(p);
+    }
+  }
+}
+
+function quickDiffProvidersChanged(): void {
+  for (const w of [...quickDiffWatches]) {
+    wireQuickDiffWatch(w);
+    w.onChange();
+  }
+}
+
+export function watchQuickDiff(path: string, onChange: () => void): () => void {
+  const w: QuickDiffWatch = { path, onChange, unsubs: new Map() };
+  quickDiffWatches.add(w);
+  wireQuickDiffWatch(w);
+  return () => {
+    quickDiffWatches.delete(w);
+    for (const unsub of w.unsubs.values()) unsub();
+    w.unsubs.clear();
+  };
 }
 
 // Extension quick-switcher results for a query, in registration order — a
@@ -1904,6 +1995,15 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       // listener granularity.
       return { refresh: notify };
     },
+    registerQuickDiffProvider(provider) {
+      extensionQuickDiffProviders.push({
+        id: `ext.${ext.id}.${provider.id}`,
+        extensionId: ext.id,
+        provideBase: provider.provideBase,
+        watch: provider.watch,
+      });
+      quickDiffProvidersChanged();
+    },
     registerSessionDecorationProvider(provider) {
       extensionSessionDecorationProviders.push({
         id: `ext.${ext.id}.${provider.id}`,
@@ -2172,6 +2272,10 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       set: (key, value, opts) => putDraft(ext.id, key, value, opts),
       delete: (key, opts) => deleteDraft(ext.id, key, opts),
     },
+    quickDiff: {
+      getBase: getQuickDiffBase,
+      watch: watchQuickDiff,
+    },
     assetUrl(relPath) {
       return extensionFileUrl(ext.id, relPath);
     },
@@ -2312,6 +2416,14 @@ function deactivateClientExtension(extId: string): void {
   for (let i = extensionSessionDecorationProviders.length - 1; i >= 0; i--) {
     if (extensionSessionDecorationProviders[i].extensionId === extId) extensionSessionDecorationProviders.splice(i, 1);
   }
+  let hadQuickDiffProvider = false;
+  for (let i = extensionQuickDiffProviders.length - 1; i >= 0; i--) {
+    if (extensionQuickDiffProviders[i].extensionId === extId) {
+      extensionQuickDiffProviders.splice(i, 1);
+      hadQuickDiffProvider = true;
+    }
+  }
+  if (hadQuickDiffProvider) quickDiffProvidersChanged();
   for (let i = extensionTerminalEngines.length - 1; i >= 0; i--) {
     if (extensionTerminalEngines[i].extensionId === extId) extensionTerminalEngines.splice(i, 1);
   }

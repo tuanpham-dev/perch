@@ -711,6 +711,106 @@ function onSettingsChanged() {
   decorHandle?.refresh();
 }
 
+// ---- Quick diff (provider for core's editor change-marks point) ----
+//
+// An editor asks for a file's base (its text in HEAD, plus the staged text)
+// and draws the marks itself. Bases move when a commit, checkout or staging
+// happens, here or in a terminal, so the blob ids of every file an editor
+// watches are polled on the decorations' 3s beat (and right after this
+// extension's own operations, via refreshDecorationsNow); a changed id fires
+// that file's watchers, which fetch the base again.
+
+interface QuickDiffBaseResponse {
+  base: { head: string; headOid: string; staged: string | null; indexOid: string | null } | null;
+}
+
+interface QuickDiffWatched {
+  callbacks: Set<() => void>;
+  // Last seen blob ids, from a base fetch or a poll; undefined until known.
+  head?: string | null;
+  index?: string | null;
+}
+
+const quickDiffWatched = new Map<string, QuickDiffWatched>();
+let quickDiffTimer: number | null = null;
+let quickDiffInFlight = false;
+
+function fireQuickDiff(path: string): void {
+  for (const cb of [...(quickDiffWatched.get(path)?.callbacks ?? [])]) cb();
+}
+
+async function quickDiffPollTick(): Promise<void> {
+  if (quickDiffInFlight || quickDiffWatched.size === 0) return;
+  quickDiffInFlight = true;
+  try {
+    const paths = [...quickDiffWatched.keys()];
+    const { oids } = await apiPostJson<{ oids: Record<string, { head: string | null; index: string | null }> }>(
+      "/quick-diff-oids",
+      { paths },
+    );
+    for (const path of paths) {
+      const w = quickDiffWatched.get(path);
+      if (!w) continue;
+      const now = oids[path] ?? { head: null, index: null };
+      const known = w.head !== undefined;
+      const moved = known && (now.head !== w.head || now.index !== w.index);
+      w.head = now.head;
+      w.index = now.index;
+      if (moved) fireQuickDiff(path);
+    }
+  } catch {
+    // Best-effort — the next tick retries.
+  } finally {
+    quickDiffInFlight = false;
+  }
+}
+
+async function provideQuickDiffBase(path: string) {
+  const { base } = await apiGetJson<QuickDiffBaseResponse>(`/quick-diff-base?path=${encodeURIComponent(path)}`);
+  const w = quickDiffWatched.get(path);
+  if (w) {
+    w.head = base?.headOid ?? null;
+    w.index = base?.indexOid ?? null;
+  }
+  if (!base) return null;
+  const basedOn = base.indexOid;
+  return {
+    original: base.head,
+    staged: base.staged,
+    // No index entry (git rm --cached) leaves nothing to stage into.
+    stage: basedOn
+      ? async (content: string) => {
+          const { indexOid } = await apiPostJson<{ indexOid: string }>("/quick-diff-stage", {
+            path,
+            content,
+            indexOid: basedOn,
+          });
+          const watched = quickDiffWatched.get(path);
+          if (watched) watched.index = indexOid;
+          refreshDecorationsNow();
+          fireQuickDiff(path);
+        }
+      : undefined,
+  };
+}
+
+function watchQuickDiff(path: string, onChange: () => void): () => void {
+  let w = quickDiffWatched.get(path);
+  if (!w) quickDiffWatched.set(path, (w = { callbacks: new Set() }));
+  w.callbacks.add(onChange);
+  if (quickDiffTimer === null) quickDiffTimer = window.setInterval(() => void quickDiffPollTick(), DECOR_POLL_MS);
+  return () => {
+    const watched = quickDiffWatched.get(path);
+    if (!watched) return;
+    watched.callbacks.delete(onChange);
+    if (watched.callbacks.size === 0) quickDiffWatched.delete(path);
+    if (quickDiffWatched.size === 0 && quickDiffTimer !== null) {
+      window.clearInterval(quickDiffTimer);
+      quickDiffTimer = null;
+    }
+  };
+}
+
 // ---- FILES tree decorations (provider for core's file-decoration point) ----
 //
 // Ported from core's inline /api/fs enrichment: the server hook's
@@ -798,6 +898,7 @@ function noteTreeRoot(treeRoot: string): void {
 // the next render rather than the next poll tick.
 function refreshDecorationsNow(): void {
   for (const root of decorSeen.keys()) void fetchDecorations(root);
+  void quickDiffPollTick();
 }
 
 function decorPollTick(): void {
@@ -3131,6 +3232,17 @@ export function activate(ctx: {
       run: (secondary: boolean) => void;
     }[];
   }) => { refresh(): void };
+  // Optional: hosts older than the quick-diff point have no editor change
+  // marks to feed.
+  registerQuickDiffProvider?: (provider: {
+    id: string;
+    provideBase: (path: string) => Promise<{
+      original: string;
+      staged: string | null;
+      stage?: (content: string) => Promise<void>;
+    } | null>;
+    watch?: (path: string, onChange: () => void) => () => void;
+  }) => void;
   registerFileDecorationProvider: (provider: {
     id: string;
     provideDecoration: (
@@ -3270,6 +3382,7 @@ export function activate(ctx: {
     provideRootDecoration,
   });
   decorTimer = window.setInterval(decorPollTick, DECOR_POLL_MS);
+  ctx.registerQuickDiffProvider?.({ id: "git", provideBase: provideQuickDiffBase, watch: watchQuickDiff });
 
   // Start the badge poller immediately so it's correct on app startup,
   // rather than only after the user opens the Source Control tab.
@@ -3395,6 +3508,11 @@ export function deactivate() {
   }
   decorHandle = null;
   decorCache.clear();
+  if (quickDiffTimer !== null) {
+    window.clearInterval(quickDiffTimer);
+    quickDiffTimer = null;
+  }
+  quickDiffWatched.clear();
   decorSeen.clear();
   commitsState = { commits: [], limit: COMMITS_PAGE, loading: false, query: "", root: null };
   commitsListeners.clear();

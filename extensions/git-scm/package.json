@@ -2,7 +2,7 @@
   "name": "git-scm",
   "private": true,
   "publisher": "perch",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "displayName": "Git",
   "description": "Built-in VS Code-style Source Control panel: stage, commit, amend, push/pull/fetch, publish and force-with-lease, an AI-written commit message, BRANCHES (branches, remotes and tags), COMMITS with search and per-row actions, a commit details view, stash, a status-bar branch readout, and diff view (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
