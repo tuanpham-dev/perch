@@ -3,6 +3,20 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.5.0 - 2026-10-19
+
+- **Change marks in the editor gutter, like VS Code.** With the Text Editor
+  extension (2.6.0 or newer) as your editor, lines changed since the last
+  commit get a bar in the gutter (green added, striped changed, a triangle
+  where lines were deleted) and matching marks on the scrollbar and minimap.
+  Click one to see the change as an inline diff and stage just that change,
+  revert it, or step to the next one; Alt+F5 and Shift+Alt+F5 move between
+  changes. Extensions can supply these marks through the new quick-diff
+  extension point; the bundled Git extension does.
+- **The default Plastic Legacy theme now colors the editor like Plastic in
+  VS Code:** change marks, diffs, line numbers, find and selection
+  highlights, and the editor's popups.
+
 ## 0.4.1 - 2026-10-19
 
 - **Terminals no longer come back garbled after a size change.** Opening a
