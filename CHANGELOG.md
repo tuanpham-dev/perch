@@ -3,6 +3,20 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.6.0 - 2026-10-19
+
+- **Open a port inside Perch.** In the PORTS view and the status bar's
+  ports list, Ctrl+click (Cmd+click on a Mac) or middle-click a port to open
+  it in a Perch preview tab instead of a browser tab, or use the new
+  **Open in Perch** button on its row.
+- **Ports work properly behind a proxy domain.** With `PROXY_DOMAIN` set, a
+  port's address now keeps the port Perch is served on, and dev servers'
+  own frames and cross-origin requests on their subdomains are no longer
+  blocked. Preview tabs now load through Perch's own `/proxy/<port>/` path,
+  so the address bar follows the page and Back, Reload and Inspect work.
+- **Dev servers that listen only on IPv6 (`::1`) can be reached.** The port
+  proxy and the tunnel used to give 502 for them.
+
 ## 0.5.0 - 2026-10-19
 
 - **Change marks in the editor gutter, like VS Code.** With the Text Editor
