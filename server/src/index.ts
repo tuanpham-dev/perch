@@ -218,6 +218,9 @@ app.use((req, res, next) => {
 // same reason the proxy routes are: whichever parser runs first consumes the
 // stream.
 app.use("/api/agent-hooks/report", agentHookBodyParser);
+// Drafts (unsaved editor edits, server/src/drafts.ts) bring their own
+// larger-limit JSON parser, for the same reason.
+app.use("/api/drafts", draftsRouter);
 app.use(express.json());
 app.use(clientPathsMiddleware);
 app.use("/api/web-preview", webProxy.api);
@@ -227,9 +230,6 @@ const tunnelCli = path.resolve(import.meta.dirname, "../../cli/tunnel.mjs");
 app.get("/tunnel.mjs", (_req, res) => {
   res.type("text/javascript").sendFile(tunnelCli);
 });
-// Drafts (unsaved editor edits, server/src/drafts.ts) bring their own
-// larger-limit JSON parser, for the same reason.
-app.use("/api/drafts", draftsRouter);
 
 // Which Perch this is, for the desktop app's launcher and its compatibility
 // check (plans/app-versioning.md R2). Public like /tunnel.mjs - outside /api,
