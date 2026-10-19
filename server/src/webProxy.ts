@@ -267,6 +267,12 @@ function behindBasicAuth(req: IncomingMessage): boolean {
   return /^basic\s/i.test(headerValue(req.headers.authorization) ?? "");
 }
 
+// Every TLS connection to a site offers HTTP/1.1 by ALPN, as a browser's (and
+// curl's) does. A handshake with no ALPN marks the client as a script to some
+// bot protection: Shopify's storefronts answer it with 429 "You have sent too
+// many requests" after a request or two.
+const UPSTREAM_TLS = { ALPNProtocols: ["http/1.1"] };
+
 const FONT_CHECK_TTL_MS = 60 * 60 * 1000;
 const FONT_CHECK_TIMEOUT_MS = 3000;
 const MAX_FONT_CHECKS = 48;
@@ -313,6 +319,7 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
         headers: { origin: "null", range: "bytes=0-0", "user-agent": "Mozilla/5.0 (Perch web preview)" },
         lookup,
         agent: false,
+        ...UPSTREAM_TLS,
         timeout: FONT_CHECK_TIMEOUT_MS,
       });
       check.on("timeout", () => check.destroy());
@@ -496,6 +503,7 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
       timeout: UPSTREAM_TIMEOUT_MS,
       // Each request resolves through the guard afresh.
       agent: false,
+      ...UPSTREAM_TLS,
     });
 
     upstream.on("timeout", () => upstream.destroy(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })));
@@ -660,7 +668,7 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
         if (cookieHeader) headers.cookie = cookieHeader;
       }
       const client = target.protocol === "https:" ? https : http;
-      const upstream = client.request(target, { method: "GET", headers, lookup, agent: false, timeout: UPSTREAM_TIMEOUT_MS });
+      const upstream = client.request(target, { method: "GET", headers, lookup, agent: false, ...UPSTREAM_TLS, timeout: UPSTREAM_TIMEOUT_MS });
       upstream.on("timeout", () => upstream.destroy());
       upstream.on("error", () => socket.destroy());
       upstream.on("response", (resp) => {
