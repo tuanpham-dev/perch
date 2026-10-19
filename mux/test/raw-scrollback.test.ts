@@ -114,3 +114,33 @@ test('tail of one huge line is the last bytes', () => {
   assert.equal(bytes.length, 100);
   assert.equal(partial, true);
 });
+
+test('since returns what was pushed after a mark, across chunks and resets', () => {
+  const r = new RawScrollback(4096);
+  r.push(Buffer.from('one\n'));
+  const mark = r.pushed;
+  r.push(Buffer.from('two\n'));
+  r.push(Buffer.from('three\n'));
+  assert.equal(r.since(mark)?.toString(), 'two\nthree\n');
+  assert.equal(r.since(r.pushed)?.length, 0);
+  r.reset(Buffer.from('seed\n'));
+  assert.equal(r.bytes().toString(), 'seed\n');
+  assert.equal(r.pushed, mark + 'two\nthree\n'.length, 'a reset does not rewind the count');
+});
+
+test('since is null once the cap has trimmed past the mark', () => {
+  const r = new RawScrollback(1024);
+  const mark = r.pushed;
+  for (let i = 0; i < 10; i++) r.push(Buffer.from(`${'x'.repeat(299)}\n`));
+  assert.equal(r.since(mark), null);
+});
+
+test('reset takes its alt-screen state from the seed', () => {
+  const r = new RawScrollback(4096);
+  r.push(Buffer.from('\x1b[?1049h'));
+  assert.equal(r.onAltScreen, true);
+  r.reset(Buffer.from('plain\n'));
+  assert.equal(r.onAltScreen, false);
+  r.reset(Buffer.from('\x1b[?1049hfull screen'));
+  assert.equal(r.onAltScreen, true);
+});

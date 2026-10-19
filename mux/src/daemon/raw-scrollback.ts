@@ -42,6 +42,7 @@ export class RawScrollback {
   #length = 0;
   #joined: Buffer | null = Buffer.alloc(0);
   #alt = false;
+  #pushed = 0;
 
   constructor(capBytes: number, seed?: Buffer) {
     this.#cap = Math.max(1024, capBytes);
@@ -84,8 +85,35 @@ export class RawScrollback {
     return { bytes: nl === -1 ? window : window.subarray(nl + 1), partial: true };
   }
 
+  /** Bytes pushed so far, ever (a reset doesn't rewind it): a mark for since(). */
+  get pushed(): number { return this.#pushed; }
+
+  /** What was pushed after `mark` (an earlier `pushed`), or null if the cap
+   *  has already trimmed some of it away. */
+  since(mark: number): Buffer | null {
+    const count = this.#pushed - mark;
+    if (count === 0) return Buffer.alloc(0);
+    if (count > this.#length) return null;
+    const all = Buffer.concat(this.#chunks, this.#length);
+    return all.subarray(all.length - count);
+  }
+
+  /** Drop everything retained and start over from `seed`, as if it were the
+   *  first chunk ever pushed. For a log whose bytes no longer replay right:
+   *  see Window's resize. */
+  reset(seed: Buffer): void {
+    this.#chunks = [];
+    this.#length = 0;
+    this.#joined = Buffer.alloc(0);
+    this.#alt = false;
+    this.#tail = Buffer.alloc(0);
+    this.#scanAlt(seed);
+    this.#append(seed);
+  }
+
   /** Append a PTY output chunk, updating alt-screen state and trimming to cap. */
   push(chunk: Buffer): void {
+    this.#pushed += chunk.length;
     this.#scanAlt(chunk);
     this.#append(chunk);
   }

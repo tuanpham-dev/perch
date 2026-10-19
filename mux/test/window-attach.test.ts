@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { killDaemons as killTestDaemons } from './procs.ts';
 import xtermPkg from '@xterm/headless';
+import { RESET_PREFIX } from '../src/daemon/raw-scrollback.ts';
 import {
   FRAME_CONTROL, FRAME_OUTPUT, FRAME_INPUT,
   FrameReader, encodeControl, encodeFrame,
@@ -60,7 +61,7 @@ class Client {
   }
   request(req: object): void { this.#sock.write(encodeControl({ id: this.#id++, ...req })); }
   attachSession(session: string): void { this.#listen(); this.request({ kind: 'session.attach', session, cols: 80, rows: 24 }); }
-  attachWindow(target: string, tail = false): void { this.#listen(); this.request({ kind: 'window.attach', target, cols: 80, rows: 24, tail }); }
+  attachWindow(target: string, tail = false, cols = 80): void { this.#listen(); this.request({ kind: 'window.attach', target, cols, rows: 24, tail }); }
   type(data: string): void { this.#sock.write(encodeFrame(FRAME_INPUT, Buffer.from(data, 'utf8'))); }
   close(): void { this.#sock.destroy(); }
 }
@@ -190,6 +191,52 @@ test('a viewer attaching while a full-screen program runs sees that program, not
     assert.equal(term.buffer.active.type, 'alternate', 'the replay leaves the viewer on the alternate screen');
     assert.match(screen, /FULLSCREEN_FRAME/, 'with the program\'s frame on it');
     a.close(); b.close();
+  } finally {
+    killDaemons(env);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a viewer attaching at another width gets the reflowed screen, not cursor moves meant for the old one', async () => {
+  const { env, dir } = makeEnv();
+  try {
+    sp(env, 'new', 'reflow');
+    await sleep(500);
+    const path = socketPathOf(env);
+    const a = new Client(path); await a.ready(); a.attachWindow('reflow:0');
+    await sleep(400);
+    // What an agent's live region does at 80 columns: print a 60-column
+    // line, then go up one row and redraw it. At 40 columns that line takes
+    // two rows, so the same cursor move would erase only its second half.
+    a.type("printf '%060d\\n\\033[1A\\033[2KREDRAWN\\n' 0\n");
+    await sleep(700);
+
+    // A narrower viewer (a phone) takes over the window, then reattaches.
+    const b = new Client(path); await b.ready(); b.attachWindow('reflow:0', false, 40);
+    await sleep(700);
+    const term = new xtermPkg.Terminal({ cols: 40, rows: 24, allowProposedApi: true });
+    await new Promise<void>((done) => term.write(b.output, done));
+    const screen = Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(i)?.translateToString(true) ?? '').join('\n');
+    assert.match(screen, /REDRAWN/, 'the redraw is on screen');
+    assert.doesNotMatch(screen, /0{20}/, 'and the line it replaced is gone, not half left behind');
+
+    // That attach rebuilt the raw log for 40 columns; a later viewer at the
+    // same width replays it, with output from after the resize still in it.
+    // (With the 80-column viewer gone first, so nothing resizes it back.)
+    a.close();
+    b.type("echo AFTER-RESIZE\n");
+    await sleep(500);
+    b.close();
+    const c = new Client(path); await c.ready(); c.attachWindow('reflow:0', false, 40);
+    await sleep(700);
+    assert.ok(c.output.startsWith(RESET_PREFIX), 'a raw replay, not the serialize fallback');
+    const term2 = new xtermPkg.Terminal({ cols: 40, rows: 24, allowProposedApi: true });
+    await new Promise<void>((done) => term2.write(c.output, done));
+    const screen2 = Array.from({ length: term2.rows }, (_, i) => term2.buffer.active.getLine(i)?.translateToString(true) ?? '').join('\n');
+    assert.match(screen2, /REDRAWN/, 'the rebuilt log keeps the redraw');
+    assert.match(screen2, /^AFTER-RESIZE$/m, 'and the output that followed it');
+    assert.doesNotMatch(screen2, /0{20}/, 'without the replaced line');
+    c.close();
   } finally {
     killDaemons(env);
     rmSync(dir, { recursive: true, force: true });

@@ -119,6 +119,13 @@ export class Window {
   // window nobody has opened yet as active.
   #lastSeenAt = Date.now() + 1000;
   #raw: RawScrollback;
+  // Set when the window changes size. The raw log's cursor addressing was
+  // computed for the old grid, so replaying it at the new one scatters text
+  // (an agent's redraws especially). Until #rebaseRaw rebuilds it, replays
+  // and saves use the serialized screen.
+  #rawStale = false;
+  #rebasing = false;
+  #sizeChanges = 0;
 
   constructor(opts: WindowOpts) {
     this.id = opts.id ?? randomUUID();
@@ -289,7 +296,40 @@ export class Window {
       try { this.#pty.resize(cols, rows); } catch { /* races with pty exit */ }
     }
     this.#term.resize(cols, rows);
+    this.#rawStale = true;
+    this.#sizeChanges++;
     this.scrollbackDirty = true;
+  }
+
+  /**
+   * Rebase a stale raw log onto the headless terminal's screen, which xterm
+   * reflowed at every resize as it went. Started by the next replay or save
+   * rather than by the resize, because a dragged pane resizes many times a
+   * second. History from before the resize loses its OSC 8 links and OSC 133
+   * marks, as on the serialize path; output after it is byte-exact again.
+   *
+   * xterm parses writes later, not as they are made, so the screen can lag
+   * the log by whatever output is still queued; serializing it right away
+   * would drop that output from the log for good. An empty write is a
+   * barrier instead: when its callback runs, everything pushed before it has
+   * been parsed, and what was pushed since is carried over after the seed.
+   */
+  #rebaseRaw(scrollbackLines: number): void {
+    if (!this.#rawStale || this.#rebasing) return;
+    this.#rebasing = true;
+    const mark = this.#raw.pushed;
+    const sizeChanges = this.#sizeChanges;
+    this.#term.write('', () => {
+      this.#rebasing = false;
+      // Null only if the cap trimmed past the mark, in which case the seed
+      // alone is as close as there is.
+      const since = this.#raw.since(mark);
+      this.#raw.reset(Buffer.from(this.serializeState(scrollbackLines, false), 'utf8'));
+      if (since) this.#raw.push(since);
+      // Resized again while waiting: the next use starts another rebase.
+      this.#rawStale = sizeChanges !== this.#sizeChanges;
+      this.scrollbackDirty = true;
+    });
   }
 
   /** Escape-sequence replay that reconstructs this window's screen and scrollback.
@@ -306,7 +346,13 @@ export class Window {
   }
 
   /** Raw sidecar bytes for persistence (byte image of the live string stream). */
-  rawBytes(): Buffer { return this.#raw.bytes(); }
+  rawBytes(scrollbackLines: number): Buffer {
+    if (!this.#rawStale) return this.#raw.bytes();
+    // Until the rebase lands, the serialized screen; the rebase marks the
+    // window dirty, so the next snapshot saves the rebuilt log.
+    this.#rebaseRaw(scrollbackLines);
+    return Buffer.from(this.serializeState(scrollbackLines, false), 'utf8');
+  }
 
   /**
    * The payload sent to a (re)attaching client to reconstruct this window.
@@ -327,7 +373,8 @@ export class Window {
    * left out. The serialize path is always whole.
    */
   replayPayload(scrollbackLines: number, refreshPrefix: string, tailBytes = 0): { data: Buffer; partial: boolean } {
-    if (platform.rawReplaySafe && !this.#raw.onAltScreen) {
+    this.#rebaseRaw(scrollbackLines);
+    if (platform.rawReplaySafe && !this.#rawStale && !this.#raw.onAltScreen) {
       const { bytes, partial } = tailBytes > 0 ? this.#raw.tail(tailBytes) : { bytes: this.#raw.bytes(), partial: false };
       // RESET_PREFIX resets attributes too, so a tail cut after colors were
       // set still starts from plain text.

@@ -122,7 +122,7 @@ export class Snapshotter {
         // is retried by the next snapshot.
         try {
           const replay = w.serializeState(lines);
-          const raw = w.rawBytes();
+          const raw = w.rawBytes(lines);
           atomicWrite(scrollbackFile(w.id), replay);
           atomicWrite(rawScrollbackFile(w.id), raw);
           w.scrollbackDirty = false;
