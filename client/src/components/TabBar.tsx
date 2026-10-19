@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppSettings } from "../settings";
 import type { MenuItem, Tab, TabGroupState } from "../types";
+import { isRealTab } from "../lib/tabs";
 import { adjustForContrast, GROUP_COLORS, groupColorHex } from "../utils/groupColor";
 import { getFileIconResult, useIconThemeVersion } from "../utils/iconThemes";
 import FileIcon from "./FileIcon";
@@ -11,6 +12,9 @@ type TabBarScope = AppSettings["tabBarScope"];
 interface Props {
   tabs: Tab[];
   activeTabId: string | null;
+  // The grid tab a terminal-tab drag is hovering in this bar, if any —
+  // highlighted to say "drop to add as a cell" (plans/project-grid-tab.md).
+  dropGridTabId?: string | null;
   label: (tab: Tab) => string;
   activity: (tab: Tab) => boolean;
   onActivate: (id: string) => void;
@@ -119,6 +123,7 @@ export default function TabBar({
   activity,
   onActivate,
   onClose,
+  dropGridTabId,
   onShowMenu,
   activeMenuSourceId,
   onCloseMenu,
@@ -461,11 +466,16 @@ export default function TabBar({
       dropIndicator?.id === tab.id ? ` drop-indicator-${dropIndicator.edge}` : "";
     const draggingClass = dragTabId === tab.id ? " dragging" : "";
     const groupedClass = groupLineColor ? " grouped" : "";
+    const gridDropClass = dropGridTabId === tab.id ? " drop-target-grid" : "";
     return (
       <div
         key={tab.id}
         data-tab-id={tab.id}
-        className={`tab${tab.id === activeTabId ? " active" : ""}${indicatorClass}${draggingClass}${groupedClass}`}
+        // SplitLayout's hit-test reads these: a terminal tab may drop onto a
+        // grid tab to join it as a cell.
+        data-grid-tab={tab.gridId !== undefined ? "" : undefined}
+        data-terminal-tab={isRealTab(tab) ? "" : undefined}
+        className={`tab${tab.id === activeTabId ? " active" : ""}${indicatorClass}${draggingClass}${groupedClass}${gridDropClass}`}
         style={groupLineColor ? ({ "--group-color": groupLineColor } as React.CSSProperties) : undefined}
         draggable={nativeDrag}
         onDragStart={nativeDrag ? (e) => onDragSourceStart(e, { kind: "tab", tabId: tab.id }) : undefined}
@@ -491,6 +501,7 @@ export default function TabBar({
         {tab.settingsView && <Icon name="settings-gear" className="tab-type-icon" />}
         {tab.keyboardView && <Icon name="keyboard" className="tab-type-icon" />}
         {tab.extensionPageId !== undefined && <Icon name="extensions" className="tab-type-icon" />}
+        {tab.gridId !== undefined && <Icon name="layout" className="tab-type-icon" />}
         {tab.extViewerPath && (
           <FileIcon
             className="tab-file-icon"

@@ -34,10 +34,13 @@ Keyboard Shortcuts).
 | `Ctrl+Alt+←` / `Ctrl+Alt+→` § | Move the active tab into the previous / next editor group |
 | ``Ctrl+` `` | Toggle the bottom terminal panel |
 | ``Ctrl+Shift+` `` | New terminal in the bottom panel |
+| `Alt+←` / `Alt+→` / `Alt+↑` / `Alt+↓` | Focus the grid cell to the left / right / above / below (only while a grid tab is active; wraps at the edges) |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste files in the FILES tree (tree focused) |
 | `Ctrl+F` | Search file names in the FILES tree (tree focused) |
 | `F2` | Rename the focused file in FILES, or the focused terminal in PROJECTS |
 | `Delete` | Delete the selected files in FILES, or close the focused terminal or project in PROJECTS |
+
+The other grid tab commands (`Grid: New Grid`, `Grid: Tile All Terminals`, `Grid: Add Terminal`, `Grid: Focus Next Cell`, `Grid: Focus Previous Cell`, `Grid: Toggle Zoom`, `Grid: Pop Out Cell`, `Grid: Close Cell`) have no default shortcut. Run them from the command palette, or bind them in the Keyboard Shortcuts editor.
 
 \* Browser-reserved outside the installed PWA — bind a different combo in Keyboard Shortcuts if you're using Perch as a regular browser tab.
 

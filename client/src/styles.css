@@ -2269,6 +2269,190 @@ body.tab-dragging .split-content-host {
   height: 5px;
 }
 
+/* Project grid tabs (plans/project-grid-tab.md): one CSS grid of terminal
+   cells. The 1px gap shows the border color through as the cell separator;
+   sashes are absolutely positioned overlays so they never become grid
+   children (a cell's position in the React tree must not change). */
+.grid-view {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: 1px;
+  background: var(--border);
+}
+
+.grid-view.resizing,
+.grid-view.swapping {
+  user-select: none;
+}
+
+.grid-view.resizing .terminal-host,
+.grid-view.swapping .terminal-host {
+  pointer-events: none;
+}
+
+.grid-cell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.grid-cell.swap-source {
+  opacity: 0.6;
+}
+
+.grid-cell.swap-target::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--focus-border);
+  background: color-mix(in srgb, var(--focus-border) 12%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.grid-cell-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  font-size: 11px;
+  color: var(--tab-inactive-fg);
+  background: var(--tab-bar-bg);
+  border-bottom: 1px solid var(--tab-border);
+  user-select: none;
+  cursor: grab;
+  touch-action: none;
+}
+
+.grid-cell-header.dragging {
+  cursor: grabbing;
+}
+
+/* The focused cell is marked by one icon in its title bar. Every header
+   reserves the icon's slot so titles never shift as focus moves. */
+.grid-cell-focus-icon {
+  flex: 0 0 auto;
+  font-size: 10px !important;
+  color: var(--accent);
+  visibility: hidden;
+}
+
+.grid-cell.focused .grid-cell-focus-icon {
+  visibility: visible;
+}
+
+.grid-cell.focused .grid-cell-title {
+  color: var(--fg-bright);
+  font-weight: 600;
+}
+
+.grid-cell-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid-cell-spacer {
+  flex: 1;
+}
+
+.grid-cell-header-btn {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.grid-cell-header-btn:hover,
+.grid-cell-header-btn.active {
+  opacity: 1;
+  background: var(--hover);
+}
+
+.grid-cell-header-btn:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.grid-cell-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.grid-sash {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.grid-sash-col {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.grid-sash-row {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.grid-sash::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+
+.grid-sash-col::after {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.grid-sash-row::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.grid-sash:hover::after,
+.grid-sash.dragging::after {
+  background: var(--accent);
+}
+
+.grid-sash-col:hover::after,
+.grid-sash-col.dragging::after {
+  width: 3px;
+}
+
+.grid-sash-row:hover::after,
+.grid-sash-row.dragging::after {
+  height: 3px;
+}
+
+/* A terminal tab dragged over a grid tab: dropping adds it as a cell. */
+.tab.drop-target-grid {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--focus-border) 15%, var(--tab-inactive-bg));
+}
+
 /* Drag-to-split's 5-zone drop overlay (T12/T13) — a translucent accent
    rectangle filling whichever zone (center/left/right/top/bottom) of a
    group's content area the dragged tab is currently hovering, computed and

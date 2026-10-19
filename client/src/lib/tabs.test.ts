@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Tab, TerminalSession } from "../types";
 import {
   groupKeyForTab,
+  isRealTab,
   moveGroup,
   moveGroupWithin,
   moveId,
@@ -368,5 +369,22 @@ describe("tabsAreDuplicates", () => {
     const settings = makeTab({ id: "1", sessionName: "", attachName: "", settingsView: true });
     const real = makeTab({ id: "2", sessionName: "blog" });
     expect(tabsAreDuplicates(settings, real)).toBe(false);
+  });
+});
+
+describe("grid tabs", () => {
+  const grid = (gridId: string, id = "t") =>
+    makeTab({ id, sessionName: "", attachName: "", gridId, originSessionName: "session" });
+
+  it("are not real tabs but join their origin project's group", () => {
+    expect(isRealTab(grid("g"))).toBe(false);
+    expect(groupKeyForTab(grid("g"))).toBe("session");
+  });
+
+  it("are duplicates only of tabs showing the same grid", () => {
+    expect(tabsAreDuplicates(grid("g", "a"), grid("g", "b"))).toBe(true);
+    expect(tabsAreDuplicates(grid("g", "a"), grid("h", "b"))).toBe(false);
+    expect(tabsAreDuplicates(grid("g"), makeTab({}))).toBe(false);
+    expect(tabsAreDuplicates(makeTab({}), grid("g"))).toBe(false);
   });
 });

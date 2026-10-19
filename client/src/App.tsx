@@ -93,6 +93,8 @@ import type { TabDragPayload } from "./lib/detachedWindows";
 import type { DragSource } from "./components/TabBar";
 import type { DropTarget, NativeDragEndInfo } from "./components/SplitLayout";
 import { randomUUID } from "./lib/uuid";
+import GridView, { PHONE_MQ } from "./components/GridView";
+import { useGrids } from "./hooks/useGrids";
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 500;
@@ -935,6 +937,12 @@ export default function App() {
     moveTabToGroup,
     moveTabToAdjacentGroup,
     splitGroupAndMoveTab,
+    grids,
+    setGrids,
+    gridsRef,
+    activeGridCell,
+    sessionsRef: tabsSessionsRef,
+    splitLayoutRef,
   } = useTabs(
     sessions,
     sessionsLoadedRef,
@@ -959,10 +967,85 @@ export default function App() {
     showError,
   );
   detachedApiRef.current = { holderOf, focusDetachedTab };
+
+  // Grids with output printed while none of their tabs was on screen (spec
+  // R16). A grid's cells stay attached while hidden, so the server's
+  // per-window activity flag (set only for unwatched windows) never fires
+  // for them; their TerminalViews' own onOutput does instead, exactly like
+  // the bottom panel's tabs. Cleared once one of the grid's tabs shows.
+  const [gridOutput, setGridOutput] = useState<ReadonlySet<string>>(() => new Set());
+  const gridTabShown = useCallback(
+    (gridId: string) => tabsRef.current.some((t) => t.gridId === gridId && t.groupId !== undefined && groupActive[t.groupId] === t.id),
+    [tabsRef, groupActive],
+  );
+  const markGridOutput = useCallback(
+    (gridId: string) => {
+      if (gridTabShown(gridId)) return;
+      setGridOutput((prev) => (prev.has(gridId) ? prev : new Set(prev).add(gridId)));
+    },
+    [gridTabShown],
+  );
+  useEffect(() => {
+    setGridOutput((prev) => {
+      const cleared = [...prev].filter((id) => gridTabShown(id));
+      if (cleared.length === 0) return prev;
+      const next = new Set(prev);
+      for (const id of cleared) next.delete(id);
+      return next;
+    });
+  }, [gridTabShown]);
+  const tabActivityWithGrids = useCallback(
+    (tab: Tab): boolean => {
+      if (tab.gridId !== undefined && gridOutput.has(tab.gridId)) {
+        return tab.groupId === undefined || groupActive[tab.groupId] !== tab.id;
+      }
+      return tabActivity(tab);
+    },
+    [gridOutput, groupActive, tabActivity],
+  );
+
+  // Project grid tabs (plans/project-grid-tab.md): every action on a grid
+  // and the menu items that reach them. State lives in useTabs.
+  const {
+    newGrid,
+    moveTabsToGrid,
+    tileAll,
+    addTerminalToGrid,
+    popOutCell,
+    closeCell,
+    swapGridCells,
+    setGridTracks,
+    toggleGridZoom,
+    focusCell,
+    focusAdjacentCell,
+    focusCellInDirection,
+    gridTabMenuItems,
+    moveToGridMenuItem,
+    chipGridMenuItems,
+    chipGridDropdownItems,
+  } = useGrids({
+    tabsRef,
+    setTabs,
+    grids,
+    gridsRef,
+    setGrids,
+    sessions,
+    sessionsRef: tabsSessionsRef,
+    splitLayoutRef,
+    setActiveTabId,
+    focusGroup,
+    removeTabsForMove,
+    projectKeyForSession,
+    refresh,
+    promptDialog,
+    showError,
+  });
   const moveTabToNewWindow = useCallback(
     (tabId: string) => {
       const tab = tabsRef.current.find((t) => t.id === tabId);
       if (!tab) return;
+      // A grid lives in this window's own state; its tab never leaves it.
+      if (tab.gridId !== undefined) return;
       if (dirtyTabsRef.current.has(tabId)) {
         showError(new Error("Save or discard this tab's changes before moving it into a new window."));
         return;
@@ -995,7 +1078,10 @@ export default function App() {
           groupKey: source.kind === "chip" ? source.groupKey : undefined,
           paneRect: { width: rect?.width ?? 0, height: rect?.height ?? 0 },
         },
-        dirty: tabs.some((t) => dirtyTabsRef.current.has(t.id)),
+        // A grid tab may not leave this window (the receiving window has no
+        // grid to show): the dirty channel already means exactly that to
+        // every other window's dragover.
+        dirty: tabs.some((t) => dirtyTabsRef.current.has(t.id) || t.gridId !== undefined),
       };
     },
     [tabsRef, projectKeyForSession, groupContentRects, dirtyTabsRef],
@@ -1023,6 +1109,12 @@ export default function App() {
   const finishForeignDrag = useCallback(
     async (payload: TabDragPayload, info: NativeDragEndInfo) => {
       if (info.handledLocally) return;
+      if (payload.tabs.some((t) => t.gridId !== undefined)) {
+        const outside =
+          info.clientX < 0 || info.clientY < 0 || info.clientX > window.innerWidth || info.clientY > window.innerHeight;
+        if (outside) showError(new Error("A grid tab stays in its window. Pop its terminals out to move them."));
+        return;
+      }
       const dirty = payload.tabs.some((t) => dirtyTabsRef.current.has(t.id));
       const result = await resolveDragEnd(payload.dragId, info.screenX, info.screenY);
       if (result.taken && result.taken.length > 0) {
@@ -1109,9 +1201,24 @@ export default function App() {
   // there's no re-render-loop risk from a fresh closure identity.
   const tabExtrasFor = useCallback(
     (groupId: string): React.ReactNode => {
-      if (extWindowActions.length === 0) return null;
       const activeId = groupActive[groupId];
       const tab = activeId ? tabs.find((t) => t.id === activeId) : undefined;
+      if (tab?.gridId !== undefined) {
+        const gridId = tab.gridId;
+        return (
+          <button
+            className="tab-bar-window-action"
+            title="Add Terminal to Grid"
+            onClick={(e) => {
+              e.stopPropagation();
+              void addTerminalToGrid(gridId, tab.id);
+            }}
+          >
+            <Icon name="add" />
+          </button>
+        );
+      }
+      if (extWindowActions.length === 0) return null;
       if (!tab || !isRealTab(tab)) return null;
       const session = sessions.find((s) => s.name === tab.sessionName);
       if (!session) return null;
@@ -1141,7 +1248,7 @@ export default function App() {
         </>
       );
     },
-    [extWindowActions, groupActive, tabs, sessions],
+    [extWindowActions, groupActive, tabs, sessions, addTerminalToGrid],
   );
 
   // A merged-away editor group's DOM node unmounting already disconnects its
@@ -1443,6 +1550,8 @@ export default function App() {
     resolvedFilesRootDir,
     repoIndex,
     mobilePointer ? null : moveTabToNewWindow,
+    moveToGridMenuItem,
+    gridTabMenuItems,
   );
 
   // Linked worktrees stopped being recorded as recent projects; this sweeps
@@ -1711,6 +1820,7 @@ export default function App() {
           ? [...items, { label: "", separator: true, onClick: () => {} }, ...contributed]
           : items;
       const entries = members.flatMap((m) => m.windows.map((w) => ({ session: m, window: w })));
+      const gridRows = chipGridDropdownItems(editorGroupId, chipKey);
       if (entries.length === 0) {
         return withContributions([{ label: "No terminals", disabled: true, onClick: () => {} }]);
       }
@@ -1739,11 +1849,13 @@ export default function App() {
           checked: openKeys.has(`${m.name}:${w.index}`),
           onClick: () => openWindowTab(m.name, w.index),
         })),
+        ...(gridRows.length > 0 ? [{ separator: true, label: "", onClick: () => {} }, ...gridRows] : []),
         { separator: true, label: "", onClick: () => {} },
         { label: "New Terminal", icon: "add", onClick: () => createWindow(primary?.name ?? chipKey) },
+        { label: "New Grid", icon: "layout", onClick: () => void newGrid(editorGroupId, chipKey) },
       ]);
     },
-    [sessions, tabs, groupActive, openWindowTab, createWindow, projectKeyForSession],
+    [sessions, tabs, groupActive, openWindowTab, createWindow, projectKeyForSession, chipGridDropdownItems, newGrid],
   );
 
   // Chrome-style "+" in a tab bar (TabBar.tsx's tab-new-btn) — creates a new
@@ -1806,11 +1918,15 @@ export default function App() {
     [tabMenuItems, tabBarSettingsItems],
   );
   const groupMenuItemsWithSettings = useCallback(
-    (editorGroupId: string, sessionName: string): MenuItem[] => [
-      ...groupMenuItems(editorGroupId, sessionName),
-      ...tabBarSettingsItems(),
-    ],
-    [groupMenuItems, tabBarSettingsItems],
+    (editorGroupId: string, sessionName: string): MenuItem[] => {
+      const gridItems = chipGridMenuItems(editorGroupId, sessionName);
+      return [
+        ...groupMenuItems(editorGroupId, sessionName),
+        ...(gridItems.length > 0 ? [{ separator: true, label: "", onClick: () => {} }, ...gridItems] : []),
+        ...tabBarSettingsItems(),
+      ];
+    },
+    [groupMenuItems, tabBarSettingsItems, chipGridMenuItems],
   );
 
   const tabBarMenuItems = useCallback(
@@ -1938,6 +2054,42 @@ export default function App() {
       "split.down": () => splitGroup("down"),
       "split.left": () => splitGroup("left"),
       "split.up": () => splitGroup("up"),
+      "grid.new": () => {
+        if (activeSessionName !== null) void newGrid(activeGroupId, projectKeyForSession(activeSessionName));
+      },
+      "grid.tileAll": () => {
+        if (activeSessionName !== null) void tileAll(activeGroupId, projectKeyForSession(activeSessionName));
+      },
+      "grid.addTerminal": () => {
+        if (activeTab?.gridId !== undefined) void addTerminalToGrid(activeTab.gridId, activeTab.id);
+      },
+      "grid.focusNextCell": () => {
+        if (activeTab?.gridId !== undefined) focusAdjacentCell(activeTab.id, 1);
+      },
+      "grid.focusPreviousCell": () => {
+        if (activeTab?.gridId !== undefined) focusAdjacentCell(activeTab.id, -1);
+      },
+      "grid.focusLeft": () => {
+        if (activeTab?.gridId !== undefined) focusCellInDirection(activeTab.id, "left", window.matchMedia(PHONE_MQ).matches);
+      },
+      "grid.focusRight": () => {
+        if (activeTab?.gridId !== undefined) focusCellInDirection(activeTab.id, "right", window.matchMedia(PHONE_MQ).matches);
+      },
+      "grid.focusUp": () => {
+        if (activeTab?.gridId !== undefined) focusCellInDirection(activeTab.id, "up", window.matchMedia(PHONE_MQ).matches);
+      },
+      "grid.focusDown": () => {
+        if (activeTab?.gridId !== undefined) focusCellInDirection(activeTab.id, "down", window.matchMedia(PHONE_MQ).matches);
+      },
+      "grid.toggleZoom": () => {
+        if (activeTab?.gridId !== undefined && activeGridCell) toggleGridZoom(activeTab.gridId, activeGridCell.id);
+      },
+      "grid.popOutCell": () => {
+        if (activeTab?.gridId !== undefined && activeGridCell) popOutCell(activeTab.gridId, activeGridCell.id, activeTab.id);
+      },
+      "grid.closeCell": () => {
+        if (activeTab?.gridId !== undefined && activeGridCell) closeCell(activeTab.gridId, activeGridCell.id);
+      },
       "group.focusNext": () => {
         const order = leaves(splitTree);
         const idx = order.indexOf(activeGroupId);
@@ -2018,6 +2170,17 @@ export default function App() {
       panel.height,
       sidebarVisible,
       sidebarWidth,
+      activeTab,
+      activeGridCell,
+      newGrid,
+      tileAll,
+      addTerminalToGrid,
+      focusAdjacentCell,
+      focusCellInDirection,
+      toggleGridZoom,
+      popOutCell,
+      closeCell,
+      projectKeyForSession,
     ],
   );
 
@@ -2033,6 +2196,9 @@ export default function App() {
   useEffect(() => {
     setContextKey("panelFocus", panelFocused);
   }, [panelFocused]);
+  useEffect(() => {
+    setContextKey("gridFocus", activeTab?.gridId !== undefined && !panelFocused);
+  }, [activeTab?.gridId, panelFocused]);
   useEffect(() => {
     setContextKey("quickSwitcherOpen", switcherQuery !== null);
     // Only the switcher's initial mode is tracked — typing/deleting the ">"
@@ -2668,7 +2834,7 @@ export default function App() {
           activeGroupId={activeGroupId}
           groupActive={groupActive}
           label={tabLabel}
-          activity={tabActivity}
+          activity={tabActivityWithGrids}
           onActivate={setActiveTabId}
           onClose={closeTab}
           onShowMenu={showMenu}
@@ -2679,6 +2845,12 @@ export default function App() {
           onReorder={moveTab}
           onMoveTabToGroup={moveTabToGroup}
           onSplitAndMoveTab={splitGroupAndMoveTab}
+          onDropTabOnGrid={(tabId, gridTabId) => {
+            const gridTab = tabsRef.current.find((t) => t.id === gridTabId);
+            if (gridTab?.gridId !== undefined) {
+              void moveTabsToGrid([tabId], { gridId: gridTab.gridId, preferTabId: gridTabId });
+            }
+          }}
           nativeDrag={!mobilePointer}
           dragPayloadFor={dragPayloadFor}
           onForeignDrop={handleForeignDrop}
@@ -2753,6 +2925,43 @@ export default function App() {
                   openSettingsTab();
                 }}
               />
+            );
+          } else if (tab.gridId !== undefined) {
+            const grid = grids[tab.gridId];
+            content = grid ? (
+              <GridView
+                grid={grid}
+                focusedCellId={tab.gridFocusedCellId}
+                visible={visible}
+                focused={focused}
+                sessions={sessions}
+                onFocusCell={(cellId) => focusCell(tab.id, cellId)}
+                onCloseCell={(cellId) => closeCell(grid.id, cellId)}
+                onPopOutCell={(cellId) => popOutCell(grid.id, cellId, tab.id)}
+                onToggleZoom={(cellId) => toggleGridZoom(grid.id, cellId)}
+                onSwapCells={(a, b) => swapGridCells(grid.id, a, b)}
+                onSetTracks={(axis, sizes) => setGridTracks(grid.id, axis, sizes)}
+                onCellExit={(cellId) => closeCell(grid.id, cellId)}
+                onOutput={() => markGridOutput(grid.id)}
+                terminal={{
+                  settings: effectiveSettings,
+                  theme: activeTerminalTheme,
+                  fontsVersion,
+                  bindings: resolvedBindings,
+                  onError: showError,
+                  showMenu,
+                  onOpenFile: openFileOrViewer,
+                  onOpenFileSecondary: openFileOrViewerSecondary,
+                  onPreviewFile: openPreviewViewerTab,
+                  isPreviewable,
+                  onWindowSwitch: (session, windowIndex) => void openWindowTab(session, windowIndex),
+                  onSessionSwitch: openSwitchedSession,
+                }}
+              />
+            ) : (
+              <div className={`settings-host${visible ? "" : " hidden"}`}>
+                <div className="file-tree-empty">Loading…</div>
+              </div>
             );
           } else if (tab.extViewerPath !== undefined) {
             // The registered viewer that opened this tab may have been

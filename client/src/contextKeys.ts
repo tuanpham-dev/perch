@@ -18,6 +18,7 @@ export const CONTEXT_KEYS: { key: string; description: string }[] = [
   { key: "filesTreeFocus", description: "The FILES tree has keyboard focus" },
   { key: "projectsListFocus", description: "The PROJECTS list has keyboard focus" },
   { key: "panelFocus", description: "The bottom terminal panel holds keyboard focus" },
+  { key: "gridFocus", description: "A grid tab is the active editor tab and the bottom panel does not hold focus" },
   { key: "sidebarVisible", description: "The sidebar is shown" },
   { key: "rightSidebarVisible", description: "The right sidebar is shown" },
   { key: "sidebarFocus", description: "Focus is currently within the sidebar" },

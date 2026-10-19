@@ -27,7 +27,11 @@ import TabBar, { type DragSource } from "./TabBar";
 export type DropTarget =
   | { kind: "bar"; groupId: string; index: number; indicatorId: string | null; indicatorEdge: "left" | "right" }
   | { kind: "zone"; groupId: string; zone: "center" | "left" | "right" | "top" | "bottom" }
-  | { kind: "chipBar"; groupId: string; index: number; indicatorKey: string | null; indicatorEdge: "left" | "right" };
+  | { kind: "chipBar"; groupId: string; index: number; indicatorKey: string | null; indicatorEdge: "left" | "right" }
+  // A terminal tab over a grid tab in some bar: the drop adds it to that
+  // grid as a cell (plans/project-grid-tab.md, spec R20). Only ever produced
+  // for a terminal tab dragged within this window.
+  | { kind: "gridTab"; groupId: string; tabId: string };
 
 // What the source window learns when its native drag ends, before deciding
 // between "taken by another window", "cancelled" and "torn off".
@@ -128,6 +132,8 @@ interface CoordinatorProps {
   onReorder: (draggedId: string, toIndex: number) => void;
   onMoveTabToGroup: (tabId: string, targetGroupId: string, index?: number) => void;
   onSplitAndMoveTab: (targetGroupId: string, direction: SplitDirection, tabId: string) => void;
+  // A terminal tab dropped onto a grid tab (DropTarget "gridTab").
+  onDropTabOnGrid: (tabId: string, gridTabId: string) => void;
   // Builds the payload a native drag carries (App knows the tabs, the pane
   // size and which tabs have unsaved changes).
   dragPayloadFor: (source: DragSource, editorGroupId: string) => { payload: TabDragPayload; dirty: boolean };
@@ -212,6 +218,8 @@ function Leaf({
   // array — that was resetting its own scrollIntoView effect (keyed on
   // `tabs`) and snapping a mid-scroll tab strip back to the active tab.
   const groupTabs = useMemo(() => tabs.filter((t) => t.groupId === groupId), [tabs, groupId]);
+  const dropGridTabId =
+    dropTarget?.kind === "gridTab" && dropTarget.groupId === groupId ? dropTarget.tabId : null;
   const dropIndicator =
     dropTarget?.kind === "bar" && dropTarget.groupId === groupId && dropTarget.indicatorId
       ? { id: dropTarget.indicatorId, edge: dropTarget.indicatorEdge }
@@ -257,6 +265,7 @@ function Leaf({
         onNewWindow={onNewWindow ? () => onNewWindow(groupId) : null}
         dragTabId={dragTabId}
         dropIndicator={dropIndicator}
+        dropGridTabId={dropGridTabId}
         onTabPointerDown={(e, tabId) => onTabPointerDown(e, tabId, groupId)}
         tabJustDraggedRef={tabJustDraggedRef}
         nativeDrag={nativeDrag}
@@ -387,6 +396,17 @@ function RenderNode({
 function hitTest(clientX: number, clientY: number, draggedTabId: string): DropTarget | null {
   const el = document.elementFromPoint(clientX, clientY);
   if (!el) return null;
+  // A terminal tab of this window over a grid tab joins that grid. The
+  // dragged tab's own element says whether it is a terminal tab; a drag from
+  // another window has no element here, so it never targets a grid.
+  const gridTabEl = el.closest<HTMLElement>(".tab[data-grid-tab]");
+  if (gridTabEl && gridTabEl.dataset.tabId !== draggedTabId && draggedTabId) {
+    const dragged = document.querySelector<HTMLElement>(`.tab[data-tab-id="${CSS.escape(draggedTabId)}"]`);
+    const groupId = gridTabEl.closest<HTMLElement>(".split-leaf")?.dataset.groupId;
+    if (dragged?.hasAttribute("data-terminal-tab") && groupId) {
+      return { kind: "gridTab", groupId, tabId: gridTabEl.dataset.tabId! };
+    }
+  }
   const stripEl = el.closest<HTMLElement>(".tab-strip");
   if (stripEl) {
     const leafEl = stripEl.closest<HTMLElement>(".split-leaf");
@@ -476,6 +496,7 @@ export default function SplitLayout({
   onReorder,
   onMoveTabToGroup,
   onSplitAndMoveTab,
+  onDropTabOnGrid,
   dragPayloadFor,
   onForeignDrop,
   onNativeDragEnd,
@@ -496,6 +517,10 @@ export default function SplitLayout({
   const tabJustDraggedRef = useRef(false);
 
   const applyDrop = (tabId: string, sourceGroupId: string, target: DropTarget) => {
+    if (target.kind === "gridTab") {
+      onDropTabOnGrid(tabId, target.tabId);
+      return;
+    }
     if (target.kind === "bar") {
       if (target.groupId === sourceGroupId) onReorder(tabId, target.index);
       else onMoveTabToGroup(tabId, target.groupId, target.index);

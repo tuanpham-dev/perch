@@ -25,6 +25,7 @@ import {
   type SplitNode,
 } from "../lib/splits";
 import { projectName } from "../lib/projects";
+import { GRIDS_STORAGE_KEY, loadStoredGrids, reconcileGridCells, type Grid } from "../lib/grids";
 import type { AppSettings } from "../settings";
 import { tabStorage } from "../lib/detachedWindows";
 import type { ExtensionInfo, RegistrySourceResult, Tab, TerminalSession } from "../types";
@@ -148,6 +149,18 @@ export function useTabs(
   // `sessions` closure it captured when this render created it.
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+
+  // Project grid tabs (plans/project-grid-tab.md): each grid's cells, tracks
+  // and zoom, keyed by grid id and shared by every tab whose gridId points at
+  // it. Per device, like `tabs`. useGrids performs every user action on it;
+  // the effects below (reconcile, prune, heal) keep it consistent with
+  // `tabs` and the session poll.
+  const [grids, setGrids] = useState<Record<string, Grid>>(loadStoredGrids);
+  const gridsRef = useRef(grids);
+  gridsRef.current = grids;
+  useEffect(() => {
+    tabStorage().setItem(GRIDS_STORAGE_KEY, JSON.stringify(grids));
+  }, [grids]);
   // For openExtViewerTab, whose callback deliberately doesn't re-create on
   // every registry change: whether a viewer is global is read at open time.
   const extFileViewersRef = useRef(extFileViewers);
@@ -681,7 +694,7 @@ export function useTabs(
         if (record && tab.windowIndex !== undefined) {
           api.closeWindowTab(tab.attachName).catch(() => {});
         }
-        if (record) pushClosedTab(tab);
+        if (record && tab.gridId === undefined) pushClosedTab(tab);
       }
       mruTabIdsRef.current = mruTabIdsRef.current.filter((tid) => !idSet.has(tid));
       setTabs((prev) => prev.filter((t) => !idSet.has(t.id)));
@@ -840,7 +853,7 @@ export function useTabs(
       for (const t of toClose) {
         dirtyTabsRef.current.delete(t.id);
         if (t.windowIndex !== undefined) api.closeWindowTab(t.attachName).catch(() => {});
-        pushClosedTab(t);
+        if (t.gridId === undefined) pushClosedTab(t);
       }
       mruTabIdsRef.current = mruTabIdsRef.current.filter((tid) => !closedIds.has(tid));
       const survivors = tabsRef.current.filter((t) => !closedIds.has(t.id));
@@ -877,7 +890,7 @@ export function useTabs(
       for (const t of toClose) {
         dirtyTabsRef.current.delete(t.id);
         if (t.windowIndex !== undefined) api.closeWindowTab(t.attachName).catch(() => {});
-        pushClosedTab(t);
+        if (t.gridId === undefined) pushClosedTab(t);
       }
       mruTabIdsRef.current = mruTabIdsRef.current.filter((tid) => !closedIds.has(tid));
       setTabs((prev) => prev.filter((t) => !closedIds.has(t.id)));
@@ -994,6 +1007,64 @@ export function useTabs(
     });
   }, [extFileViewers]);
 
+  // Grid cells follow out-of-band renames/renumbers by stable id, and a
+  // cell whose window is gone (shell exited, window killed elsewhere)
+  // leaves its grid; an emptied grid is deleted, and the prune effect below
+  // then closes its tabs. Same poll-driven role as reconcileTabs and the
+  // vanished-window sweep play for window tabs.
+  useEffect(() => {
+    if (!sessionsLoadedRef.current) return;
+    setGrids((prev) => reconcileGridCells(prev, sessions));
+  }, [sessions, sessionsLoadedRef]);
+
+  // Keeps `grids` and grid tabs consistent: a grid tab whose grid is gone
+  // closes (not recorded — there is nothing to reopen), and a grid no tab
+  // shows any more is forgotten. Every action that creates a grid and its
+  // first tab sets both in the same synchronous step, so this never sees a
+  // fresh grid without its tab.
+  useEffect(() => {
+    const orphanTabs = tabs.filter((t) => t.gridId !== undefined && !grids[t.gridId]).map((t) => t.id);
+    if (orphanTabs.length > 0) dropTabs(orphanTabs, false);
+    const shown = new Set(tabs.map((t) => t.gridId).filter((g): g is string => g !== undefined));
+    if (Object.keys(grids).some((id) => !shown.has(id))) {
+      setGrids((prev) => {
+        const next: Record<string, Grid> = {};
+        let changed = false;
+        for (const [id, g] of Object.entries(prev)) {
+          if (shown.has(id)) next[id] = g;
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, [tabs, grids, dropTabs]);
+
+  // Per grid tab: the focused cell must be a cell of its grid (first cell
+  // otherwise), and its origin session — what puts the tab in its
+  // project's chip — follows the grid's first cell, so the tab stays
+  // grouped when the session it was created from goes away.
+  useEffect(() => {
+    setTabs((prev) => {
+      let changed = false;
+      const next = prev.map((tab) => {
+        if (tab.gridId === undefined) return tab;
+        const grid = grids[tab.gridId];
+        if (!grid || grid.cells.length === 0) return tab;
+        const first = grid.cells[0];
+        const focusOk = grid.cells.some((c) => c.id === tab.gridFocusedCellId);
+        const originOk = grid.cells.some((c) => c.sessionName === tab.originSessionName);
+        if (focusOk && originOk) return tab;
+        changed = true;
+        return {
+          ...tab,
+          gridFocusedCellId: focusOk ? tab.gridFocusedCellId : first.id,
+          ...(originOk ? {} : { originSessionName: first.sessionName, originSessionId: first.sessionId }),
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [grids, tabs]);
+
   // A viewer tab's origin session (see openExtViewerTab) can go away —
   // killed, or its last real tab closed independently of the viewer tab.
   // The viewer tab itself has no live terminal process to lose, so it stays
@@ -1005,6 +1076,9 @@ export function useTabs(
       let changed = false;
       const next = prev.map((tab) => {
         if (tab.originSessionName === undefined) return tab;
+        // A grid tab's origin is derived from its cells (the grid heal
+        // effect), never cleared — it always belongs to its project's chip.
+        if (tab.gridId !== undefined) return tab;
         const stillExists = tab.originSessionId
           ? sessions.some((s) => s.id === tab.originSessionId)
           : sessions.some((s) => s.name === tab.originSessionName);
@@ -1038,10 +1112,17 @@ export function useTabs(
   // and every session-level command act on. Usually activeRealTab's, but a
   // virtual tab's origin session wins even when none of its terminals is
   // open as a tab any more — the project is still the one the tab came from.
+  // A grid tab's context is its focused cell's session and window (spec R15).
+  const activeGrid = activeTab?.gridId !== undefined ? grids[activeTab.gridId] : undefined;
+  const activeGridCell = activeGrid
+    ? (activeGrid.cells.find((c) => c.id === activeTab?.gridFocusedCellId) ?? activeGrid.cells[0])
+    : undefined;
   const activeSessionName: string | null =
-    virtualOrigin !== undefined && sessions.some((s) => s.name === virtualOrigin)
-      ? virtualOrigin
-      : (activeRealTab?.sessionName ?? null);
+    activeGridCell && sessions.some((s) => s.name === activeGridCell.sessionName)
+      ? activeGridCell.sessionName
+      : virtualOrigin !== undefined && sessions.some((s) => s.name === virtualOrigin)
+        ? virtualOrigin
+        : (activeRealTab?.sessionName ?? null);
 
   const activeSession = sessions.find((s) => s.name === activeSessionName) ?? null;
   // A window-tab is pinned to a specific window, which may not be the
@@ -1051,7 +1132,9 @@ export function useTabs(
   // when the tab is in the active session, though: a real tab left over
   // from another project says nothing about this one's windows.
   const activeWindow =
-    activeRealTab?.windowIndex !== undefined && activeRealTab.sessionName === activeSessionName
+    activeGridCell && activeGridCell.sessionName === activeSessionName
+      ? activeSession?.windows.find((w) => w.index === activeGridCell.windowIndex)
+      : activeRealTab?.windowIndex !== undefined && activeRealTab.sessionName === activeSessionName
       ? activeSession?.windows.find((w) => w.index === activeRealTab.windowIndex)
       : activeSession?.windows.find((w) => w.active);
   const filesRootDir = activeWindow?.cwd ?? null;
@@ -1102,6 +1185,11 @@ export function useTabs(
         }
         return tab.extensionPageId;
       }
+      if (tab.gridId !== undefined) {
+        const grid = grids[tab.gridId];
+        const session = grid?.cells[0]?.sessionName ?? tab.originSessionName ?? "";
+        return `${projectLabelForSession(session)} · ${grid?.name ?? "Grid"}`;
+      }
       if (tab.extViewerTitle !== undefined) return tab.extViewerTitle;
       const virtualPath = tabVirtualPath(tab);
       if (virtualPath !== undefined) {
@@ -1112,7 +1200,7 @@ export function useTabs(
       const win = session?.windows.find((w) => w.index === tab.windowIndex);
       return `${projectLabelForSession(tab.sessionName)} · ${win?.name ?? `terminal ${tab.windowIndex}`}`;
     },
-    [sessions, extensions, registryCatalog, projectLabelForSession],
+    [sessions, extensions, registryCatalog, projectLabelForSession, grids],
   );
 
   // Suppressed on the active tab — you're already looking at it, a dot
@@ -1124,6 +1212,13 @@ export function useTabs(
       // app-focused one — VS Code shows no dot on any visible editor, and a
       // background split pane's own shown tab is still visible on screen.
       if (tab.groupId !== undefined && splitLayout.groupActive[tab.groupId] === tab.id) return false;
+      if (tab.gridId !== undefined) {
+        return (grids[tab.gridId]?.cells ?? []).some(
+          (c) =>
+            sessions.find((s) => s.name === c.sessionName)?.windows.find((w) => w.index === c.windowIndex)
+              ?.activity ?? false,
+        );
+      }
       const session = sessions.find((s) => s.name === tab.sessionName);
       if (!session) return false;
       if (tab.windowIndex !== undefined) {
@@ -1131,7 +1226,7 @@ export function useTabs(
       }
       return session.windows.some((w) => w.activity);
     },
-    [sessions, splitLayout.groupActive],
+    [sessions, splitLayout.groupActive, grids],
   );
 
   // A cross-session pick made from inside the terminal (the tmux backend's choose-tree) — the server
@@ -1169,6 +1264,23 @@ export function useTabs(
       if (tab.keyboardView) return;
       // Global singleton, like the settings tab — not duplicated per group.
       if (tab.extensionPageId !== undefined) return;
+      // A grid tab's copy shows the same grid (linked — spec R3); no new
+      // attach is minted here, the copy's cells reuse the grid's own.
+      if (tab.gridId !== undefined) {
+        const copy: Tab = {
+          id: randomUUID(),
+          sessionName: "",
+          attachName: "",
+          groupId: targetGroupId,
+          gridId: tab.gridId,
+          gridFocusedCellId: tab.gridFocusedCellId,
+          originSessionName: tab.originSessionName,
+          originSessionId: tab.originSessionId,
+        };
+        setTabs((prev) => [...prev, copy]);
+        setActiveTabId(copy.id, targetGroupId);
+        return;
+      }
       if (tab.windowIndex !== undefined) {
         try {
           const { attachName } = await api.openWindowTab(tab.sessionName, tab.windowIndex);
@@ -1456,6 +1568,12 @@ export function useTabs(
     tabs,
     setTabs,
     tabsRef,
+    grids,
+    setGrids,
+    gridsRef,
+    activeGridCell,
+    sessionsRef,
+    splitLayoutRef,
     activeTabId,
     setActiveTabId,
     activeTabIdRef,

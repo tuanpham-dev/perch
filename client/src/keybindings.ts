@@ -33,6 +33,8 @@ export interface Command {
   enablement?: string;
 }
 
+const GRID_KEYS_WHEN = "gridFocus && !quickSwitcherOpen && !sidebarFocus";
+
 export const COMMANDS: Command[] = [
   { id: "sidebar.toggle", label: "Toggle Sidebar", defaultBindings: [{ key: "ctrl+shift+KeyB" }], scope: "global" },
   // VS Code's secondary-sidebar chord. The right sidebar exists only once a
@@ -70,6 +72,21 @@ export const COMMANDS: Command[] = [
   { id: "split.down", label: "Split Editor Down", defaultBindings: [], scope: "global" },
   { id: "split.left", label: "Split Editor Left", defaultBindings: [], scope: "global" },
   { id: "split.up", label: "Split Editor Up", defaultBindings: [], scope: "global" },
+  { id: "grid.new", label: "Grid: New Grid", defaultBindings: [], scope: "global" },
+  { id: "grid.tileAll", label: "Grid: Tile All Terminals", defaultBindings: [], scope: "global" },
+  { id: "grid.addTerminal", label: "Grid: Add Terminal", defaultBindings: [], scope: "global" },
+  { id: "grid.focusNextCell", label: "Grid: Focus Next Cell", defaultBindings: [], scope: "global" },
+  { id: "grid.focusPreviousCell", label: "Grid: Focus Previous Cell", defaultBindings: [], scope: "global" },
+  // tmux's own no-prefix pane switching (bind -n M-Left select-pane -L), only
+  // while a grid tab has the editor's focus — Alt+Arrow reaches the shell
+  // everywhere else.
+  { id: "grid.focusLeft", label: "Grid: Focus Left Cell", defaultBindings: [{ key: "alt+ArrowLeft", when: GRID_KEYS_WHEN }], scope: "global" },
+  { id: "grid.focusRight", label: "Grid: Focus Right Cell", defaultBindings: [{ key: "alt+ArrowRight", when: GRID_KEYS_WHEN }], scope: "global" },
+  { id: "grid.focusUp", label: "Grid: Focus Cell Above", defaultBindings: [{ key: "alt+ArrowUp", when: GRID_KEYS_WHEN }], scope: "global" },
+  { id: "grid.focusDown", label: "Grid: Focus Cell Below", defaultBindings: [{ key: "alt+ArrowDown", when: GRID_KEYS_WHEN }], scope: "global" },
+  { id: "grid.toggleZoom", label: "Grid: Toggle Zoom", defaultBindings: [], scope: "global" },
+  { id: "grid.popOutCell", label: "Grid: Pop Out Cell", defaultBindings: [], scope: "global" },
+  { id: "grid.closeCell", label: "Grid: Close Cell", defaultBindings: [], scope: "global" },
   { id: "group.focusNext", label: "Focus Next Editor Group", defaultBindings: [], scope: "global" },
   { id: "group.focusPrevious", label: "Focus Previous Editor Group", defaultBindings: [], scope: "global" },
   { id: "group.focus1", label: "Focus 1st Editor Group", defaultBindings: [{ key: "ctrl+Digit1" }], scope: "global" },

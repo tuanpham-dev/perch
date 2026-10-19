@@ -12,7 +12,8 @@ export function isRealTab(tab: Tab): boolean {
     tab.settingsView === undefined &&
     tab.keyboardView === undefined &&
     tab.extViewerPath === undefined &&
-    tab.extensionPageId === undefined
+    tab.extensionPageId === undefined &&
+    tab.gridId === undefined
   );
 }
 
@@ -28,6 +29,9 @@ export function tabVirtualPath(tab: Tab): string | undefined {
 export function tabsAreDuplicates(a: Tab, b: Tab): boolean {
   if (a.settingsView || b.settingsView) return !!a.settingsView && !!b.settingsView;
   if (a.keyboardView || b.keyboardView) return !!a.keyboardView && !!b.keyboardView;
+  if (a.gridId !== undefined || b.gridId !== undefined) {
+    return a.gridId !== undefined && a.gridId === b.gridId;
+  }
   if (a.extensionPageId !== undefined || b.extensionPageId !== undefined) {
     return a.extensionPageId !== undefined && a.extensionPageId === b.extensionPageId;
   }

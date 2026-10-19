@@ -57,6 +57,12 @@ export function useTabGroups(
       const liveKeys = new Map<string, string>(); // group key -> a session name mapping to it
       for (const t of tabs) {
         if (isRealTab(t)) liveKeys.set(keyForSession(t.sessionName), t.sessionName);
+        // A grid tab is a project's tab too, and may be its only one once
+        // Tile All has moved every terminal into it — its chip keeps its
+        // color rather than being pruned (plans/project-grid-tab.md).
+        else if (t.gridId !== undefined && t.originSessionName !== undefined && !liveKeys.has(keyForSession(t.originSessionName))) {
+          liveKeys.set(keyForSession(t.originSessionName), t.originSessionName);
+        }
       }
       let changed = false;
       const next: Record<string, TabGroupState> = {};

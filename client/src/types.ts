@@ -126,6 +126,16 @@ export interface Tab {
   // installed extensions are looked up by id alone.
   extensionPageId?: string;
   extensionPageSource?: string;
+  // Marks a grid tab (plans/project-grid-tab.md): several of one project's
+  // terminal windows tiled in one tab. sessionName/attachName are "" like
+  // every other virtual-tab kind; originSessionName is kept pointing at a
+  // session of the grid's project so the tab joins that project's chip
+  // (useTabs heals it as cells come and go). The grid itself — cells,
+  // tracks, zoom — lives in useTabs' `grids` record, shared by every tab
+  // with the same gridId (split copies are linked).
+  gridId?: string;
+  // Per-tab: which cell of the grid has focus in this tab.
+  gridFocusedCellId?: string;
 }
 
 export interface MenuItem {

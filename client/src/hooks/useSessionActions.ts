@@ -86,6 +86,10 @@ export function useSessionActions(
   // "Move into New Window" (plans/detach-tab-to-new-window.md); null on a
   // phone or tablet, where the item is left out entirely.
   moveTabToNewWindow: ((tabId: string) => void) | null,
+  // Project grid tabs (plans/project-grid-tab.md, useGrids): a terminal
+  // tab's "Move to Grid" submenu, and a grid tab's own items.
+  moveToGridMenuItem: (tab: Tab) => MenuItem | null,
+  gridTabMenuItems: (tab: Tab) => MenuItem[],
 ) {
   // Opens the project rooted in `cwd`: focuses the live session already
   // rooted there, or creates one — named after the folder, started in
@@ -715,10 +719,12 @@ export function useSessionActions(
           label: "Move into Next Group",
           onClick: () => moveTabToAdjacentGroup(tab.id, "next"),
         },
-        ...(moveTabToNewWindow
+        ...(moveTabToNewWindow && tab.gridId === undefined
           ? [{ label: "Move into New Window", onClick: () => moveTabToNewWindow(tab.id) }]
           : []),
       ];
+      const moveToGrid = moveToGridMenuItem(tab);
+      if (moveToGrid) splitItems.splice(5, 0, moveToGrid);
       const closeItems: MenuItem[] = [
         { label: "Close Tab", onClick: () => closeTab(tab.id) },
         { label: "Close Other Tabs", onClick: () => closeOtherTabs(tab.id) },
@@ -747,6 +753,7 @@ export function useSessionActions(
             ];
       // Virtual tabs (image/markdown preview) have no session — New
       // Window/Close Project don’t apply.
+      if (tab.gridId !== undefined) return [...splitItems, ...gridTabMenuItems(tab), ...closeItems];
       if (!isRealTab(tab)) return [...splitItems, ...closeItems, ...pathItems];
       return [
         ...splitItems,
@@ -769,6 +776,8 @@ export function useSessionActions(
       moveTabToNewWindow,
       filesRootDir,
       showError,
+      moveToGridMenuItem,
+      gridTabMenuItems,
     ],
   );
 
