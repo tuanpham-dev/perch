@@ -6,7 +6,7 @@ import zlib from "node:zlib";
 import { readSettingsDoc } from "./settingsStore.js";
 import { type CookieStore, type SameSiteContext, webPreviewCookies } from "./webProxyCookies.js";
 import { type AllowList, BlockedAddressError, assertLiteralAllowed, guardedLookup, parseAllowList } from "./webProxyGuard.js";
-import { rewriteCss, rewriteHtml, rewriteJsModuleSpecifiers } from "./webProxyRewrite.js";
+import { fontUrlsIn, rewriteCss, rewriteHtml, rewriteJsModuleSpecifiers } from "./webProxyRewrite.js";
 import { consumeCrossSiteEntry, getToken, mintToken } from "./webProxyTokens.js";
 import {
   type ProxiedAddress,
@@ -58,6 +58,9 @@ const DROP_REQUEST = new Set([
   "origin",
   "referer",
   "x-auth-token",
+  // The visitor's sign-in to Perch or to a relay in front of it (a tunnel's
+  // basic auth with --forward-auth passes its password on): never the site's.
+  "authorization",
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-proto",
@@ -251,6 +254,18 @@ function corsHeaders(req: IncomingMessage, exposed: string[]): Record<string, st
   return headers;
 }
 
+// Behind a relay that signs visitors in with HTTP basic auth (and passes the
+// sign-in on, as a tunnel's --forward-auth does). The preview's page reaches
+// the relay with its session cookie, but a font request never carries
+// cookies from a sandboxed frame, so fonts can't come through the proxy.
+function behindBasicAuth(req: IncomingMessage): boolean {
+  return /^basic\s/i.test(headerValue(req.headers.authorization) ?? "");
+}
+
+const FONT_CHECK_TTL_MS = 60 * 60 * 1000;
+const FONT_CHECK_TIMEOUT_MS = 3000;
+const MAX_FONT_CHECKS = 48;
+
 export function createWebProxy(opts: WebProxyOptions = {}) {
   const cookies = () => opts.cookies ?? webPreviewCookies();
 
@@ -268,6 +283,52 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
     allow = parseAllowList(Array.isArray(list) ? list : []);
   }
   const lookup = guardedLookup(() => allow);
+
+  // Whether a font may load straight from its own host into the preview's
+  // sandboxed frame: the host has to allow any origin (Access-Control-Allow-
+  // Origin "*" or "null"), since the frame's origin is opaque. Checked once
+  // per address, through the same address guard as everything else.
+  const fontChecks = new Map<string, { ok: Promise<boolean>; at: number }>();
+  function fontAllowsAnyOrigin(url: string): Promise<boolean> {
+    const cached = fontChecks.get(url);
+    if (cached && Date.now() - cached.at < FONT_CHECK_TTL_MS) return cached.ok;
+    if (fontChecks.size > 2000) fontChecks.clear();
+    const ok = new Promise<boolean>((resolve) => {
+      let target: URL;
+      try {
+        target = new URL(url);
+        assertLiteralAllowed(target.hostname, allow);
+      } catch {
+        resolve(false);
+        return;
+      }
+      const client = target.protocol === "https:" ? https : http;
+      const check = client.request(target, {
+        method: "GET",
+        headers: { origin: "null", range: "bytes=0-0", "user-agent": "Mozilla/5.0 (Perch web preview)" },
+        lookup,
+        agent: false,
+        timeout: FONT_CHECK_TIMEOUT_MS,
+      });
+      check.on("timeout", () => check.destroy());
+      check.on("error", () => resolve(false));
+      check.on("response", (resp) => {
+        const allowed = headerValue(resp.headers["access-control-allow-origin"])?.trim();
+        resolve((resp.statusCode ?? 0) < 400 && (allowed === "*" || allowed === "null"));
+        resp.destroy();
+      });
+      check.end();
+    });
+    fontChecks.set(url, { ok, at: Date.now() });
+    return ok;
+  }
+
+  // Of the fonts a stylesheet uses, the ones that can load from their host.
+  async function directFontsFor(css: string, base: URL): Promise<Set<string>> {
+    const urls = fontUrlsIn(css, base).slice(0, MAX_FONT_CHECKS);
+    const results = await Promise.all(urls.map((u) => fontAllowsAnyOrigin(u).then((ok) => (ok ? u : null))));
+    return new Set(results.filter((u): u is string => u !== null));
+  }
 
   // Whether this request is the web preview's, by URL alone (so the app's
   // Origin and sign-in middleware can step aside for it).
@@ -444,7 +505,8 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
       }
     });
     upstream.on("response", (up) => {
-      void respond(req, res, up, { token, target, isDocument, dest, firstParty, sameSite }).catch((err) => {
+      const fontsDirect = behindBasicAuth(req);
+      void respond(req, res, up, { token, target, isDocument, dest, firstParty, sameSite, fontsDirect }).catch((err) => {
         up.destroy();
         if (isDocument) {
           const { title, detail } = describeError(err, target);
@@ -463,7 +525,15 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
     req: IncomingMessage,
     res: ServerResponse,
     up: IncomingMessage,
-    ctx: { token: string; target: URL; isDocument: boolean; dest?: string; firstParty: boolean; sameSite: SameSiteContext },
+    ctx: {
+      token: string;
+      target: URL;
+      isDocument: boolean;
+      dest?: string;
+      firstParty: boolean;
+      sameSite: SameSiteContext;
+      fontsDirect: boolean;
+    },
   ): Promise<void> {
     const { token, target, isDocument } = ctx;
     const setCookie = up.headers["set-cookie"] ?? [];
@@ -531,12 +601,14 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
     let body: string;
     if (isHtml) {
       const cookie = ctx.firstParty ? await cookies().documentCookie(target) : "";
-      body = await rewriteHtml(text, { target, token, cookie });
+      const directFonts = ctx.fontsDirect ? await directFontsFor(text, target) : undefined;
+      body = await rewriteHtml(text, { target, token, cookie, fontsDirect: ctx.fontsDirect, directFonts });
       out["content-type"] = "text/html; charset=utf-8";
       out["referrer-policy"] = "unsafe-url";
       out["cache-control"] = "no-store";
     } else if (isCss) {
-      body = rewriteCss(text, target, token);
+      const directFonts = ctx.fontsDirect ? await directFontsFor(text, target) : undefined;
+      body = rewriteCss(text, target, token, directFonts);
       out["content-type"] = "text/css; charset=utf-8";
     } else {
       body = await rewriteJsModuleSpecifiers(text, target, token);

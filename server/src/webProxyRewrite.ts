@@ -20,6 +20,9 @@ export interface RuntimeConfig {
   base: string | null;
   // document.cookie at load: the site's non-HttpOnly cookies.
   cookie: string;
+  // Fonts load from their own host, not through the proxy (behind a
+  // basic-auth relay, which a font request can't get through).
+  fontsDirect: boolean;
 }
 
 // ---- CSS ----
@@ -27,12 +30,47 @@ export interface RuntimeConfig {
 const CSS_URL_RE = /url\(\s*(['"]?)([^'")]*)\1\s*\)/gi;
 const CSS_IMPORT_RE = /@import\s+(['"])([^'"]+)\1/gi;
 
-export function rewriteCss(css: string, base: URL, token: string): string {
-  return css
-    .replace(CSS_URL_RE, (whole, quote: string, value: string) => {
+const FONT_FACE_RE = /@font-face\s*\{[^}]*\}/gi;
+
+// The absolute addresses of the fonts a stylesheet's @font-face rules use.
+export function fontUrlsIn(css: string, base: URL): string[] {
+  const urls = new Set<string>();
+  for (const block of css.match(FONT_FACE_RE) ?? []) {
+    for (const m of block.matchAll(CSS_URL_RE)) {
+      try {
+        const u = new URL(m[2].trim(), base);
+        if (u.protocol === "http:" || u.protocol === "https:") urls.add(u.href);
+      } catch {
+        // not a URL
+      }
+    }
+  }
+  return [...urls];
+}
+
+// `directFonts`: font addresses to leave pointing at their own host (checked
+// to allow it, see webProxy.ts), instead of the proxy.
+export function rewriteCss(css: string, base: URL, token: string, directFonts?: ReadonlySet<string>): string {
+  const urls = (text: string, fonts: boolean) =>
+    text.replace(CSS_URL_RE, (whole, quote: string, value: string) => {
+      if (fonts && directFonts?.size) {
+        try {
+          const abs = new URL(value.trim(), base).href;
+          if (directFonts.has(abs)) return `url(${quote}${abs}${quote})`;
+        } catch {
+          // fall through to the proxy
+        }
+      }
       const next = rewriteUrl(value, base, token);
       return next === value ? whole : `url(${quote}${next}${quote})`;
-    })
+    });
+  let out = "";
+  let last = 0;
+  for (const m of css.matchAll(FONT_FACE_RE)) {
+    out += urls(css.slice(last, m.index), false) + urls(m[0], true);
+    last = (m.index ?? 0) + m[0].length;
+  }
+  return (out + urls(css.slice(last), false))
     .replace(CSS_IMPORT_RE, (whole, quote: string, value: string) => {
       const next = rewriteUrl(value, base, token);
       return next === value ? whole : `@import ${quote}${next}${quote}`;
@@ -184,8 +222,9 @@ export function runtimeTag(config: RuntimeConfig): string {
 
 export async function rewriteHtml(
   html: string,
-  opts: { target: URL; token: string; cookie: string },
+  opts: { target: URL; token: string; cookie: string; fontsDirect?: boolean; directFonts?: ReadonlySet<string> },
 ): Promise<string> {
+  const directFonts = opts.directFonts;
   const { target, token } = opts;
   await ensureLexer();
   const pageBase = declaredBase(html, target);
@@ -195,6 +234,7 @@ export async function rewriteHtml(
     target: target.href,
     base: pageBase ? pageBase.href : null,
     cookie: opts.cookie,
+    fontsDirect: !!opts.fontsDirect,
   };
   const injection = runtimeTag(config);
 
@@ -249,8 +289,18 @@ export async function rewriteHtml(
     for (const attr of tag.attrs) {
       if (urlAttrs.has(attr.name)) attr.value = rewriteUrl(attr.value, base, token);
       else if (attr.name === "srcset" || attr.name === "imagesrcset") attr.value = rewriteSrcset(attr.value, base, token);
-      else if (attr.name === "style") attr.value = rewriteCss(attr.value, base, token);
+      else if (attr.name === "style") attr.value = rewriteCss(attr.value, base, token, directFonts);
     }
+    // Everything this page loads is cross-origin to its sandboxed frame. A
+    // CORS request leaves cookies out unless asked, and a relay's session
+    // cookie is what gets it past the relay's sign-in; the proxy accepts
+    // credentialed requests (webProxy.ts's corsHeaders).
+    const isModule =
+      (name === "script" && (tag.attrs.find((a) => a.name === "type")?.value ?? "").toLowerCase() === "module") ||
+      (name === "link" && /\bmodulepreload\b/i.test(tag.attrs.find((a) => a.name === "rel")?.value ?? ""));
+    const cors = tag.attrs.find((a) => a.name === "crossorigin");
+    if (cors) cors.value = "use-credentials";
+    else if (isModule) tag.attrs.push({ name: "crossorigin", value: "use-credentials" });
 
     if (name === "style" || name === "script") {
       rawTextOf = name;
@@ -266,7 +316,7 @@ export async function rewriteHtml(
   });
 
   rewriter.on("text", (_text, raw) => {
-    if (rawTextOf === "style") rewriter.emitRaw(rewriteCss(raw, base, token));
+    if (rawTextOf === "style") rewriter.emitRaw(rewriteCss(raw, base, token, directFonts));
     else if (rawTextOf === "script" && scriptKind === "importmap") rewriter.emitRaw(rewriteImportMap(raw, base, token));
     else if (rawTextOf === "script" && scriptKind === "module") rewriter.emitRaw(rewriteModuleSync(raw, base, token));
     else rewriter.emitRaw(raw);

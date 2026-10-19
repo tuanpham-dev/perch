@@ -257,14 +257,23 @@
   });
 
   // ---- Network ----
+  // Everything goes to this server, which is cross-origin to the page's
+  // opaque origin, so a request leaves cookies out unless it asks for them.
+  // A relay's sign-in in front of this server can be such a cookie (see
+  // webProxy.ts), so the page's own requests ask, unless the page said
+  // "omit". The proxy answers credentialed requests.
 
   window.fetch = function (input, init) {
     try {
       if (typeof Request !== "undefined" && input instanceof Request) {
         var next = toResource(input.url);
         if (next !== input.url) input = new Request(next, input);
+        if (input.credentials !== "omit" && !(init && init.credentials)) {
+          input = new Request(input, { credentials: "include" });
+        }
       } else {
         input = toResource(input);
+        if (!init || !init.credentials) init = Object.assign({}, init || {}, { credentials: "include" });
       }
     } catch (e) {
       // send it as the page wrote it
@@ -292,7 +301,13 @@
         }
       }
     });
-    return nativeOpen.apply(this, args);
+    var result = nativeOpen.apply(this, args);
+    try {
+      xhr.withCredentials = true;
+    } catch (e) {
+      // a synchronous request can't; it goes without
+    }
+    return result;
   };
 
   function wrapConstructor(Native, rewrite) {
@@ -311,7 +326,35 @@
   }
 
   window.WebSocket = wrapConstructor(window.WebSocket, toSocket);
-  window.EventSource = wrapConstructor(window.EventSource, toResource);
+  var NativeEventSource = window.EventSource;
+  if (NativeEventSource) {
+    window.EventSource = wrapConstructor(NativeEventSource, toResource);
+    var WrappedEventSource = window.EventSource;
+    window.EventSource = function (url, opts) {
+      return new WrappedEventSource(url, Object.assign({ withCredentials: true }, opts || {}));
+    };
+    window.EventSource.prototype = NativeEventSource.prototype;
+    ["CONNECTING", "OPEN", "CLOSED"].forEach(function (k) {
+      if (k in NativeEventSource) Object.defineProperty(window.EventSource, k, { value: NativeEventSource[k] });
+    });
+  }
+
+  // Fonts a script creates: through the proxy, or from their own host when
+  // the server says fonts can't come through it (cfg.fontsDirect).
+  if (window.FontFace) {
+    var NativeFontFace = window.FontFace;
+    window.FontFace = function (family, source, descriptors) {
+      if (typeof source === "string") {
+        source = source.replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi, function (whole, quote, value) {
+          var u = realUrl(value);
+          if (!u) return whole;
+          return "url(" + quote + (cfg.fontsDirect ? u.href : PERCH + resourcePath(u)) + quote + ")";
+        });
+      }
+      return new NativeFontFace(family, source, descriptors);
+    };
+    window.FontFace.prototype = NativeFontFace.prototype;
+  }
   window.Worker = wrapConstructor(window.Worker, toResource);
   if (window.SharedWorker) window.SharedWorker = wrapConstructor(window.SharedWorker, toResource);
 
@@ -377,11 +420,37 @@
   patchProperty(window.HTMLImageElement, "srcset", rewriteSrcset);
   patchProperty(window.HTMLSourceElement, "srcset", rewriteSrcset);
 
+  // A script or element that asks for CORS gets the credentialed kind (see
+  // Network above); a module script always loads in CORS mode.
+  function credentialed(value) {
+    return value == null ? value : "use-credentials";
+  }
+  patchProperty(window.HTMLScriptElement, "crossOrigin", credentialed);
+  patchProperty(window.HTMLLinkElement, "crossOrigin", credentialed);
+  patchProperty(window.HTMLImageElement, "crossOrigin", credentialed);
+  patchProperty(window.HTMLMediaElement, "crossOrigin", credentialed);
+  var scriptType = window.HTMLScriptElement && Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, "type");
+  if (scriptType && scriptType.set) {
+    Object.defineProperty(HTMLScriptElement.prototype, "type", {
+      configurable: true,
+      enumerable: scriptType.enumerable,
+      get: scriptType.get,
+      set: function (value) {
+        scriptType.set.call(this, value);
+        if (String(value).toLowerCase() === "module") nativeSetAttribute.call(this, "crossorigin", "use-credentials");
+      },
+    });
+  }
+
   var LOADING_ATTRS = { src: 1, poster: 1, data: 1, action: 1, formaction: 1, background: 1 };
   Element.prototype.setAttribute = function (name, value) {
     var n = String(name).toLowerCase();
     var tag = this.tagName ? this.tagName.toLowerCase() : "";
-    if (LOADING_ATTRS[n] || (n === "href" && (tag === "link" || tag === "use" || tag === "image"))) {
+    if (n === "crossorigin") {
+      value = "use-credentials";
+    } else if (n === "type" && tag === "script" && String(value).toLowerCase() === "module") {
+      nativeSetAttribute.call(this, "crossorigin", "use-credentials");
+    } else if (LOADING_ATTRS[n] || (n === "href" && (tag === "link" || tag === "use" || tag === "image"))) {
       value = toResource(value);
     } else if (n === "srcset" || n === "imagesrcset") {
       value = rewriteSrcset(value);

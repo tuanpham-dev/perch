@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rewriteCss, rewriteHtml, rewriteJsModuleSpecifiers } from "./webProxyRewrite.js";
+import { fontUrlsIn, rewriteCss, rewriteHtml, rewriteJsModuleSpecifiers } from "./webProxyRewrite.js";
 
 const TOKEN = "abcdefghijklmnopqrstuvwx";
 const P = `/web/${TOKEN}`;
@@ -78,6 +78,29 @@ describe("rewriteHtml", () => {
   it("keeps the config out of reach of a closing tag", async () => {
     const out = await rewriteHtml("<p>x</p>", { target, token: TOKEN, cookie: "x=</script><b>" });
     expect(out).not.toContain("x=</script>");
+  });
+});
+
+describe("credentials and fonts", () => {
+  it("asks for credentials on module scripts and anything marked crossorigin", async () => {
+    const out = await rewriteHtml(
+      `<script type="module" src="/m.js"></script><link rel="modulepreload" href="/p.js"><img crossorigin src="/a.png"><script src="/c.js"></script>`,
+      { target, token: TOKEN, cookie: "" },
+    );
+    expect(out).toMatch(/<script type="module" src="[^"]+" crossorigin="use-credentials">/);
+    expect(out).toMatch(/<link rel="modulepreload" href="[^"]+" crossorigin="use-credentials">/);
+    expect(out).toMatch(/<img crossorigin="use-credentials"/);
+    expect(out).toMatch(/<script src="[^"]+"><\/script>$/);
+  });
+
+  it("leaves fonts that can load directly at their own host, and proxies the rest", () => {
+    const base = new URL("https://example.com/css/site.css");
+    const css = `@font-face{font-family:A;src:url(https://fonts.example.net/a.woff2)}@font-face{font-family:B;src:url(/b.woff2)} body{background:url(/bg.png)}`;
+    expect(fontUrlsIn(css, base)).toEqual(["https://fonts.example.net/a.woff2", "https://example.com/b.woff2"]);
+    const out = rewriteCss(css, base, TOKEN, new Set(["https://fonts.example.net/a.woff2"]));
+    expect(out).toContain("url(https://fonts.example.net/a.woff2)");
+    expect(out).toContain(`url(${P}/https/example.com/b.woff2)`);
+    expect(out).toContain(`url(${P}/https/example.com/bg.png)`);
   });
 });
 

@@ -98,6 +98,15 @@ app.use((req, res, next) => {
     webProxy.handleWebRequest(req, res).catch(next);
     return;
   }
+  // A CORS preflight anywhere else: nothing here is meant to be called from
+  // another origin (the app and /proxy/<port> are same-origin), so it's
+  // refused before any route or proxied dev server sees it. A tunnel in
+  // front that lets preflights through unauthenticated (--allow-cors-
+  // preflight, for the web preview above) then reaches nothing else.
+  if (req.method === "OPTIONS" && req.headers["access-control-request-method"]) {
+    res.status(403).end();
+    return;
+  }
   // /public/ routes (e.g. live-preview's serve/mtime) enforce their own
   // capability-token authorization instead of trusting Origin — see
   // isOriginExemptPath's module comment for why that's safe.

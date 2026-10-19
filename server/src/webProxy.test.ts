@@ -68,6 +68,18 @@ beforeAll(async () => {
     } else if (req.url === "/login") {
       res.writeHead(200, { "content-type": "text/html", "set-cookie": ["sid=s3cret; Path=/; HttpOnly; Max-Age=3600", "theme=dark; Path=/"] });
       res.end("<p>signed in</p>");
+    } else if (req.url === "/headers") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ authorization: req.headers.authorization ?? null }));
+    } else if (req.url === "/font.woff2") {
+      res.writeHead(200, { "content-type": "font/woff2", "access-control-allow-origin": "*" });
+      res.end("wOF2");
+    } else if (req.url === "/private.woff2") {
+      res.writeHead(200, { "content-type": "font/woff2" });
+      res.end("wOF2");
+    } else if (req.url === "/fonts.css") {
+      res.writeHead(200, { "content-type": "text/css" });
+      res.end(`@font-face{font-family:A;src:url(/font.woff2)}@font-face{font-family:B;src:url(/private.woff2)}`);
     } else if (req.url === "/me") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ cookie: req.headers.cookie ?? null }));
@@ -144,6 +156,24 @@ describe("web proxy", () => {
     const res = await fetch(`${proxyBase}/assets/app.js?v=2`, { redirect: "manual", headers: { referer: `${proxyBase}${src}` } });
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toMatch(new RegExp(`^/web/[^/]+/http/127\\.0\\.0\\.1:${sitePort}/assets/app\\.js\\?v=2$`));
+  });
+
+  it("never passes the visitor's sign-in on to the site", async () => {
+    const { token } = await open(`http://127.0.0.1:${sitePort}/`);
+    const res = await fetch(`${proxyBase}${toProxyPath(`http://127.0.0.1:${sitePort}/headers`, token)}`, {
+      headers: { authorization: "Basic dHVubmVsOnBhc3N3b3Jk" },
+    });
+    expect(((await res.json()) as { authorization: string | null }).authorization).toBeNull();
+  });
+
+  it("behind basic auth, points fonts that allow it at their own host", async () => {
+    const { token } = await open(`http://127.0.0.1:${sitePort}/`);
+    const cssUrl = `${proxyBase}${toProxyPath(`http://127.0.0.1:${sitePort}/fonts.css`, token)}`;
+    const direct = await (await fetch(cssUrl, { headers: { authorization: "Basic dHVubmVsOnBhc3N3b3Jk" } })).text();
+    expect(direct).toContain(`url(http://127.0.0.1:${sitePort}/font.woff2)`);
+    expect(direct).toMatch(/url\(\/web\/[^/]+\/http\/127\.0\.0\.1:\d+\/private\.woff2\)/);
+    const plain = await (await fetch(cssUrl)).text();
+    expect(plain).not.toContain(`url(http://127.0.0.1`);
   });
 
   it("refuses an unknown token", async () => {
