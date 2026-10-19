@@ -3,6 +3,17 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.4.1 - 2026-10-19
+
+- **Terminals no longer come back garbled after a size change.** Opening a
+  terminal at another width than it was last used at (a phone picking up a
+  desktop's terminal, say) could scatter a coding agent's output across the
+  screen, leaving half-erased lines behind. Perch now replays the screen
+  reflowed to the new size.
+- **Unsaved edits to large files are kept again.** Drafts over 100 KB were
+  refused, so unsaved changes to a large file weren't restored when it
+  reopened.
+
 ## 0.4.0 - 2026-10-19
 
 - **Grid tabs: several terminals of a project tiled in one tab,** the way
