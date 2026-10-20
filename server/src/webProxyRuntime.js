@@ -92,7 +92,9 @@
     if (!s.trim() || s.trim().charAt(0) === "#" || PASS_THROUGH.test(s)) return null;
     var u;
     try {
-      u = new URL(s, resolveBase());
+      // A root-relative address the proxy already wrote (a rewritten
+      // url() a script reads back out of a stylesheet) is this server's.
+      u = new URL(s, /^\s*\/web\/[A-Za-z0-9_-]+\/(https?|wss?)\//.test(s) ? PERCH : resolveBase());
     } catch (e) {
       return null;
     }

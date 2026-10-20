@@ -318,6 +318,17 @@ if (existsSync(clientDist)) {
           next();
           return;
         }
+        // A page moving to a root path ("/about" from a link or
+        // location.href) goes back under the prefix rather than being served
+        // here: from a bare "/about" the page's next request carries no port
+        // in its Referer, and a reload loads the app itself into the preview.
+        // 307 keeps a form's POST a POST.
+        const dest = req.headers["sec-fetch-dest"];
+        if (dest === "document" || dest === "iframe" || dest === "frame") {
+          const absolute = parseProxyPath(new URL(req.headers.referer ?? "/", "http://x").pathname)?.absolute;
+          res.redirect(307, `/${absolute ? "absproxy" : "proxy"}/${refererPort}${req.url ?? "/"}`);
+          return;
+        }
         handleProxyRequest(req, res, refererPort, req.url ?? "/", null);
       })
       .catch(next);

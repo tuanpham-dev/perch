@@ -535,6 +535,20 @@
     var PLACEHOLDER = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
     function viewportShot(extra) {
+      if (extra && extra.skipFonts) return renderView(extra);
+      // The page's fonts, gathered without touching its stylesheets (see
+      // fontEmbedCSS); without them if that fails.
+      return fontEmbedCSS(lib).then(
+        function (css) {
+          return renderView(Object.assign({ fontEmbedCSS: css }, extra || {}));
+        },
+        function () {
+          return renderView(Object.assign({ skipFonts: true }, extra || {}));
+        },
+      );
+    }
+
+    function renderView(extra) {
       return lib.toCanvas(
         document.documentElement,
         Object.assign(
@@ -676,9 +690,11 @@
       });
     }
     guardCanvases();
+    guardClones();
     return run(0).then(
       function (dataUrl) {
         unguardCanvases();
+        unguardClones();
         if (restore) window.scrollTo(restore.x, restore.y);
         // Say when a simpler render stood in, and why the full one failed.
         return {
@@ -688,10 +704,186 @@
       },
       function (err) {
         unguardCanvases();
+        unguardClones();
         if (restore) window.scrollTo(restore.x, restore.y);
         throw new Error(describeCaptureError(err));
       },
     );
+  }
+
+  // The @font-face rules the page uses, with their files embedded, for
+  // html-to-image's fontEmbedCSS. Left to itself, html-to-image gathers them
+  // by fetching every stylesheet it can't read and inserting all its rules
+  // into the page's own first inline stylesheet (and an @import's rules into
+  // the sheet that imports it). In a sandboxed frame no stylesheet can be
+  // read, so a screenshot copied the whole site's CSS into the live page,
+  // reordering its cascade and upsetting CSS-in-JS libraries that keep track
+  // of their sheet's rules. Here the unreadable ones are parsed into detached
+  // sheets instead, and the page's are only read.
+  var fontFaces = null;
+
+  function fontEmbedCSS(lib) {
+    if (!lib.embedResources) return Promise.reject(new Error("no font embedding"));
+    if (!fontFaces) {
+      fontFaces = collectFontFaces();
+      fontFaces.catch(function () {
+        fontFaces = null;
+      });
+    }
+    return fontFaces.then(function (faces) {
+      var used = usedFontFamilies();
+      return Promise.all(
+        faces
+          .filter(function (f) {
+            return used.has(f.family);
+          })
+          .map(function (f) {
+            return lib.embedResources(f.cssText, f.base, { cacheBust: false }).catch(function () {
+              return "";
+            });
+          }),
+      ).then(function (texts) {
+        return texts.join("\n");
+      });
+    });
+  }
+
+  function normalizeFamily(name) {
+    return String(name).trim().replace(/["']/g, "");
+  }
+
+  function usedFontFamilies() {
+    var used = new Set();
+    var all = document.getElementsByTagName("*");
+    for (var i = 0; i < all.length; i++) {
+      if (isOurs(all[i])) continue;
+      getComputedStyle(all[i]).fontFamily.split(",").forEach(function (f) {
+        used.add(normalizeFamily(f));
+      });
+    }
+    return used;
+  }
+
+  function collectFontFaces() {
+    var faces = [];
+    var seen = new Set();
+
+    function walk(rules, base, depth) {
+      var jobs = [];
+      for (var i = 0; i < rules.length; i++) {
+        var rule = rules[i];
+        if (rule.type === CSSRule.FONT_FACE_RULE) {
+          var src = rule.style.getPropertyValue("src");
+          if (/url\(/.test(src) && !/url\(\s*['"]?data:/.test(src)) {
+            faces.push({ family: normalizeFamily(rule.style.getPropertyValue("font-family")), cssText: rule.cssText, base: base });
+          }
+        } else if (rule.type === CSSRule.IMPORT_RULE) {
+          jobs.push(visit(rule.styleSheet, rule.href ? new URL(rule.href, base || location.href).href : null, depth + 1));
+        } else if (rule.cssRules) {
+          // @media, @supports, @layer
+          jobs.push(walk(rule.cssRules, base, depth));
+        }
+      }
+      return Promise.all(jobs);
+    }
+
+    function visit(sheet, href, depth) {
+      if (depth > 4) return Promise.resolve();
+      var rules = null;
+      try {
+        rules = sheet ? sheet.cssRules : null;
+      } catch (e) {
+        rules = null;
+      }
+      var base = (sheet && sheet.href) || href;
+      // An inline sheet's URLs are the document's, which a proxy may have
+      // already rewritten to its own root-relative paths.
+      if (rules) return walk(rules, base || document.baseURI, depth);
+      if (!base || seen.has(base)) return Promise.resolve();
+      seen.add(base);
+      return parseRemote(base, depth);
+    }
+
+    // A stylesheet the page can't read, fetched and parsed on its own.
+    // Constructed sheets ignore @import, so those are followed here.
+    function parseRemote(href, depth) {
+      if (typeof CSSStyleSheet === "undefined" || !CSSStyleSheet.prototype.replaceSync) return Promise.resolve();
+      return fetch(href)
+        .then(function (res) {
+          return res.ok ? res.text() : "";
+        })
+        .then(function (text) {
+          var imports = [];
+          text = text.replace(/@import\s+(?:url\(\s*)?(['"]?)([^'")\s;]+)\1\s*\)?[^;]*;/gi, function (_, q, url) {
+            try {
+              imports.push(new URL(url, href).href);
+            } catch (e) {
+              // unparseable; skip it
+            }
+            return "";
+          });
+          var detached = new CSSStyleSheet();
+          detached.replaceSync(text);
+          return Promise.all(
+            [walk(detached.cssRules, href, depth)].concat(
+              imports.map(function (url) {
+                return visit(null, url, depth + 1);
+              }),
+            ),
+          );
+        })
+        .catch(function () {
+          // a sheet that won't load just has no fonts to give
+        });
+    }
+
+    var sheets = Array.prototype.slice.call(document.styleSheets);
+    return Promise.all(
+      sheets.map(function (s) {
+        return visit(s, s.href, 0);
+      }),
+    ).then(function () {
+      return faces;
+    });
+  }
+
+  // html-to-image copies the page node by node with cloneNode(false), and
+  // cloning a custom element runs its constructor: the page's own code, on a
+  // copy that has no children yet. Many constructors look for their children
+  // and throw, and the ones that don't add listeners and subscriptions that
+  // outlive the screenshot (a Shopify theme's cart and search elements, say),
+  // so the page misbehaves afterwards. While capturing, a custom element's
+  // shallow copy is a plain element made in a document with no custom
+  // elements, which is never upgraded: the copy only needs to look the same.
+  var nativeCloneNode = Node.prototype.cloneNode;
+  var cloneGuards = 0;
+  var inertDoc = null;
+
+  function isCustomElement(node) {
+    return node.nodeType === 1 && node.localName.indexOf("-") > 0 && !!window.customElements && !!customElements.get(node.localName);
+  }
+
+  function guardClones() {
+    if (cloneGuards++ > 0) return;
+    inertDoc = inertDoc || document.implementation.createHTMLDocument("");
+    Node.prototype.cloneNode = function (deep) {
+      if (deep || !isCustomElement(this)) return nativeCloneNode.apply(this, arguments);
+      var copy = inertDoc.createElementNS(this.namespaceURI, this.localName);
+      for (var i = 0; i < this.attributes.length; i++) {
+        var a = this.attributes[i];
+        try {
+          copy.setAttributeNS(a.namespaceURI, a.name, a.value);
+        } catch (e) {
+          // a name only the parser accepts (Alpine's "@click"); not needed to look the same
+        }
+      }
+      return copy;
+    };
+  }
+
+  function unguardClones() {
+    if (--cloneGuards > 0) return;
+    Node.prototype.cloneNode = nativeCloneNode;
   }
 
   function withTimeout(promise, ms) {

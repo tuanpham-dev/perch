@@ -337,7 +337,13 @@ export function BrowserView({ filePath, active, toolbarTarget, setTitle, showMen
         const win = iframeRef.current?.contentWindow;
         if (cmd === "back") win?.history.back();
         else if (cmd === "forward") win?.history.forward();
-        else win?.location.reload();
+        else if (win && !win.location.pathname.startsWith(new URL(page.base).pathname)) {
+          // A single-page app pushed a root path ("/about"), outside the
+          // proxy: reloading it there would load the app itself. Load the
+          // same page through the proxy instead.
+          const loc = win.location;
+          win.location.replace(page.base.replace(/\/$/, "") + loc.pathname + loc.search + loc.hash);
+        } else win?.location.reload();
       } catch {
         if (cmd === "reload") setFrameKey((k) => k + 1);
       }
