@@ -7,7 +7,7 @@ import { responding, succeeds, which } from './run.ts';
 import { usableServiceManager } from './serviceManager.ts';
 import { versionLine } from './version.ts';
 
-const NODE_MAJOR = 23;
+const NODE_MAJOR = 24;
 
 export async function cmdDoctor(): Promise<void> {
   let failed = false;

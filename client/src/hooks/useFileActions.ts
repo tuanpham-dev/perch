@@ -6,6 +6,7 @@ import {
   extensionFileMenuItems,
   findFileViewerFor,
   findPreviewCapableViewerFor,
+  notifyFilesRenamed,
   requestFindInFolder,
   type RegisteredFileViewer,
 } from "../extensions";
@@ -71,7 +72,8 @@ export function useFileActions(
       const newName = (await promptDialog("New name", base))?.trim();
       if (!newName || newName === base) return;
       try {
-        await api.renameEntry(entryPath, newName);
+        const { path: dest } = await api.renameEntry(entryPath, newName);
+        notifyFilesRenamed([{ from: entryPath, to: dest }]);
         setPrunePath({ paths: [entryPath] });
         setFilesRefreshKey((k) => k + 1);
       } catch (err) {
@@ -186,7 +188,8 @@ export function useFileActions(
   const pasteIntoDir = useCallback(
     async (destDir: string) => {
       try {
-        const { pasted, errors } = await api.pasteFsClipboard(destDir);
+        const { pasted, moved, errors } = await api.pasteFsClipboard(destDir);
+        if (moved?.length) notifyFilesRenamed(moved);
         if (fsClipboard?.mode === "cut" && pasted.length > 0) {
           setPrunePath({ paths: fsClipboard.paths });
           setFsClipboardState(null);
@@ -211,7 +214,8 @@ export function useFileActions(
     async (paths: string[], destDir: string, mode: "move" | "copy") => {
       if (paths.length === 0) return;
       try {
-        const { done, errors } = await api.transferEntries(paths, destDir, mode);
+        const { done, moved, errors } = await api.transferEntries(paths, destDir, mode);
+        if (moved?.length) notifyFilesRenamed(moved);
         // A move leaves the source paths behind as stale tree state (expanded /
         // dirCache / selection), same as a cut-paste — prune them. A copy adds
         // without removing, so a plain refresh is enough.

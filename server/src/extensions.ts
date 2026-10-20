@@ -32,12 +32,24 @@ import {
   type TerminalSession,
 } from "./terminals.js";
 import { notifyExtension } from "./push.js";
+import {
+  agentSessionMessages,
+  dropSessionReaders,
+  listAgentSessions,
+  registerSessionReader,
+  resumeSessionCommand,
+  type ListedSession,
+  type SessionMessage,
+  type SessionReader,
+} from "./agentSessions.js";
 import { createWorktree, listWorktrees, removeWorktree, type WorktreeListing } from "./gitWorktrees.js";
 import { listAiProfiles, runAi, type AiProfileSummary, type AiRunOptions } from "./ai.js";
 import {
   DEFAULT_AGENT_ICON,
   dropAgentCompanions,
   parseHookDescriptor,
+  parseResumeSession,
+  parseSessionsDescriptor,
   parseOneShot,
   registerAgentCompanion,
   type AgentCompanionTransform,
@@ -62,10 +74,22 @@ import {
 } from "./settingsStore.js";
 import { configDir } from "./configDir.js";
 import { draftStore } from "./drafts.js";
+import { appVersion } from "./version.js";
+import { compare as semverCompare, parse as semverParse, valid as semverValid } from "./semver.js";
+import { createExtensionStorageService, type ExtensionStorage } from "./extensionStorage.js";
+import { stateDir } from "./stateDir.js";
 import { extractZip } from "./zip.js";
 import { registerEngine, type EngineRegistration } from "./multiplexer.js";
 
 export const extensionsDir = path.join(configDir, "extensions");
+// Every extension's own records, files and runtime folder (extensionStorage.ts).
+// Handed to its server code as activate({ storage }), and to its browser code
+// through /api/storage (extensionStorageRoutes.ts).
+export const extensionStorage = createExtensionStorageService({
+  dataRoot: path.join(configDir, "extension-data"),
+  stateRoot: path.join(stateDir(), "x"),
+  log: (...args) => console.warn(...args),
+});
 const stateFilePath = path.join(configDir, "extensions-state.json");
 
 // Bundled extensions shipped in the repo (image/markdown/json/csv/media/pdf
@@ -217,6 +241,9 @@ interface ExtensionManifest {
     // uninstalled (the xterm terminal engine — the app's rendering floor).
     // Ignored on user-installed extensions, which could otherwise claim it.
     required?: boolean;
+    // The oldest Perch this extension runs on (a version, e.g. "0.9.0"). An
+    // older host lists it with `incompatible` set and never loads its code.
+    minPerch?: string;
   };
 }
 
@@ -253,6 +280,11 @@ export interface AgentContribution {
   // Fallback codicon name from the app's own icon set. Anything empty or
   // unknown renders a generic robot.
   icon?: string;
+  // Reopens one past conversation: "{id}" is replaced by its session id.
+  resumeSession?: string;
+  // Where its conversations are kept, for the session browser:
+  // { format: "claude-jsonl" | "codex-rollout", dir? }.
+  sessions?: unknown;
 }
 
 // The normalized, ordered form of a manifest's contributes.configuration —
@@ -364,6 +396,21 @@ export interface ExtensionInfo {
   // from before this was tracked). An exported settings bundle carries it so
   // an import knows where to fetch the extension from.
   source: string | null;
+  // "Needs Perch X or newer" when manifest perch.minPerch is above this
+  // server's version: neither its server nor its client code is loaded.
+  incompatible: string | null;
+}
+
+// Whether this Perch meets an extension's perch.minPerch. The host's own
+// pre-release tag is ignored, so a 0.9.0-dev checkout (the working copy
+// between releases) runs extensions written for 0.9.0.
+export function incompatibleReason(manifest: ExtensionManifest, hostVersion = appVersion()): string | null {
+  const min = manifest.perch?.minPerch;
+  if (typeof min !== "string" || !semverValid(min)) return null;
+  const host = semverParse(hostVersion);
+  if (!host) return null;
+  const released = `${host.major}.${host.minor}.${host.patch}`;
+  return semverCompare(released, min) < 0 ? `Needs Perch ${min} or newer` : null;
 }
 
 function resolveId(manifest: ExtensionManifest, folder: string): string {
@@ -546,6 +593,7 @@ function toInfo(
     required: isRequired(manifest, builtin),
     uninstalled,
     source,
+    incompatible: incompatibleReason(manifest),
   };
 }
 
@@ -674,6 +722,8 @@ export async function uninstallExtension(id: string): Promise<void> {
     await clearExtensionSecrets(id);
     // Same for its unsaved drafts: nothing is left to restore them into.
     await draftStore.clearExtension(id);
+    // Its stored records and files are NOT removed (extensionStorage.ts):
+    // reinstalling brings them back, and Settings deletes them on purpose.
   }
   await writeState(state);
 }
@@ -733,6 +783,10 @@ export function emitApiMutation(): void {
 // sanctioned way an extension reaches core state (never by importing core
 // modules, which would bypass enable/disable and version accounting).
 export interface ExtensionHostApi {
+  // This extension's own storage: collections of JSON records shared with its
+  // browser code (ctx.storage), raw SQL on the same database, change topics,
+  // and private files and runtime folders. See extensionStorage.ts.
+  storage: ExtensionStorage;
   ports: {
     // See ports.ts — listening ports attributed to terminals (the tunnel security
     // gate's own data source, shared rather than re-scanned).
@@ -784,8 +838,9 @@ export interface ExtensionHostApi {
     create(name?: string, cwd?: string, exactCwd?: boolean): Promise<TerminalSession>;
     // Returns the new window's index. Without `cwd`, the session's own path.
     // A `name` is kept as given; without one the window is named after what
-    // runs in it.
-    createWindow(session: string, cwd?: string, name?: string): Promise<number>;
+    // runs in it. A `command` is typed into the new shell and declared on the
+    // window, so it runs again when the window is restored after a restart.
+    createWindow(session: string, cwd?: string, name?: string, command?: string): Promise<number>;
     // Makes a window the session's current one.
     selectWindow(session: string, index: number): Promise<void>;
     // Types `text` literally into the session's window, then Enter when
@@ -848,6 +903,23 @@ export interface ExtensionHostApi {
   // tool-start / tool-end only arrive once the user has turned on
   // per-tool-call hooks in Settings → AI Providers; a subscriber that wants them
   // must keep working without them.
+  // Past agent conversations (agentSessions.ts), for a session browser.
+  // `cwd` may be `~`-shortened. Agents are read through the `sessions`
+  // descriptor their manifest declares, or a reader an extension provides.
+  agentSessions: {
+    // Every conversation that ran in `cwd`, across agents, newest first,
+    // each marked with the window it's open in right now, if any.
+    list(cwd: string): Promise<ListedSession[]>;
+    // The last `limit` messages of one (default 50, at most 500).
+    messages(agentId: string, id: string, cwd: string, limit?: number): Promise<SessionMessage[]>;
+    // The line that reopens it (`resumeSession` with the id filled in, plus
+    // the skip-permissions flag under Yolo), or null when it can't be.
+    resumeCommand(agentId: string, id: string): Promise<string | null>;
+    // A reader for an agent THIS extension contributed (bare manifest id),
+    // for a transcript format core doesn't read itself; it wins over a
+    // declared `sessions` descriptor. Dropped when the server hook unmounts.
+    provideReader(agentId: string, reader: SessionReader): void;
+  };
   agentHooks: {
     // Returns an unsubscribe. All of an extension's subscriptions are also
     // dropped when its server hook unmounts.
@@ -909,12 +981,19 @@ export interface ExtensionHostApi {
 
 function makeHostApi(id: string): ExtensionHostApi {
   return {
+    storage: extensionStorage.forExtension(id),
     ports: { list: listTerminalPorts, find: findTerminalPort },
     agents: {
       list: () => listAgents(),
       launchCommand: (agentId) => launchCommand(agentId),
       forWindow: (session, windowIndex) => agentForWindow(session, windowIndex),
       forSession: (session) => agentsForSession(session),
+    },
+    agentSessions: {
+      list: (cwd) => listAgentSessions(cwd),
+      messages: (agentId, sessionId, cwd, limit) => agentSessionMessages(agentId, sessionId, cwd, limit),
+      resumeCommand: (agentId, sessionId) => resumeSessionCommand(agentId, sessionId),
+      provideReader: (agentId, reader) => registerSessionReader(`${id}.${agentId}`, reader),
     },
     sessions: {
       list: () => listSessions(),
@@ -927,9 +1006,9 @@ function makeHostApi(id: string): ExtensionHostApi {
           invalidateSessionsCache();
         }
       },
-      createWindow: async (session, cwd, name) => {
+      createWindow: async (session, cwd, name, command) => {
         try {
-          return await createWindow(session, cwd ? expandHome(cwd) : undefined, name);
+          return await createWindow(session, cwd ? expandHome(cwd) : undefined, name, command);
         } finally {
           invalidateSessionsCache();
         }
@@ -1042,6 +1121,10 @@ async function contributedAgents(): Promise<AgentPreset[]> {
         // How to run this CLI for one-shot text (ai.ts). Absent means this
         // agent is not offered as a text provider at all.
         oneShot: parseOneShot(raw?.oneShot),
+        // The session browser's two facts (agentSessions.ts): how to reopen
+        // one conversation, and where and in what format they are kept.
+        resumeSession: parseResumeSession(raw?.resumeSession),
+        sessions: parseSessionsDescriptor(raw?.sessions),
         docsUrl: typeof raw?.docsUrl === "string" ? raw.docsUrl.trim() : "",
         // An extension-relative path becomes a URL here rather than in the
         // client: whoever renders a row should not have to know which
@@ -1107,6 +1190,11 @@ export async function mountServerHookIfNeeded(
   if (serverHooks.has(id)) return;
   const serverEntry = manifest.perch?.server;
   if (!serverEntry) return;
+  const incompatible = incompatibleReason(manifest);
+  if (incompatible) {
+    console.warn(`extension ${id}: not loaded: ${incompatible}`);
+    return;
+  }
   try {
     const entryPath = path.resolve(folderPath, serverEntry);
     const mod: unknown = await import(pathToFileURL(entryPath).href);
@@ -1135,6 +1223,8 @@ export async function mountServerHookIfNeeded(
       // Lifted for the same reason as `ai` — an extension holding a
       // credential reaches for it by name: activate({ secrets }).
       secrets: host.secrets,
+      // Lifted too: nearly every extension with state keeps it here.
+      storage: host.storage,
       host,
     });
     serverHooks.set(id, router);
@@ -1147,6 +1237,7 @@ export async function mountServerHookIfNeeded(
 
 export function unmountServerHook(id: string): void {
   serverHooks.delete(id);
+  dropSessionReaders(id);
   apiMutationListeners.delete(id);
   for (const undo of engineRegistrations.get(id) ?? []) undo();
   engineRegistrations.delete(id);
@@ -1155,6 +1246,9 @@ export function unmountServerHook(id: string): void {
   // Last, so the extension tears down after its routes and subscriptions are
   // already gone and nothing new can reach it mid-teardown.
   runServerDeactivate(id);
+  // Its validators go with its code. The connections close too; an async
+  // deactivate() that still writes simply reopens them. The data stays.
+  extensionStorage.release(id);
 }
 
 export async function loadEnabledServerHooks(): Promise<void> {

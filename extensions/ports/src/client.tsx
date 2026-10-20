@@ -39,6 +39,11 @@ let getActiveContext: (() => ActiveContext) | null = null;
 // session opener for extensions, and the status item then keeps its popover.
 let openSessionWindow: ((sessionName: string, opts?: { windowIndex?: number }) => void) | null = null;
 let togglePanelView: ((viewId: string) => boolean) | null = null;
+// Other extensions' items for a port's menu (ctx.app.portMenuItems); null on a host
+// that predates ctx.registerPortMenuItem.
+let extraPortMenuItems:
+  | ((port: { port: number; address: string; pid?: number; process?: string }) => { label: string; onClick: () => void }[])
+  | null = null;
 
 // This extension's PORTS view, by the id the host assigns it
 // (ext.<publisher>.<name>.<view id>) - what the status item toggles.
@@ -510,6 +515,11 @@ function PortsPanel({ actionsTarget, showMenu, confirmDialog }: PanelProps) {
       { label: "Open in Browser", onClick: () => openInBrowser(p.port) },
       { label: "Copy URL", onClick: () => onCopyPortUrl(p.port) },
     ];
+    // Other extensions' items for this port (ctx.registerPortMenuItem), e.g.
+    // the HTTP Client's "Open in HTTP Client".
+    for (const extra of extraPortMenuItems?.({ port: p.port, address: p.address, pid: p.pid, process: p.process }) ?? []) {
+      items.push({ label: extra.label, onClick: extra.onClick });
+    }
     if (p.pid !== undefined) {
       items.push({ label: "Kill Process", danger: true, onClick: () => onKillPort(p) });
     }
@@ -686,6 +696,20 @@ function PortsTableView({ context }: PanelViewProps) {
       })
       .catch(() => {});
   };
+  // The row's right-click menu: the row's own buttons, then other
+  // extensions' items for the port (ctx.registerPortMenuItem).
+  const tableMenuItems = (p: ListeningPort): MenuItem[] => {
+    const items: MenuItem[] = [
+      { label: "Open", onClick: () => openPort(p.port) },
+      { label: "Open in Perch", onClick: () => openPortInApp(p.port) },
+      { label: "Copy URL", onClick: () => onCopyPortUrl(p.port) },
+    ];
+    for (const extra of extraPortMenuItems?.({ port: p.port, address: p.address, pid: p.pid, process: p.process }) ?? []) {
+      items.push({ label: extra.label, onClick: extra.onClick });
+    }
+    if (p.pid !== undefined) items.push({ label: "Kill Process", danger: true, onClick: () => onKillPort(p) });
+    return items;
+  };
   // Same prompt and SIGTERM-then-SIGKILL route as the popover's Kill.
   const onKillPort = (p: ListeningPort) => {
     context
@@ -814,7 +838,14 @@ function PortsTableView({ context }: PanelViewProps) {
           </thead>
           <tbody>
             {ports.map((p) => (
-              <tr key={p.port} className="ports-table-row">
+              <tr
+                key={p.port}
+                className="ports-table-row"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  context.showMenu(e.clientX, e.clientY, tableMenuItems(p));
+                }}
+              >
                 <td className="ports-table-port">
                   {/* The port opens on click, as the popover's row does. */}
                   <button
@@ -948,6 +979,7 @@ interface ExtensionContext {
     promptDialog?(message: string, defaultValue?: string): Promise<string | null>;
     openSessionWindow?(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void;
     togglePanelView?(viewId: string): boolean;
+    portMenuItems?(port: { port: number; address: string; pid?: number; process?: string }): { label: string; onClick: () => void }[];
   };
 }
 
@@ -1171,6 +1203,7 @@ export function activate(ctx: ExtensionContext): void {
   openViewerTab = ctx.app.openViewerTab;
   openSessionWindow = ctx.app.openSessionWindow ?? null;
   togglePanelView = ctx.app.togglePanelView ?? null;
+  extraPortMenuItems = ctx.app.portMenuItems ?? null;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   // The wide table, for hosts that have a bottom panel to put it in.
   ctx.registerPanelView?.({
@@ -1246,6 +1279,7 @@ export function deactivate(): void {
   removeStylesheet = null;
   openSessionWindow = null;
   togglePanelView = null;
+  extraPortMenuItems = null;
   serverFetch = null;
   extSettings = null;
   getActiveContext = null;

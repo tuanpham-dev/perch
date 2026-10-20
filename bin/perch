@@ -5,8 +5,8 @@
 // Node resolves the ~/.local/bin symlink for the entry script, so __dirname
 // is the repo's bin/.
 const major = Number(process.versions.node.split(".")[0]);
-if (major < 23) {
-  console.error(`Perch needs Node.js 23 or newer (found ${process.version}) - install it from https://nodejs.org`);
+if (major < 24) {
+  console.error(`Perch needs Node.js 24 or newer (found ${process.version}) - install it from https://nodejs.org`);
   process.exit(1);
 }
 // As a file URL: on Windows a bare "C:\..." path is read as a URL with scheme "c:"

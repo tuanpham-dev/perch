@@ -197,7 +197,7 @@ export default function SettingsView({
           {section === "editor" && <EditorSection />}
           {section === "behavior" && <BehaviorSection confirmDialog={confirmDialog} />}
           {section === "ui" && <UiSection />}
-          {section === "extensions" && <ExtensionsSection />}
+          {section === "extensions" && <ExtensionsSection extensions={extensions} confirmDialog={confirmDialog} />}
           {section === "ai" && <AiProvidersSection />}
           {section === "about" && <AboutSection />}
           {activeExtension && (

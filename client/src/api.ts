@@ -463,11 +463,16 @@ export function sendTextToSession(name: string, text: string, submit?: boolean, 
 // Resolves with the new window's index — the bottom terminal panel attaches
 // the window it just created (see hooks/useBottomPanel.ts); every other
 // caller ignores it and lets the session poll surface the new window.
-export function createWindow(name: string, cwd?: string): Promise<{ index: number }> {
+// `opts.command` runs in the new window and again whenever it's restored.
+export function createWindow(
+  name: string,
+  cwd?: string,
+  opts?: { name?: string; command?: string },
+): Promise<{ index: number }> {
   return request(`/api/sessions/${encodeURIComponent(name)}/windows`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cwd }),
+    body: JSON.stringify({ cwd, name: opts?.name, command: opts?.command }),
   });
 }
 
@@ -733,7 +738,12 @@ export function clearFsClipboard(): Promise<void> {
 
 export function pasteFsClipboard(
   destDir: string,
-): Promise<{ pasted: string[]; errors: { path: string; message: string }[] }> {
+): Promise<{
+  pasted: string[];
+  // Source -> destination for each entry a cut moved (empty for a copy).
+  moved?: { from: string; to: string }[];
+  errors: { path: string; message: string }[];
+}> {
   return request("/api/fs/paste", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -747,7 +757,12 @@ export function transferEntries(
   paths: string[],
   destDir: string,
   mode: "move" | "copy",
-): Promise<{ done: string[]; errors: { path: string; message: string }[] }> {
+): Promise<{
+  done: string[];
+  // Source -> destination for each entry a move moved (empty for a copy).
+  moved?: { from: string; to: string }[];
+  errors: { path: string; message: string }[];
+}> {
   return request("/api/fs/transfer", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -863,6 +878,23 @@ export function uploadFile(
 
 export function fetchExtensions(): Promise<ExtensionInfo[]> {
   return request("/api/extensions");
+}
+
+// What each extension keeps in its storage (server/src/extensionStorage.ts),
+// including extensions that have since been uninstalled.
+export interface StoredDataInfo {
+  id: string;
+  bytes: number;
+  installed: boolean;
+}
+
+export function fetchStoredData(): Promise<StoredDataInfo[]> {
+  return request("/api/storage");
+}
+
+export async function deleteStoredData(id: string): Promise<void> {
+  const res = await fetch(`/api/storage/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) throw new ApiError(`${res.status} ${res.statusText}`, res.status);
 }
 
 export function installExtensionPackage(file: File | Blob): Promise<ExtensionInfo> {
@@ -1056,4 +1088,61 @@ export function getUpdates(): Promise<UpdateStatus> {
 /** Asks the server to check GitHub now, and returns the new answer. */
 export function checkForUpdates(): Promise<UpdateStatus> {
   return request("/api/updates/check", { method: "POST" });
+}
+
+// The project's committed terminal setup (.perch/project.json) - see
+// server/src/projectSetup.ts.
+export interface ProjectSetupTerminalDto {
+  name: string;
+  command?: string;
+  cwd?: string;
+}
+
+export type ProjectSetupDto =
+  | { status: "none" }
+  | { status: "invalid"; error: { message: string; path: string } }
+  | {
+      status: "ok";
+      setup: { terminals: ProjectSetupTerminalDto[]; grid: boolean };
+      hash: string;
+      trust: "new" | "changed" | "approved" | "never";
+    };
+
+export function getProjectSetup(cwd: string): Promise<ProjectSetupDto> {
+  return request(`/api/project-setup?cwd=${encodeURIComponent(cwd)}`);
+}
+
+export function openProjectSetup(
+  cwd: string,
+  session: string,
+  hash: string,
+): Promise<{ terminals: { name: string; index: number; created: boolean }[]; grid: boolean }> {
+  return request("/api/project-setup/open", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cwd, session, hash }),
+  });
+}
+
+export function setProjectSetupNever(cwd: string, never: boolean): Promise<void> {
+  return request("/api/project-setup/never", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cwd, never }),
+  });
+}
+
+export function listProjectSetupNever(): Promise<{ folders: string[] }> {
+  return request("/api/project-setup/never");
+}
+
+export function saveProjectSetup(
+  cwd: string,
+  opts: { write: boolean; overwrite: boolean },
+): Promise<{ content: string; exists: boolean; written: boolean }> {
+  return request("/api/project-setup/save", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cwd, ...opts }),
+  });
 }

@@ -112,6 +112,16 @@ async function findSession(name: string): Promise<MuxSession> {
   return s;
 }
 
+// A session's windows with what each was started with: its declared command
+// (the one createWindow was given, typed again on restore), "" for a plain
+// shell. Used by the project setup file's "save the current terminals".
+export async function declaredWindows(
+  session: string,
+): Promise<{ index: number; name: string; cwd: string; declaredCommand: string }[]> {
+  const s = await findSession(session);
+  return s.windows.map((w) => ({ index: w.index, name: w.name, cwd: w.cwd ?? s.rootCwd, declaredCommand: w.declaredCommand }));
+}
+
 // A new session starts at the git repo root containing `cwd` (matching the
 // FILES panel's rooting), else `cwd` itself — unless exactCwd: a project
 // session must start at the registered folder so its path round-trips to the
@@ -153,10 +163,13 @@ export async function killWindow(session: string, index: number): Promise<void> 
 
 // A new terminal starts at the session's own folder, not wherever its active
 // window has cd'd to. A name given here stays; without one the window is named
-// after what runs in it. Returns the new window's index.
-export async function createWindow(session: string, cwd?: string, name?: string): Promise<number> {
+// after what runs in it. A `command` is typed into the new shell and becomes
+// the window's declared command, which is typed again when the window is
+// restored after a restart. Returns the new window's index.
+export async function createWindow(session: string, cwd?: string, name?: string, command?: string): Promise<number> {
   const dir = cwd ? expandHome(cwd) : (await findSession(session)).rootCwd;
-  return (await mux().createWindow(session, { cwd: dir, name })).index;
+  const run = command?.trim() || undefined;
+  return (await mux().createWindow(session, { cwd: dir, name, command: run })).index;
 }
 
 // The session's lazygit window — by running command, or by name for one

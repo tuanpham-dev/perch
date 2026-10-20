@@ -299,13 +299,14 @@ export default function GridView({
                     key={provider.id}
                     type="button"
                     className={`window-decoration-badge${decoration.className ? ` ${decoration.className}` : ""}`}
-                    title={decoration.tooltip ?? decoration.badge}
+                    title={decoration.tooltip ?? (decoration.badge || undefined)}
                     tabIndex={-1}
                     onClick={(e) => {
                       e.stopPropagation();
                       provider.onClick?.((e.currentTarget as HTMLElement).getBoundingClientRect(), decorationCtx);
                     }}
                   >
+                    {decoration.icon && <Icon name={decoration.icon} />}
                     {decoration.badge}
                   </button>
                 ))}
@@ -356,6 +357,7 @@ export default function GridView({
                 onPreviewFile={terminal.onPreviewFile}
                 isPreviewable={terminal.isPreviewable}
                 cwd={win?.cwd}
+                terminalWindow={{ sessionName: cell.sessionName, windowIndex: cell.windowIndex, windowId: win?.id ?? cell.windowId }}
               />
             </div>
           </div>

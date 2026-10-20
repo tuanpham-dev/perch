@@ -1,6 +1,6 @@
 [package]
 name = "perch-desktop"
-version = "0.8.0"
+version = "0.9.0-dev"
 description = "Perch as a desktop app"
 edition = "2021"
 publish = false

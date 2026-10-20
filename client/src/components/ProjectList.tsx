@@ -993,13 +993,14 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
           <button
             key={provider.id}
             className={`window-decoration-badge${decoration.className ? ` ${decoration.className}` : ""}`}
-            title={decoration.tooltip ?? decoration.badge}
+            title={decoration.tooltip ?? (decoration.badge || undefined)}
             tabIndex={-1}
             onClick={(e) => {
               e.stopPropagation();
               provider.onClick?.((e.currentTarget as HTMLElement).getBoundingClientRect(), ctx);
             }}
           >
+            {decoration.icon && <Icon name={decoration.icon} />}
             {decoration.badge}
           </button>
         ))}

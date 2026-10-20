@@ -1,4 +1,6 @@
-// First: server/.env has to be in process.env before any other module loads.
+// First: refuse a Node too old to run the rest (nodeVersion.ts).
+import "./nodeVersion.js";
+// Then: server/.env has to be in process.env before any other module loads.
 import "./loadEnv.js";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -8,6 +10,7 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import { agentHookBodyParser, ensureAgentHookShim } from "./agentHooks.js";
 import { draftsRouter } from "./drafts.js";
+import { createExtensionStorageRouter } from "./extensionStorageRoutes.js";
 import { resumeRestoredAgents } from "./agentResume.js";
 import { applyTerminalSettings } from "./terminalSettings.js";
 import { api } from "./api.js";
@@ -17,7 +20,7 @@ import { writeInstanceRecord } from "./instanceRecord.js";
 import { versionInfo } from "./version.js";
 import { startUpdateChecks } from "./updates.js";
 import { subscribeCommandEvents } from "./commandEvents.js";
-import { loadEnabledServerHooks } from "./extensions.js";
+import { extensionStorage, listExtensions, loadEnabledServerHooks } from "./extensions.js";
 import { captureConsole } from "./logChannels.js";
 import { activeEngineId, DAEMON_ENGINE_ID, enginesSettled, getMultiplexer, selectEngine, whenEngineReady } from "./multiplexer.js";
 import { startDaemonLink, terminalEnv } from "./mux.js";
@@ -228,6 +231,18 @@ app.use("/api/agent-hooks/report", agentHookBodyParser);
 // Drafts (unsaved editor edits, server/src/drafts.ts) bring their own
 // larger-limit JSON parser, for the same reason.
 app.use("/api/drafts", draftsRouter);
+// Extension storage (server/src/extensionStorage*.ts) too: a record may be 16 MB.
+app.use(
+  "/api/storage",
+  createExtensionStorageRouter(extensionStorage, {
+    installedIds: async () => (await listExtensions()).map((e) => e.id),
+  }),
+);
+// Extension routes (/api/ext/<id>) take the same 17 MB JSON bodies extension
+// storage does, so what an extension stores can also pass through its own
+// routes (HTTP Client's history keeps response bodies up to 1 MB). The
+// app-wide default below is 100 KB.
+app.use("/api/ext", express.json({ limit: "17mb" }));
 app.use(express.json());
 app.use(clientPathsMiddleware);
 app.use("/api/web-preview", webProxy.api);

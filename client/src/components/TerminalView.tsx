@@ -21,7 +21,8 @@ import {
   type TerminalTheme,
 } from "../engines/types";
 import { bindingMatches, serializeEvent, type Keybinding } from "../keybindings";
-import { resolveGitRootDir } from "../hooks/useGitRootDir";
+import { resolveUploadDir } from "../lib/uploadDir";
+import { openComposer } from "../lib/composerBridge";
 import { LocalEcho, normalizeSpaces, wrapModeForCommand } from "../localEcho";
 import { inputDebug } from "../inputDebug";
 import type { AppSettings } from "../settings";
@@ -48,21 +49,6 @@ import { oversizeReason, uploadMaxBytes } from "../upload";
 // hijack image pastes in every pane.
 function localEchoWhenMatches(when: string, command: string): boolean {
   return when.trim() !== "" && whenMatches(when, command);
-}
-
-// Expands the pasteDropUploadDir setting for one upload: {cwd} is the pane's
-// working directory, {gitroot} the git repo root containing it (the repo-less
-// fallback to cwd itself comes from the /api/fs/git-root endpoint). Brace
-// syntax matches the touch-keys extension's {esc}/{ctrl} send tokens. Empty
-// keeps the original behavior, {cwd}/uploads. The git lookup only runs when
-// the token is actually present — a literal path stays a single sync step.
-async function resolveUploadDir(setting: string, cwd: string): Promise<string> {
-  if (!setting) return `${cwd}/uploads`;
-  let dir = setting.replaceAll("{cwd}", cwd);
-  if (dir.includes("{gitroot}")) {
-    dir = dir.replaceAll("{gitroot}", await resolveGitRootDir(cwd));
-  }
-  return dir;
 }
 
 // A single onData call is either a plain-text/IME burst or one full control
@@ -187,6 +173,9 @@ interface Props {
   // setting is empty — "" (window not found yet) just disables the feature
   // for this render, same as an empty localEchoWhen.
   cwd?: string;
+  // The window this view shows, for terminal accessories (their context's
+  // `window`). Optional: a view with no single window passes nothing.
+  terminalWindow?: { sessionName: string; windowIndex: number; windowId?: string };
 }
 
 export default function TerminalView({
@@ -208,6 +197,7 @@ export default function TerminalView({
   onPreviewFile,
   isPreviewable,
   cwd,
+  terminalWindow,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   // The engine's open() takes over the element it's given: contenteditable,
@@ -2638,6 +2628,16 @@ export default function TerminalView({
         disabled: !hasSelection,
         onClick: () => copySelectionAsRef.current("paragraph"),
       });
+      // Only with a selection: it opens the composer prefilled with it.
+      if (hasSelection) {
+        items.push({
+          label: "Send Selection to Agent…",
+          onClick: () => {
+            const selection = engineRef.current?.getSelection();
+            if (selection) openComposer({ text: selection, attachName: attachNameRef.current });
+          },
+        });
+      }
       items.push({ label: "Paste", onClick: () => pasteFromClipboardRef.current() });
       // Omitted rather than shown dead when the engine can't do it (the
       // seam's selectAll is optional).
@@ -2803,6 +2803,7 @@ export default function TerminalView({
       engineRef.current?.setSoftKeyboardSuppressed?.(suppressed);
     },
     containerRef: terminalBodyRef,
+    window: terminalWindow ?? null,
   };
 
   return (

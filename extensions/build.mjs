@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Builds every extensions/<name>/src/client.tsx into extensions/<name>/dist/client.js
 // (+ dist/client.css if the entry pulls in CSS, e.g. highlight.js's theme).
+// Each .ts/.tsx directly in extensions/<name>/src/chunks/ is built to
+// dist/chunks/<file>.js: a bundle the client import()s by URL through
+// ctx.assetUrl on first use, so its weight stays out of client.js — the same
+// convention perch-extensions' build uses (markdown-preview's Mermaid chunk).
 // react/react-dom/react-jsx-runtime are aliased to _shared/shims so every
 // bundled extension shares the host's single React instance instead of
 // shipping its own — see _shared/shims/*.mjs and client/src/main.tsx.
@@ -27,7 +31,43 @@ function findExtensionNames() {
     .filter((name) => existsSync(path.join(__dirname, name, "src/client.tsx")));
 }
 
+// The .ts/.tsx files directly inside extensions/<name>/src/chunks, if any.
+function findChunkEntries(name) {
+  const dir = path.join(__dirname, name, "src/chunks");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && /\.tsx?$/.test(e.name))
+    .map((e) => path.join(dir, e.name));
+}
+
+async function buildChunks(name) {
+  const entryPoints = findChunkEntries(name);
+  if (entryPoints.length === 0) return;
+  const ctx = await context({
+    entryPoints,
+    outdir: path.join(__dirname, name, "dist/chunks"),
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: "es2020",
+    jsx: "automatic",
+    alias: shims,
+    // Minified, unlike client.js: chunks are the heavy, rarely-read artifacts.
+    minify: true,
+    logLevel: "info",
+    define: { "import.meta.env.DEV": JSON.stringify(watch) },
+  });
+  if (watch) {
+    await ctx.watch();
+  } else {
+    await ctx.rebuild();
+    await ctx.dispose();
+    console.log(`[extensions] built ${name} chunks (${entryPoints.length})`);
+  }
+}
+
 async function buildOne(name) {
+  await buildChunks(name);
   const entry = path.join(__dirname, name, "src/client.tsx");
   const outfile = path.join(__dirname, name, "dist/client.js");
   const ctx = await context({

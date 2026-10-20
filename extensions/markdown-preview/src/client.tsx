@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
+import { isValidElement, useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -19,6 +19,7 @@ import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
 import { scalarText, splitFrontmatter } from "../frontmatter.mjs";
+import { MermaidBlock, setMermaidAssetUrl } from "./MermaidBlock";
 
 // Set once from activate() — see the module comment on extSettings below.
 interface SettingsApi {
@@ -251,6 +252,24 @@ function CodeBlock(props: HTMLAttributes<HTMLPreElement>) {
   );
 }
 
+// The plain text of a rendered node tree (a fenced block's <code> children).
+function nodeText(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (isValidElement<{ children?: React.ReactNode }>(node)) return nodeText(node.props.children);
+  return "";
+}
+
+// The source of a ```mermaid block, when this <pre>'s child is one.
+function mermaidSource(children: React.ReactNode): string | null {
+  const code = Array.isArray(children) ? children[0] : children;
+  if (!isValidElement<{ className?: string; children?: React.ReactNode }>(code)) return null;
+  const classes = (code.props.className ?? "").split(/\s+/);
+  if (!classes.includes("language-mermaid")) return null;
+  return nodeText(code.props.children).replace(/\n$/, "");
+}
+
 interface Props {
   filePath: string;
   active: boolean;
@@ -409,9 +428,13 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
           />
         );
       },
-      pre: (props) => <CodeBlock {...props} />,
+      pre: ({ node: _node, ...props }) => {
+        const source = mermaidSource(props.children);
+        if (source === null) return <CodeBlock {...props} />;
+        return <MermaidBlock source={source} dark={hl === "dark"} fallback={<CodeBlock {...props} />} />;
+      },
     }),
-    [filePath, openLinkTarget],
+    [filePath, openLinkTarget, hl],
   );
 
   const controls = (
@@ -476,6 +499,7 @@ export function activate(ctx: {
   openFileTab = ctx.app.openFileTab;
   openViewerTab = ctx.app.openViewerTab;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
+  setMermaidAssetUrl(ctx.assetUrl);
   ctx.registerFileViewer({
     id: "markdownViewer",
     extensions: ["md", "markdown"],
@@ -493,5 +517,6 @@ export function deactivate() {
   removeStylesheet = null;
   openFileTab = null;
   openViewerTab = null;
+  setMermaidAssetUrl(null);
   pendingAnchors.clear();
 }

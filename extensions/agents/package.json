@@ -2,7 +2,7 @@
   "name": "agents",
   "private": true,
   "publisher": "perch",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Agents",
   "description": "Built-in agent definitions: Claude Code and OpenAI Codex, for agent detection, \"Start work\" launch presets, and core's agent-hook pipeline. The app itself ships no agents - every agent comes from an extension's contributes.agents, and this is the one that supplies the two common CLIs (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",
@@ -14,6 +14,10 @@
         "program": "claude",
         "command": "claude",
         "resume": "claude --continue",
+        "resumeSession": "claude --resume {id}",
+        "sessions": {
+          "format": "claude-jsonl"
+        },
         "skipPermissionsArgs": "--dangerously-skip-permissions",
         "docsUrl": "https://docs.claude.com/en/docs/claude-code",
         "iconUrl": "./claude.svg",
@@ -57,6 +61,10 @@
         "program": "codex",
         "command": "codex",
         "resume": "codex resume --last",
+        "resumeSession": "codex resume {id}",
+        "sessions": {
+          "format": "codex-rollout"
+        },
         "skipPermissionsArgs": "--dangerously-bypass-approvals-and-sandbox",
         "docsUrl": "https://github.com/openai/codex",
         "iconUrl": "./codex.svg",

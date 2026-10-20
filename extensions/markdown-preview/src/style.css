@@ -348,3 +348,36 @@
   font-size: 0.85em;
   white-space: pre-wrap;
 }
+
+/* ```mermaid blocks drawn as diagrams (MermaidBlock.tsx). The SVG scales down
+   to the column and scrolls sideways only when it can't. */
+.markdown-mermaid {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  overflow-x: auto;
+}
+
+.markdown-mermaid .markdown-copy-button {
+  top: 6px;
+}
+
+.markdown-mermaid-svg svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.markdown-mermaid-loading,
+.markdown-mermaid-message {
+  font-size: 0.9em;
+  color: var(--fg-inactive);
+}
+
+.markdown-mermaid-message {
+  margin: -8px 0 16px;
+  color: var(--error, var(--fg-inactive));
+}

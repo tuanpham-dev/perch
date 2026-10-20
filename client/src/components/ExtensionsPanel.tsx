@@ -42,6 +42,7 @@ function ExtensionRow({
   iconSrc,
   displayName,
   description,
+  warning,
   publisher,
   verified,
   disabled,
@@ -54,6 +55,8 @@ function ExtensionRow({
   iconSrc: string | null;
   displayName: string;
   description: string;
+  // Shown in place of the description, e.g. "Needs Perch 0.9.0 or newer".
+  warning?: string | null;
   publisher?: string;
   verified?: boolean;
   disabled?: boolean;
@@ -77,7 +80,11 @@ function ExtensionRow({
       <ExtIcon src={iconSrc} />
       <div className="extension-row-body">
         <div className="extension-row-title">{displayName}</div>
-        <div className="extension-row-description">{description}</div>
+        {warning ? (
+          <div className="extension-row-description extension-error">{warning}</div>
+        ) : (
+          <div className="extension-row-description">{description}</div>
+        )}
         <div className="extension-row-footer">
           {verified && <Icon name="verified-filled" className="extension-verified-icon" />}
           {publisher && <span className="extension-row-publisher">{publisher}</span>}
@@ -538,6 +545,7 @@ export default function ExtensionsPanel({
                   iconSrc={ext.icon ? api.extensionFileUrl(ext.id, ext.icon) : null}
                   displayName={ext.displayName}
                   description={ext.description}
+                  warning={ext.incompatible}
                   publisher={parsePublisher(ext.id)}
                   tabIndex={rowProps.tabIndex}
                   rowRef={rowProps.ref}

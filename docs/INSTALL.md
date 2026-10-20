@@ -6,7 +6,7 @@ your `PATH`. To run straight from a clone instead, see
 
 ## Requirements
 
-- Node.js 23+
+- Node.js 24+
 - A C/C++ toolchain (`node-pty` compiles a native addon on install)
 
 ## Install
@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.sh 
 
 Clones the repo to `~/.local/share/perch`, builds it, and symlinks a `perch` command into `~/.local/bin`. It also installs and starts a user service, so it survives logout and starts on boot: a systemd user unit (`~/.config/systemd/user/perch.service`, with linger enabled) on Linux, carrying the `PATH` of the shell that ran the installer so a Node installed under your home (nvm, a tarball) is found, a launchd agent (`~/Library/LaunchAgents/dev.perch.plist`) on macOS. No `sudo`, nothing written outside `$HOME`. Re-running the same command later updates an existing install instead of failing.
 
-The installer checks for Node 23+, `git`, and a C/C++ toolchain up front and exits with distro-specific hints if anything's missing, rather than trying to install them itself.
+The installer checks for Node 24+, `git`, and a C/C++ toolchain up front and exits with distro-specific hints if anything's missing, rather than trying to install them itself.
 
 ### Windows
 
@@ -25,7 +25,7 @@ The installer checks for Node 23+, `git`, and a C/C++ toolchain up front and exi
 irm https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.ps1 | iex
 ```
 
-Clones to `%LOCALAPPDATA%\perch\app`, builds it, adds its `bin` folder to your user `PATH`, and adds a Task Scheduler task that starts Perch when you sign in (hidden, logging to `%LOCALAPPDATA%\perch\perch.log`). Needs Node 23+ and Git for Windows; no administrator rights. Terminals run PowerShell 7 (`pwsh`) when it's installed, else Windows PowerShell; pick another shell in Settings → Terminal Backend. Command history and prompt jumps work in those terminals out of the box (the shell integration is loaded automatically). Search works without ripgrep, but installing it (`winget install BurntSushi.ripgrep.MSVC`) makes it faster and adds full glob support.
+Clones to `%LOCALAPPDATA%\perch\app`, builds it, adds its `bin` folder to your user `PATH`, and adds a Task Scheduler task that starts Perch when you sign in (hidden, logging to `%LOCALAPPDATA%\perch\perch.log`). Needs Node 24+ and Git for Windows; no administrator rights. Terminals run PowerShell 7 (`pwsh`) when it's installed, else Windows PowerShell; pick another shell in Settings → Terminal Backend. Command history and prompt jumps work in those terminals out of the box (the shell integration is loaded automatically). Search works without ripgrep, but installing it (`winget install BurntSushi.ripgrep.MSVC`) makes it faster and adds full glob support.
 
 To run the Linux server inside WSL instead, use `install.sh` in your distro; Windows reaches it at `http://localhost:3001` and the desktop app lists it as Installed. WSL2 stops the distro a few seconds after its last `wsl.exe` session ends, taking the service with it, so keep a session open (for example `wsl.exe -e sleep infinity` in the background) or set `vmIdleTimeout` in `.wslconfig`.
 

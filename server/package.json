@@ -1,7 +1,7 @@
 {
   "name": "perch-server",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.9.0-dev",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",

@@ -2871,6 +2871,12 @@ body.scrollbar-dragging {
   display: flex;
   flex-direction: column;
   min-width: 180px;
+  /* Its own width, not what's left between its left edge and the screen's:
+     a menu opened near the right edge (a status-bar item's) is measured at
+     that position before ContextMenu moves it left, and would otherwise be
+     squeezed into the leftover strip, wrapping every label. */
+  width: max-content;
+  max-width: calc(100vw - 16px);
   padding: 4px;
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -5577,4 +5583,341 @@ body.scrollbar-dragging {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+
+/* ---- Send to agents (AgentComposer) ---- */
+
+.dialog.agent-composer {
+  width: 640px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Phones: a full-screen sheet rather than a floating box. */
+.dialog.agent-composer.sheet {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100%;
+  max-height: none;
+  min-width: 0;
+  border-radius: 0;
+  border: none;
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+}
+
+.agent-composer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.agent-composer-head .dialog-title {
+  margin-bottom: 0;
+}
+
+.agent-composer-editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.agent-composer-text {
+  resize: vertical;
+  min-height: 140px;
+  font-family: var(--mono-font, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-composer.sheet .agent-composer-text {
+  flex: 1;
+  resize: none;
+}
+
+.agent-composer-mentions {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.agent-composer-mention {
+  padding: 3px 10px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.agent-composer-mention.active,
+.agent-composer-mention:hover {
+  background: var(--list-active-bg, var(--list-hover-bg));
+  color: var(--fg-bright);
+}
+
+.agent-composer-to {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-inactive);
+}
+
+.agent-composer-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.agent-composer-target {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+  color: var(--fg-bright);
+  cursor: pointer;
+}
+
+.agent-composer-target:hover {
+  background: var(--list-hover-bg);
+}
+
+.agent-composer-target-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-composer-state,
+.agent-composer-result {
+  font-size: 12px;
+  color: var(--fg-inactive);
+}
+
+.agent-composer-state.waiting {
+  color: var(--warning, #e5c07b);
+}
+
+.agent-composer-result.ok {
+  color: var(--git-added-fg, #73c991);
+}
+
+.agent-composer-result.bad,
+.agent-composer-error {
+  color: var(--error);
+}
+
+.agent-composer-error,
+.agent-composer-muted {
+  font-size: 12px;
+}
+
+.agent-composer-muted {
+  color: var(--fg-inactive);
+}
+
+.agent-composer-buttons {
+  align-items: center;
+  margin-top: 4px;
+}
+
+.agent-composer-submit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--fg-bright);
+  cursor: pointer;
+}
+
+.agent-composer-hint {
+  margin-left: 6px;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+/* ---- Project setup (.perch/project.json) review and save ---- */
+
+.dialog.project-setup-dialog {
+  width: 620px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.project-setup-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+}
+
+.project-setup-row {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) minmax(60px, max-content) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.project-setup-name {
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+.project-setup-cwd {
+  color: var(--fg-inactive);
+  font-family: var(--mono-font, ui-monospace, Menlo, Consolas, monospace);
+}
+
+.project-setup-command {
+  font-family: var(--mono-font, ui-monospace, Menlo, Consolas, monospace);
+  color: var(--fg-bright);
+  overflow-wrap: anywhere;
+}
+
+.project-setup-warning {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--warning, #e5c07b);
+}
+
+.project-setup-buttons {
+  flex-wrap: wrap;
+}
+
+.project-setup-preview {
+  margin: 0;
+  max-height: 340px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--fg-bright);
+  font-family: var(--mono-font, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+}
+
+/* The non-modal notice (components/Notice.tsx). */
+.app-notice {
+  position: fixed;
+  left: 50%;
+  bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--fg-bright);
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+.app-notice-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-notice-action {
+  flex: none;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A codicon inside a decoration badge (SessionDecoration/FileDecoration.icon),
+   sized to the badge's text. */
+.window-decoration-badge .codicon,
+.file-tree-git-badge .codicon {
+  font-size: 12px;
+}
+
+.window-decoration-badge .codicon + *,
+.window-decoration-badge .codicon:not(:last-child) {
+  margin-right: 2px;
+}
+
+/* Settings → Extensions → Stored data: one row per extension with its size
+   and a delete button (components/settings/ExtensionsSection.tsx). */
+.stored-data-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.stored-data-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.stored-data-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.stored-data-size {
+  color: var(--fg-inactive);
+  font-variant-numeric: tabular-nums;
+}
+
+.stored-data-group {
+  margin: 8px 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-inactive);
+}
+
+.stored-data-error {
+  color: var(--error-fg, #f48771);
 }

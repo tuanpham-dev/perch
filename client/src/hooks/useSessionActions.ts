@@ -12,6 +12,7 @@ import {
   type WorktreeNode,
 } from "../lib/projects";
 import { isRealTab, tabVirtualPath } from "../lib/tabs";
+import { notifyProjectCreated } from "../lib/projectSetupBridge";
 import type { SplitDirection } from "../lib/splits";
 import type { AppSettings } from "../settings";
 import type { MenuItem, Project, RepoInfo, Tab, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
@@ -135,6 +136,7 @@ export function useSessionActions(
         await refresh();
         const activeIndex = created.windows.find((w) => w.active)?.index;
         if (activeIndex !== undefined) await openWindowTab(created.name, activeIndex);
+        notifyProjectCreated(created.name, cwd);
         return created.name;
       } catch (err) {
         showError(err);

@@ -254,6 +254,14 @@ export interface AgentPreset {
   // already ships (see client/src/components/Icon.tsx). Anything empty or
   // unknown renders the generic robot rather than leaving a hole in the row.
   icon: string;
+  // The line that reopens one particular past conversation, with "{id}" where
+  // its session id goes ("claude --resume {id}"). Empty when the agent can't
+  // resume a chosen session. Manifest-only, like the hook descriptor.
+  resumeSession: string;
+  // Where this agent keeps its conversations and in which format, for the
+  // session browser (agentSessions.ts). Null when it declares none; an
+  // extension may still provide a reader for it from its server hook.
+  sessions: AgentSessionsDescriptor | null;
   // An agent kept but not offered: it stays configured and stops showing up
   // in pickers and in detection.
   enabled: boolean;
@@ -262,6 +270,43 @@ export interface AgentPreset {
   // whoever contributed them owns their command line - but they can be
   // enabled and disabled like any other.
   contributedBy: string;
+}
+
+// The transcript formats core can read for the session browser. Each names
+// one agent CLI's own on-disk layout; see agentSessionFormats/.
+export const SESSION_FORMATS = ["claude-jsonl", "codex-rollout"] as const;
+export type SessionFormat = (typeof SESSION_FORMATS)[number];
+
+export interface AgentSessionsDescriptor {
+  format: SessionFormat;
+  // Where the transcripts live, ~ expanded; null for the format's own
+  // default (~/.claude/projects, ~/.codex/sessions). Always under $HOME.
+  dir: string | null;
+}
+
+// A manifest's `sessions` field, or null when it is absent or unusable: an
+// unknown format, or a dir outside $HOME (the same fence the hook descriptor
+// has, since core reads every file under it).
+export function parseSessionsDescriptor(raw: unknown): AgentSessionsDescriptor | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>;
+  const format = typeof source.format === "string" ? source.format.trim() : "";
+  if (!(SESSION_FORMATS as readonly string[]).includes(format)) return null;
+  let dir: string | null = null;
+  if (source.dir !== undefined) {
+    if (typeof source.dir !== "string" || !source.dir.trim()) return null;
+    const expanded = path.resolve(source.dir.trim().replace(/^~(?=$|[\\/])/, homedir()));
+    const home = homedir();
+    if (expanded !== home && !expanded.startsWith(home + path.sep)) return null;
+    dir = expanded;
+  }
+  return { format: format as SessionFormat, dir };
+}
+
+// The resumeSession line, or "" when it is absent or has no {id} to fill.
+export function parseResumeSession(raw: unknown): string {
+  const line = typeof raw === "string" ? raw.trim() : "";
+  return line.includes("{id}") ? line : "";
 }
 
 // Core ships no agents. "What is an AI agent" is answered entirely by what
@@ -300,6 +345,9 @@ function parseAgent(raw: unknown): AgentPreset | null {
     // it is ignored, and resolveAgents puts the real descriptor back.
     hooks: null,
     oneShot: null,
+    // Manifest-only too: they name a command line and a folder core reads.
+    resumeSession: "",
+    sessions: null,
     docsUrl: readString(source, "docsUrl"),
     iconUrl: readString(source, "iconUrl"),
     icon: readString(source, "icon") || DEFAULT_AGENT_ICON,
@@ -448,7 +496,7 @@ export async function resumeCommand(id: string): Promise<string | null> {
   return withPermissions(agent, agent.resume);
 }
 
-async function withPermissions(agent: AgentSummary, line: string): Promise<string> {
+export async function withPermissions(agent: Pick<AgentSummary, "skipPermissionsArgs">, line: string): Promise<string> {
   const doc = await readSettingsDoc();
   const settings = (doc.settings ?? {}) as Record<string, unknown>;
   const yolo = settings.agentPermissions === "yolo";

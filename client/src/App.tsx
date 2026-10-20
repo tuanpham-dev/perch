@@ -6,6 +6,11 @@ import ContextMenu from "./components/ContextMenu";
 import Dialog from "./components/Dialog";
 import FolderPickerDialog from "./components/FolderPickerDialog";
 import AboutDialog from "./components/AboutDialog";
+import AgentComposer, { type ComposerSource } from "./components/AgentComposer";
+import Notice from "./components/Notice";
+import ProjectSetupDialog from "./components/ProjectSetupDialog";
+import { setProjectCreatedHandler } from "./lib/projectSetupBridge";
+import { openComposer, setComposerHandler, type ComposerRequest } from "./lib/composerBridge";
 import { useUpdates } from "./hooks/useUpdates";
 import ExtensionPageView from "./components/ExtensionPageView";
 import Icon from "./components/Icon";
@@ -31,6 +36,7 @@ import {
   extensionTabGroupMenuItems,
   focusProjectsPanel,
   focusSidebarTab,
+  getActiveContext,
   requestTerminalRefocus,
   setExecuteCommandHandler,
   setExtensionSettingUpdater,
@@ -46,6 +52,7 @@ import {
   useExtensionRegistryVersion,
   extensionPanelViews,
   extensionUrlHandlers,
+  extensionViewerAccessories,
   setPanelViewHandlers,
   type PanelViewContext,
 } from "./extensions";
@@ -354,6 +361,15 @@ export default function App() {
   // "available" banner (plans/app-versioning.md). Re-read when the update
   // settings change, so switching channel shows that channel's answer.
   const [aboutOpen, setAboutOpen] = useState(false);
+  // The "Send to agents" composer: what it opened with, and where from.
+  const [composer, setComposer] = useState<{ text: string; source: ComposerSource | null; cwd: string | null } | null>(null);
+  const [composerSubmit, setComposerSubmit] = useState(() => {
+    try {
+      return localStorage.getItem("perch.composerSubmit") === "1";
+    } catch {
+      return false;
+    }
+  });
 
   // The settings bundle waiting on its import preview. Held here, and
   // rendered at the app root below beside every other dialog, because
@@ -1615,6 +1631,49 @@ export default function App() {
   openWindowTabRef.current = openWindowTab;
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+
+  // Resolves where a composer request came from (the terminal's attach name,
+  // through the tab or grid cell showing it; else the active terminal) and
+  // opens the composer, a selection wrapped in a fenced block under a
+  // "From project · window:" line.
+  useEffect(() => {
+    const handler = ({ text, attachName }: ComposerRequest) => {
+      let sessionName: string | null = null;
+      let windowIndex: number | null = null;
+      if (attachName) {
+        const tab = tabsRef.current.find((t) => t.attachName === attachName);
+        const cell = Object.values(gridsRef.current)
+          .flatMap((g) => g.cells)
+          .find((c) => c.attachName === attachName);
+        if (tab) {
+          sessionName = tab.sessionName;
+          windowIndex = tab.windowIndex ?? null;
+        } else if (cell) {
+          sessionName = cell.sessionName;
+          windowIndex = cell.windowIndex;
+        }
+      }
+      if (!sessionName) {
+        const active = getActiveContext();
+        sessionName = active.sessionName;
+        windowIndex = active.windowIndex;
+      }
+      const session = sessionsRef.current.find((x) => x.name === sessionName);
+      const window = session ? (session.windows.find((w) => w.index === windowIndex) ?? session.windows.find((w) => w.active)) : undefined;
+      const source: ComposerSource | null =
+        session && window
+          ? {
+              sessionName: session.name,
+              windowIndex: window.index,
+              label: `${session.path.replace(/\/+$/, "").split("/").pop() || session.name} · ${window.name}`,
+            }
+          : null;
+      const body = attachName && text ? `From ${source?.label ?? "a terminal"}:\n\`\`\`\n${text.replace(/\n+$/, "")}\n\`\`\`\n` : text;
+      setComposer({ text: body, source, cwd: window?.cwd ?? session?.path ?? null });
+    };
+    setComposerHandler(handler);
+    return () => setComposerHandler(null);
+  }, [tabsRef, gridsRef]);
   useEffect(() => {
     if (IS_DETACHED) return;
     installDesktopHooks({
@@ -1992,6 +2051,100 @@ export default function App() {
   // Both the keyboard dispatcher (handlers below) and the palette (built
   // further down) share these same guards, so a bound chord fired with no
   // context and a palette row with no context behave identically: a no-op.
+  // ---- Project setup (.perch/project.json) ----
+  // Offered when opening a folder creates its session (lib/projectSetupBridge),
+  // and on demand through the Project: commands. Reads through a ref so the
+  // bridge handler, installed once, sees the current tabs and groups.
+  type SetupPrompt =
+    | { kind: "review"; session: string; cwd: string; name: string; terminals: api.ProjectSetupTerminalDto[]; hash: string; changed: boolean }
+    | { kind: "notice"; session: string; cwd: string; name: string; count: number; hash: string }
+    | { kind: "save"; cwd: string; name: string; content: string; exists: boolean };
+  const [setupPrompt, setSetupPrompt] = useState<SetupPrompt | null>(null);
+  const setupDeps = useRef({ openWindowTab, refresh, tileAll, projectKeyForSession, activeGroupId, showError });
+  setupDeps.current = { openWindowTab, refresh, tileAll, projectKeyForSession, activeGroupId, showError };
+
+  const projectNameOf = (cwd: string) => cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || cwd;
+
+  const openSetup = useCallback(async (session: string, cwd: string, hash: string) => {
+    const deps = setupDeps.current;
+    try {
+      const { terminals, grid } = await api.openProjectSetup(cwd, session, hash);
+      await deps.refresh();
+      for (const t of terminals) await setupDeps.current.openWindowTab(session, t.index);
+      if (grid && terminals.length > 1) {
+        // Let the tabs just opened land in state (tileAll gathers the open
+        // tabs it finds there), then tile them.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await setupDeps.current.tileAll(setupDeps.current.activeGroupId, setupDeps.current.projectKeyForSession(session));
+      }
+    } catch (err) {
+      deps.showError(err);
+    }
+  }, []);
+
+  // What to show for a project's setup file. `explicit`: the user asked
+  // (the command), so an approved file just opens and a "never" is undone.
+  const offerSetup = useCallback(
+    async (session: string, cwd: string, explicit: boolean) => {
+      let reading: api.ProjectSetupDto;
+      try {
+        reading = await api.getProjectSetup(cwd);
+      } catch (err) {
+        if (explicit) setupDeps.current.showError(err);
+        return;
+      }
+      const name = projectNameOf(cwd);
+      if (reading.status === "none") {
+        if (explicit) setupDeps.current.showError(`${name} has no .perch/project.json`);
+        return;
+      }
+      if (reading.status === "invalid") {
+        setupDeps.current.showError(`.perch/project.json isn't usable (${reading.error.path}): ${reading.error.message}`);
+        return;
+      }
+      let trust = reading.trust;
+      if (trust === "never") {
+        if (!explicit) return;
+        await api.setProjectSetupNever(cwd, false).catch(() => {});
+        trust = "new";
+      }
+      if (trust === "approved") {
+        if (explicit) void openSetup(session, cwd, reading.hash);
+        else setSetupPrompt({ kind: "notice", session, cwd, name, count: reading.setup.terminals.length, hash: reading.hash });
+        return;
+      }
+      setSetupPrompt({ kind: "review", session, cwd, name, terminals: reading.setup.terminals, hash: reading.hash, changed: trust === "changed" });
+    },
+    [openSetup],
+  );
+
+  useEffect(() => {
+    setProjectCreatedHandler((session, cwd) => void offerSetup(session, cwd, false));
+    return () => setProjectCreatedHandler(null);
+  }, [offerSetup]);
+
+  const activeProject = () => {
+    const session = sessionsRef.current.find((x) => x.name === activeSessionName);
+    return session ? { session: session.name, cwd: session.path } : null;
+  };
+
+  const dismissSetupNotice = useCallback(() => setSetupPrompt((p) => (p?.kind === "notice" ? null : p)), []);
+
+  const saveSetupPreview = useCallback(async () => {
+    const project = activeProject();
+    if (!project) {
+      showError("Open a project's terminal first");
+      return;
+    }
+    try {
+      const { content, exists } = await api.saveProjectSetup(project.cwd, { write: false, overwrite: false });
+      setSetupPrompt({ kind: "save", cwd: project.cwd, name: projectNameOf(project.cwd), content, exists });
+    } catch (err) {
+      showError(err);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionName, showError]);
+
   const globalHandlers = useMemo<Record<string, () => void>>(
     () => ({
       // Sidebar and panel commands are no-ops in a detached window, which
@@ -2004,6 +2157,13 @@ export default function App() {
       "sidebar.focusExtensions": () => !IS_DETACHED && focusSidebarTab(EXTENSIONS_TAB_ID),
       "sidebar.focusProjects": () => !IS_DETACHED && focusProjectsPanel(),
       "quickSwitcher.toggle": () => setSwitcherQuery((q) => (q === null ? "" : null)),
+      "agents.compose": () => openComposer({ text: "" }),
+      "project.openSetup": () => {
+        const project = activeProject();
+        if (project) void offerSetup(project.session, project.cwd, true);
+        else showError("Open a project's terminal first");
+      },
+      "project.saveSetup": () => void saveSetupPreview(),
       "commandPalette.toggle": () => setSwitcherQuery((q) => (q === null ? ">" : null)),
       "tab.next": () => cycleTab(1),
       "tab.previous": () => cycleTab(-1),
@@ -2216,6 +2376,9 @@ export default function App() {
       popOutCell,
       closeCell,
       projectKeyForSession,
+      offerSetup,
+      saveSetupPreview,
+      showError,
     ],
   );
 
@@ -3079,6 +3242,11 @@ export default function App() {
                 onPreviewFile={openPreviewViewerTab}
                 isPreviewable={isPreviewable}
                 cwd={paneWindow?.cwd}
+                terminalWindow={
+                  paneSession && paneWindow
+                    ? { sessionName: paneSession.name, windowIndex: paneWindow.index, windowId: paneWindow.id }
+                    : undefined
+                }
               />
             );
           }
@@ -3100,6 +3268,14 @@ export default function App() {
               }}
             >
               {content}
+              {tab.extViewerPath !== undefined &&
+                tab.extViewerId !== undefined &&
+                extensionViewerAccessories.map((a) => (
+                  <a.component
+                    key={a.id}
+                    context={{ filePath: tab.extViewerPath!, viewerId: tab.extViewerId!, active: visible, mobilePointer }}
+                  />
+                ))}
             </div>
           );
         })}
@@ -3394,6 +3570,69 @@ export default function App() {
             <Icon name="close" />
           </button>
         </div>
+      )}
+      {setupPrompt?.kind === "review" && (
+        <ProjectSetupDialog
+          mode="review"
+          projectName={setupPrompt.name}
+          terminals={setupPrompt.terminals}
+          changed={setupPrompt.changed}
+          onOpen={() => {
+            const p = setupPrompt;
+            setSetupPrompt(null);
+            void openSetup(p.session, p.cwd, p.hash);
+          }}
+          onNotNow={() => setSetupPrompt(null)}
+          onNever={() => {
+            const p = setupPrompt;
+            setSetupPrompt(null);
+            api.setProjectSetupNever(p.cwd, true).catch(showError);
+          }}
+        />
+      )}
+      {setupPrompt?.kind === "save" && (
+        <ProjectSetupDialog
+          mode="save"
+          projectName={setupPrompt.name}
+          content={setupPrompt.content}
+          exists={setupPrompt.exists}
+          onCancel={() => setSetupPrompt(null)}
+          onSave={() => {
+            const p = setupPrompt;
+            setSetupPrompt(null);
+            api.saveProjectSetup(p.cwd, { write: true, overwrite: p.exists }).catch(showError);
+          }}
+        />
+      )}
+      {setupPrompt?.kind === "notice" && (
+        <Notice
+          message={`Open terminal setup (${setupPrompt.count === 1 ? "1 terminal" : `${setupPrompt.count} terminals`})`}
+          actionLabel="Open"
+          onAction={() => {
+            const p = setupPrompt;
+            setSetupPrompt(null);
+            void openSetup(p.session, p.cwd, p.hash);
+          }}
+          onDismiss={dismissSetupNotice}
+        />
+      )}
+      {composer && (
+        <AgentComposer
+          initialText={composer.text}
+          source={composer.source}
+          sourceCwd={composer.cwd}
+          uploadDirSetting={settingsRef.current.pasteDropUploadDir}
+          submitAfter={composerSubmit}
+          onSubmitAfterChange={(value) => {
+            setComposerSubmit(value);
+            try {
+              localStorage.setItem("perch.composerSubmit", value ? "1" : "0");
+            } catch {
+              // private mode: the choice lasts this page only
+            }
+          }}
+          onClose={() => setComposer(null)}
+        />
       )}
       {aboutOpen && (
         <AboutDialog

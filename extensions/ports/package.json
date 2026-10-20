@@ -2,7 +2,7 @@
   "name": "ports",
   "private": true,
   "publisher": "perch",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "displayName": "Ports",
   "description": "Built-in Ports status-bar readout and its popover: listening ports inside your terminals, with open-in-browser, copy-URL, tunnel-command, and kill-process actions (bundled - see extensions/build.mjs).",
   "icon": "./icon.svg",

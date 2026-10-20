@@ -33,10 +33,10 @@ Heading 'Checking dependencies'
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Die 'git not found - install Git for Windows (https://git-scm.com/download/win)' }
 Ok 'git found'
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Die 'node not found - install Node.js 23+ (https://nodejs.org)' }
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Die 'node not found - install Node.js 24+ (https://nodejs.org)' }
 $nodeVersion = (node --version).Trim()
 $nodeMajor = [int]($nodeVersion.TrimStart('v').Split('.')[0])
-if ($nodeMajor -lt 23) { Die "node $nodeVersion found, but 23+ is required - install Node.js 23+ (https://nodejs.org)" }
+if ($nodeMajor -lt 24) { Die "node $nodeVersion found, but 24+ is required - install Node.js 24+ (https://nodejs.org)" }
 Ok "node $nodeVersion"
 
 if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {

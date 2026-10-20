@@ -399,4 +399,7 @@ export interface ExtensionInfo {
   // was recorded (an upload, a builtin, or an install from before it was
   // tracked). Mirrors server/src/extensions.ts's ExtensionInfo.
   source: string | null;
+  // "Needs Perch X or newer" when the extension's perch.minPerch is above
+  // this server's version; its code is never loaded. Absent from older servers.
+  incompatible?: string | null;
 }

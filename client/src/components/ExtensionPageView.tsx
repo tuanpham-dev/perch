@@ -185,6 +185,7 @@ export default function ExtensionPageView({
                       {installing ? "Updating…" : `Update to v${update.entry.version}`}
                     </button>
                   )}
+                  {installed?.incompatible && <span className="extension-error">{installed.incompatible}</span>}
                   {installed?.required && (
                     <span className="extension-required-label" title="This extension is part of the app's core surface and cannot be disabled or uninstalled.">
                       Required

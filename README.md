@@ -76,7 +76,7 @@ irm https://raw.githubusercontent.com/tuanpham-dev/perch/main/install.ps1 | iex
 
 This builds the app, installs a `perch` command, and starts a user service
 that survives logout and comes back on boot. Perch is then at
-<http://127.0.0.1:3001>. You need Node.js 23+ and a C/C++ toolchain; the
+<http://127.0.0.1:3001>. You need Node.js 24+ and a C/C++ toolchain; the
 installer checks first and tells you what's missing.
 
 It installs the latest release; `perch update` moves it to newer ones as they

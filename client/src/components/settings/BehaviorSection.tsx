@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchShellIntegrationStatus } from "../../api";
+import { fetchShellIntegrationStatus, listProjectSetupNever, setProjectSetupNever } from "../../api";
 import { copyText } from "../../clipboard";
 import { normalizeCarryOverPath } from "../../lib/carryOverPaths";
 import Icon from "../Icon";
@@ -201,6 +201,54 @@ function CarryOverList() {
   );
 }
 
+// Folders whose .perch/project.json the user said never to offer
+// (projectSetup.ts keeps the list on the server, outside the settings
+// document). Removing one brings the offer back the next time it's opened.
+function ProjectSetupNeverList() {
+  const [folders, setFolders] = useState<string[] | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    listProjectSetupNever()
+      .then((r) => setFolders(r.folders))
+      .catch(() => setFolders([]));
+  }, []);
+
+  const remove = (folder: string) => {
+    setProjectSetupNever(folder, false)
+      .then(() => setFolders((prev) => (prev ?? []).filter((f) => f !== folder)))
+      .catch((err: Error) => setError(err.message));
+  };
+
+  return (
+    <div className="settings-row">
+      <span className="settings-label">Terminal setup files never offered</span>
+      <div className="settings-hint">
+        Folders whose .perch/project.json you chose Never for This Folder on. Remove one to be offered its terminal
+        setup again, or run Project: Open Terminal Setup in it.
+      </div>
+      {folders && folders.length === 0 && <div className="settings-hint">None.</div>}
+      {folders && folders.length > 0 && (
+        <div className="settings-entry-list">
+          {folders.map((f) => (
+            <div key={f} className="settings-entry">
+              <div className="settings-entry-head">
+                <span className="settings-entry-path" title={f}>
+                  {f}
+                </span>
+                <button className="icon-button" title="Remove" aria-label={`Remove ${f}`} onClick={() => remove(f)}>
+                  <Icon name="trash" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <div className="settings-hint settings-error">{error}</div>}
+    </div>
+  );
+}
+
 // Hosts the web preview's server may open although they're private or
 // local (a staging box on the LAN). Same list shape as CarryOverList.
 function WebPreviewHostsList() {
@@ -379,6 +427,8 @@ export default function BehaviorSection({
       </label>
 
       <CarryOverList />
+
+      <ProjectSetupNeverList />
 
       <label className="settings-row">
         <span className="settings-label">Ports to list</span>

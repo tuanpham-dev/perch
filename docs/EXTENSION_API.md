@@ -28,6 +28,7 @@ to read).
   - [Sidebar tabs](#sidebar-tabs--registersidebartab)
   - [Sidebar tab menu items](#sidebar-tab-menu-items--registersidebartabmenuitem)
   - [File menu items](#file-menu-items--registerfilemenuitem)
+  - [Port menu items](#port-menu-items--registerportmenuitem)
   - [Tab group menu items](#tab-group-menu-items--registertabgroupmenuitem)
   - [Window actions](#window-actions--registerwindowaction)
   - [File decorations](#file-decorations--registerfiledecorationprovider)
@@ -36,6 +37,7 @@ to read).
   - [Terminal engines](#terminal-engines--registerterminalengine)
   - [Editors](#editors--registereditor)
   - [Terminal accessories](#terminal-accessories--registerterminalaccessory)
+  - [Viewer accessories](#viewer-accessories--registervieweraccessory)
   - [App overlays](#app-overlays--registerappoverlay)
   - [Status bar items](#status-bar-items--registerstatusbaritem)
   - [Quick-switcher providers](#quick-switcher-providers--registerquickswitcherprovider)
@@ -45,7 +47,9 @@ to read).
   - [`ctx.serverEventSource`](#ctxservereventsource)
   - [`ctx.settings`](#ctxsettings)
   - [`ctx.drafts`](#ctxdrafts)
+  - [`ctx.storage`](#ctxstorage)
 - [Server API](#server-api)
+  - [Storage — `storage`](#storage--storage)
 - [Agent hooks](#agent-hooks)
 - [Sharing the host runtime](#sharing-the-host-runtime)
 - [Building and packaging](#building-and-packaging)
@@ -139,7 +143,8 @@ the whole extension.
   "perch": {
     "client": "./dist/client.js",  // ESM client entry (omit if none)
     "server": "./server.js",       // ESM server entry (omit if none)
-    "required": true               // bundled-only; see below
+    "required": true,              // bundled-only; see below
+    "minPerch": "0.9.0"            // the oldest Perch this runs on (optional)
   }
 }
 ```
@@ -149,7 +154,8 @@ the whole extension.
 | Field | Meaning |
 | --- | --- |
 | `client` | Extension-relative path to the browser entry — an ESM module exporting `activate(ctx)` (and optionally `deactivate()`). Dynamic-imported by the host; see [Client API](#client-api). |
-| `server` | Extension-relative path to the server entry — an ESM module exporting `activate({ router, log, getSettings, ai, secrets, host })` (and optionally `deactivate()`); see [Server API](#server-api). |
+| `server` | Extension-relative path to the server entry — an ESM module exporting `activate({ router, log, getSettings, ai, secrets, storage, host })` (and optionally `deactivate()`); see [Server API](#server-api). |
+| `minPerch` | The oldest Perch version this extension runs on, e.g. `"0.9.0"`. On an older Perch it is listed with **Needs Perch 0.9.0 or newer** and neither its client nor its server code is loaded. The host's own pre-release tag is ignored, so a `0.9.0-dev` build meets `"0.9.0"`. Perch versions before this field ignore it and load the extension anyway, so an extension that needs a newer API should still check for it (`if (!ctx.storage)`) and say so in its own UI. |
 | `required` | **Bundled extensions only** (silently ignored on user-installed ones, which could otherwise claim it). Marks the extension as a *required builtin*: the server refuses `disable`/`uninstall`, ignores stale state-file entries for it, and the UI shows a **Required** chip instead of those actions. Reserved for surfaces the app cannot function without — currently only `xterm-engine`, the terminal rendering floor. |
 
 ### `contributes.themes`
@@ -319,7 +325,9 @@ whether or not your extension has a client or server entry.
 | `program` | The foreground command a window running it reports — how a window is recognised as this agent. Omit for launch-only. |
 | `command` | The full launch line. Omit for detection-only. An entry with neither is dropped. |
 | `resume` | The line that picks the agent back up in the same folder (`claude --continue`). Typed into a window that was running the agent when terminals are restored after a restart, if **Resume agents** is on. Omit and a restored window stays at its shell prompt. |
-| `skipPermissionsArgs` | Appended for the agent's no-prompts mode (also to `resume`). Empty means it has none, and no "skip permissions" choice is offered for it. |
+| `skipPermissionsArgs` | Appended for the agent's no-prompts mode (also to `resume` and `resumeSession`). Empty means it has none, and no "skip permissions" choice is offered for it. |
+| `resumeSession` | The line that reopens one particular past conversation, with `{id}` where its session id goes (`claude --resume {id}`). Used by session browsers through `host.agentSessions.resumeCommand`. A line without `{id}` is dropped. |
+| `sessions` | Where the agent keeps its conversations, for session browsers - see **Session readers** below. |
 | `hooks` | How the app should write this agent's hook config — see **The hooks descriptor** below. Omit it for an agent whose CLI has none; a malformed one costs the agent its hooks, not its row. |
 | `oneShot` | How to run this CLI for a single prompt — see **The one-shot form** below. Declaring it also lists this agent as an AI provider under Settings → AI Providers. |
 | `docsUrl` | Where to read about it, or how to install it — the row's link, and the only useful action for an agent whose CLI is absent. |
@@ -446,6 +454,46 @@ be in the hook file's own directory, output is capped at 64KB, and a transform
 that throws, hangs or returns anything else is logged and skipped rather than
 failing the install. Register one for an agent you did not contribute and
 nothing happens.
+
+#### Session readers
+
+A session browser lists an agent's past conversations through a reader. The
+common case is declared: `sessions.format` names a transcript layout core
+reads itself, and `sessions.dir` (optional, `~` allowed, must be under
+`$HOME`) moves it from the format's default folder.
+
+```json
+"sessions": { "format": "claude-jsonl" }
+```
+
+| Format | Default folder | Layout |
+| --- | --- | --- |
+| `claude-jsonl` | `~/.claude/projects` | Claude Code: one `<session id>.jsonl` per conversation, in a folder named after the project path |
+| `codex-rollout` | `~/.codex/sessions` | Codex: `<yyyy>/<mm>/<dd>/rollout-*.jsonl`, each starting with a `session_meta` line |
+
+For any other layout, provide a reader from your server entry, for an agent
+your extension contributed. A provided reader wins over a declared format:
+
+```js
+export function activate({ host }) {
+  host.agentSessions.provideReader("opencode", {
+    // Conversations that ran in `cwd` (absolute): [{ id, cwd, title, lastActiveAt, messageCount }]
+    async list(cwd) { … },
+    // The last `limit` messages of one, oldest first: [{ role: "user" | "assistant" | "tool", text }]
+    async messages(id, cwd, limit) { … },
+    // Optional: which session a running agent process has open, so a browser
+    // can mark it as open in its window.
+    async sessionForProcess(pid) { … },
+  });
+}
+```
+
+Readers are fenced like companions: a call that throws, takes longer than 5
+seconds or returns malformed data is logged and that agent's conversations
+are left out, without failing the listing. Session ids are limited to
+letters, digits and `._:-` (they end up on a command line), and a row with
+any other id is dropped. Nothing here may write to the agent's files. The
+reader is dropped when your server hook unmounts.
 
 ### `contributes.configuration`
 
@@ -848,6 +896,25 @@ selection is not a contribution point. Reference: `prompts` in the
 [perch-extensions](https://github.com/tuanpham-dev/perch-extensions)
 registry.
 
+### Port menu items — `registerPortMenuItem`
+
+```ts
+ctx.registerPortMenuItem({
+  id: string,
+  label: string,
+  icon?: string,
+  order?: number,
+  isVisible?: (port: { port: number; address: string; pid?: number; process?: string }) => boolean,
+  onClick: (port) => void,
+});
+```
+
+Adds an item to a listening port's menu in the bundled Ports extension
+(its right-click menu, keyboard menu and status-bar popover), after its own
+items and before Kill Process. The Ports extension reads them with
+`ctx.app.portMenuItems(port)`. Reference: the HTTP Client extension's "Open
+in HTTP Client".
+
 ### Tab group menu items — `registerTabGroupMenuItem`
 
 ```ts
@@ -919,6 +986,7 @@ const handle = ctx.registerFileDecorationProvider({
 
 interface FileDecoration {
   badge?: string;      // short text at the row's right edge, e.g. "M"
+  icon?: string;       // a codicon drawn in the badge, before the text
   tooltip?: string;    // falls back to the badge text
   className?: string;  // extra class(es) on the whole row — colors/dimming
                        // come from YOUR stylesheet, not a color value here
@@ -1001,7 +1069,8 @@ interface SessionDecorationContext {  // same snapshot shape as WindowActionCont
 }
 
 interface SessionDecoration {
-  badge: string;        // the pill text, e.g. a count
+  badge: string;        // the pill text, e.g. a count; may be "" with an icon
+  icon?: string;        // a codicon drawn in the pill, before the text
   tooltip?: string;
   className?: string;
 }
@@ -1169,6 +1238,9 @@ interface TerminalAccessoryContext {
   setSoftKeyboardSuppressed(suppressed: boolean): void; // see below
   containerRef: React.RefObject<HTMLDivElement | null>; // the terminal body,
                                    // for "overlay" positioning
+  window: { sessionName: string; windowIndex: number; windowId?: string } | null;
+                                   // which window this view shows (windowId
+                                   // once the sessions poll has resolved it)
 }
 ```
 
@@ -1233,6 +1305,30 @@ gesture. The host listens on `document` in the capture phase, so an
 extension cannot preempt it from its own handlers; this attribute is the
 seam. The bundled touch-keys extension uses it on its floating one-handed
 toggle and key cluster.
+
+### Viewer accessories — `registerViewerAccessory`
+
+```ts
+ctx.registerViewerAccessory({
+  id: string,
+  component: React.ComponentType<{ context: ViewerAccessoryContext }>,
+});
+
+interface ViewerAccessoryContext {
+  filePath: string;        // the file the tab shows (a global viewer's own path)
+  viewerId: string;        // the namespaced viewer id showing it
+  active: boolean;         // the tab is showing
+  mobilePointer: boolean;
+}
+```
+
+The file-viewer counterpart of a terminal accessory: rendered once **per
+open file-viewer tab** (any viewer, core's or an extension's), as a sibling
+drawn after the viewer's content. The tab's host is the containing block, so
+`position: absolute; inset: 0` covers exactly that tab's content; leave what
+you don't draw on `pointer-events: none` so the viewer underneath keeps
+working. Return `null` when you have nothing for that file. Reference: the
+Notes extension's floating file notes.
 
 ### App overlays — `registerAppOverlay`
 
@@ -1447,6 +1543,16 @@ ctx.app.onDidChangeContext(cb): () => void   // returns unsubscribe
 ```
 The active tab's identity — the "current directory" for panels that follow
 the user around (git-scm's status, search's scope).
+
+```ts
+ctx.app.onDidRenameFiles(cb: (pairs: { from: string; to: string }[]) => void): () => void
+```
+Fires after the FILES panel renames, drag-moves or cut-pastes entries, with
+each source path and where it landed (a folder's pair covers everything
+inside it). Copies don't fire. For carrying per-path state along — the Notes
+extension keeps a file's notes on it this way. A change made outside the app,
+such as `mv` in a terminal, isn't reported: it can't be told apart from a
+delete.
 
 ```ts
 ctx.app.openFileTab(path: string, line?: number): void
@@ -1823,6 +1929,54 @@ The pattern the bundled viewers follow (`csv-preview`; `text-editor` and
 Absent on older hosts. Feature-detect it with `ctx.drafts?.` and treat a
 missing store as "edits live as long as the tab".
 
+### `ctx.storage`
+
+```ts
+const notes = ctx.storage.collection("notes");
+notes.get<T>(key): Promise<{ value: T; rev: number } | null>
+notes.put(key, value, opts?: { ifRev?: number }): Promise<{ rev: number }>
+notes.delete(key, opts?: { ifRev?: number }): Promise<void>
+notes.list<T>(opts?: { prefix?: string; after?: string; limit?: number; keysOnly?: boolean }): Promise<{ key: string; value: T; rev: number }[]>
+notes.subscribe(cb: (n: { type: "change"; changes: { key; rev; value?; deleted? }[] } | { type: "resync" }) => void): () => void
+ctx.storage.subscribeTopic(topic, cb: (n: { type: "topic"; payload? } | { type: "resync" }) => void): () => void
+```
+
+Your extension's own records on the server, readable and writable from its
+browser code and from its [server code](#storage--storage) alike. They are
+named collections of JSON values, kept in one SQLite database per extension
+under Perch's config folder. Every device connected to the server sees the
+same records.
+
+- **Limits.** A value can be any JSON up to 16 MB, and a key 1 to 1024
+  characters. Collection and topic names use `[A-Za-z0-9._-]`, at most 64
+  characters. `list` returns keys in order, at most 1000 per call; page with
+  `after`. `keysOnly: true` leaves the values out, which is much cheaper for
+  counting or pruning a collection of big records.
+- **Revisions.** Every record has a `rev` that grows on each write. Pass
+  `ifRev` (0 means "must not exist yet") to write only if nobody else has
+  since. A mismatch rejects with an `Error` whose `status` is 409 and whose
+  `current` is what's stored now, so two devices editing one record can
+  notice instead of overwriting each other.
+- **Validators.** A write your server code's validator refuses rejects with
+  status 422 and the validator's message. Nothing is stored.
+- **Changes.** `subscribe` hears every write to that collection within about
+  a second, whether it came from this tab, another device or your server
+  code, with the new value or `deleted: true`. After the event stream
+  reconnects (a server restart, a network drop), each subscriber gets
+  `{ type: "resync" }`: reload whatever you show, because changes may have
+  been missed. The same happens when the user deletes your data in
+  Settings. The whole browser shares one event connection, however many
+  extensions and tabs subscribe, so subscribe freely and stop polling.
+- **Topics.** `subscribeTopic` hears your server code's
+  `storage.notify(topic, payload?)`. Use it for state you keep in SQL tables,
+  or as a plain "something changed, refetch" signal.
+- **Lifetime.** Records survive reloads, restarts, updates and an
+  uninstall: reinstalling finds them again. **Settings → Extensions → Stored
+  data** shows each extension's size and deletes it on request.
+
+Absent on Perch before 0.9. Feature-detect it with `if (!ctx.storage)` and
+declare `"minPerch": "0.9.0"` in the manifest.
+
 ---
 
 ## Server API
@@ -1831,14 +1985,14 @@ missing store as "edits live as long as the tab".
 TypeScript via tsx, but extension server entries are plain JS):
 
 ```js
-export function activate({ router, log, getSettings, host, ai, secrets }) {
+export function activate({ router, log, getSettings, host, ai, secrets, storage }) {
   router.get("/list", async (req, res) => { ... });
 }
 ```
 
 | Piece | Contract |
 | --- | --- |
-| `router` | An Express router mounted at `/api/ext/<extensionId>` while the extension is enabled. JSON bodies are parsed (`req.body`); send errors as `res.status(4xx/5xx).json({ error: "…" })` — client helpers surface the `error` field. Routes 404 immediately on disable/uninstall. |
+| `router` | An Express router mounted at `/api/ext/<extensionId>` while the extension is enabled. JSON bodies up to 17 MB are parsed (`req.body`; Perch before 0.9 parsed only 100 KB); send errors as `res.status(4xx/5xx).json({ error: "…" })` — client helpers surface the `error` field. Routes 404 immediately on disable/uninstall. |
 | `log(...args)` | `console.log` prefixed with `[ext:<id>]`. |
 | `getSettings()` | `Promise<Record<string, unknown>>` — this extension's current configuration values (defaults + user overrides), read fresh per call. |
 | `host.ports.list()` | `Promise<ListeningPort[]>` — listening ports attributed to terminal sessions (`{ port, address, process?, pid?, session, orphan? }`). How far past the still-open terminals it reaches is the user's `portScope` setting; `orphan` marks a process that outlived its terminal (`session` is then the name it remembers, empty when no terminal started it). The same attribution data the WS tunnel's security gate uses; consume it rather than re-scanning `/proc`. |
@@ -1850,7 +2004,7 @@ export function activate({ router, log, getSettings, host, ai, secrets }) {
 | `host.agents.launchCommand(id)` | `Promise<string \| null>` - the line that starts one enabled agent (ids are `<extensionId>.<agentId>`, e.g. `perch.agents.claude`), with the user's global Yolo/Manual choice from **Settings → AI Providers** already applied: the agent's `skipPermissionsArgs` is appended only under Yolo. `null` for an unknown or disabled id, or an agent with no launch command. Use this, not `list()`'s `command`, whenever a server hook types an agent into a window itself - it is the same rule the client-side launch presets apply, and there is no other place a server hook can read the global choice from. |
 | `host.sessions.list()` | `Promise<TerminalSession[]>` - every terminal session with its windows, the same listing as `GET /api/sessions` (paths `~`-shortened). Each window carries a stable `id`. |
 | `host.sessions.create(name?, cwd?, exactCwd?)` | `Promise<TerminalSession>` - starts a session. It is named after its folder when `name` is omitted. `cwd` may be `~`-shortened; the session starts at the git root containing it unless `exactCwd` is true. Rejects when the name is taken. |
-| `host.sessions.createWindow(session, cwd?, name?)` | `Promise<number>` - opens a window in `session`, makes it current, and returns its index. Without `cwd`, the session's own path. A `name` is kept as given; without one the window is named after what runs in it. |
+| `host.sessions.createWindow(session, cwd?, name?, command?)` | `Promise<number>` - opens a window in `session`, makes it current, and returns its index. Without `cwd`, the session's own path. A `name` is kept as given; without one the window is named after what runs in it. A `command` (one line) is typed into the new shell and declared on the window, so it runs again when the window is restored after a restart - unlike `sendText`, which types it once. |
 | `host.sessions.selectWindow(session, index)` | `Promise<void>` - makes a window the session's current one. |
 | `host.sessions.sendText(session, text, submit, windowIndex?)` | `Promise<void>` - types `text` literally into the session's window, then presses Enter when `submit` is true (after a short settle, so Ink-based TUIs do not drop it). **Without `windowIndex` it targets the session's current window** - whichever window last had focus, not necessarily the one you created - so pass it whenever you know which window you mean. |
 | `host.sessions.sendTextToWindow(windowId, text, submit)` | `Promise<void>` - the same, addressed by window id, which survives renumbering and renames. |
@@ -1861,8 +2015,13 @@ export function activate({ router, log, getSettings, host, ai, secrets }) {
 | `host.worktrees.list(dir, opts?)` | `Promise<{ repo, worktrees, branches }>` - the worktrees of the repository containing `dir` (`~` expanded). `repo` is the main worktree's path, `null` outside a repository. `opts.dirty` adds per-worktree uncommitted-changes state and `opts.branches` the local branch list; both cost extra git calls. Paths are absolute. |
 | `host.worktrees.create({ cwd, branch, base?, mode, location? })` | `Promise<{ path, branch }>` - `mode: "new"` creates `branch` off `base` (default HEAD), `"existing"` checks an existing branch out. `location` is a template over `{repo}` and `{branch}`, default `{repo}/.worktrees/{branch}`; an in-repo location is added to `.git/info/exclude`. Stops at the checkout - no session is created. Refusals reject with an error whose `status` is 400 (not a repo, no branch) or 409 (the target already exists). |
 | `host.worktrees.remove({ cwd, path, force? })` | `Promise<{ removed }>` - removes a worktree's checkout and keeps its branch. Only a path git reports as a worktree of that repository, never the main one (404/400 otherwise). Kill any session inside it first. |
+| `host.agentSessions.list(cwd)` | Every past conversation that ran in `cwd`, across agents with a reader, newest first: `{ id, cwd, title, lastActiveAt, messageCount, agentId, agentLabel, iconUrl, icon, canResume, openIn }`, where `openIn` is `{ sessionName, windowIndex, windowId }` for one open in a window right now. |
+| `host.agentSessions.messages(agentId, id, cwd, limit?)` | The last `limit` (default 50, at most 500) messages of one conversation. |
+| `host.agentSessions.resumeCommand(agentId, id)` | The line that reopens it: the agent's `resumeSession` with the id filled in, plus `skipPermissionsArgs` under Yolo; null when it can't be. |
+| `host.agentSessions.provideReader(agentId, reader)` | A session reader for an agent this extension contributed - see **Session readers**. |
 | `host.agentHooks.subscribe({ events, onEvent })` | Subscribe to normalized AI agent hook events — core installs the hooks, receives them at one endpoint and fans them out (see [Agent hooks](#agent-hooks)). Returns an unsubscribe; all of an extension's subscriptions are dropped when its hook unmounts. |
 | `host.agentHooks.provideCompanion(agentId, transform)` | Registers a transform for the `companion` file named by the hooks descriptor of an agent **this extension** contributes (`agentId` is the bare manifest id). Core runs it after writing that agent's hooks, passing `{ hookFile, handlers, current }`, and writes back the string it returns or resolves; `handlers` is empty on uninstall. A throw, hang or oversized result is logged and skipped. Registering for an agent you didn't contribute does nothing. See [Companions](#companions). |
+| `storage` | This extension's own records, files and runtime folder; see [Storage](#storage--storage). Also on `host.storage`. |
 | `secrets.get(name)` | `Promise<string \| null>` — one of this extension's stored credentials, or null. Also on `host.secrets`. |
 | `secrets.set(name, value)` | `Promise<void>` — stores a credential under `name` (1-64 chars of `[A-Za-z0-9._-]`); a null or blank `value` clears it. |
 | `secrets.list()` | `Promise<string[]>` — the names this extension has stored, **never** the values. The shape a "set / not set" UI needs, and the one that's safe to send to a client. |
@@ -1880,6 +2039,53 @@ browser-facing `/api/sessions` and `/api/git/worktrees` routes already allow
 anyone holding the app's auth; what is new is that a server hook reaches it
 with **no browser open** - from a timer, a socket, or an agent hook callback.
 Installing an extension that has a server entry is trusting it with that.
+
+#### Storage — `storage`
+
+```js
+export function activate({ router, storage }) {
+  const notes = storage.collection("notes");
+  // Browser writes (ctx.storage) are checked; your own writes skip it.
+  notes.validate((key, value) => (value.body.length > 256 * 1024 ? "Notes are limited to 256 KB" : undefined));
+
+  router.post("/notes/:id/pin", async (req, res) => {
+    const updated = await notes.update(req.params.id, (note) => note && { ...note, pinned: true });
+    res.json(updated);
+  });
+}
+```
+
+The same records the browser reaches as [`ctx.storage`](#ctxstorage), in one
+SQLite database per extension at `<config>/extension-data/<id>/data.sqlite`
+(`<config>` is `~/.config/perch` unless `PERCH_CONFIG_DIR` moves it, so each
+Perch profile has its own). Use it instead of writing your own JSON files:
+writes are durable as soon as they resolve, ordered, and announced to every
+open browser.
+
+| Piece | Contract |
+| --- | --- |
+| `storage.collection(name)` | A named collection: `get(key)`, `put(key, value, { ifRev? })`, `delete(key, { ifRev? })` and `list({ prefix?, after?, limit?, keysOnly? })`, with the same results, limits and 409 conflicts (a `StorageConflict` with `current`) as [`ctx.storage`](#ctxstorage). |
+| `collection.update(key, fn)` | Read-modify-write with nothing landing in between: `fn(current)` gets the value (or `undefined`) and returns the new one, or `undefined` to delete. Resolves `{ value, rev }`, or null after a delete. |
+| `collection.validate(fn)` | Checks writes that come from browser code: `fn(key, value)` returns (or throws) a message to refuse one, which the browser sees as a 422. Writes from your server code skip it. Dropped when the extension is deactivated; register it in `activate`. |
+| `storage.transaction(fn)` | Several writes as one: `fn(tx)` gets `tx.collection(name)` with synchronous `get`/`put`/`delete`/`list`. Either everything applies or, if `fn` throws, nothing does. Changes are announced once it commits. |
+| `storage.sql` | `{ exec(sql), prepare(sql) }` on the same database (Node's `node:sqlite` statements) for your own tables and indexes. It can't touch the reserved `_perch_*` tables that hold collections, or attach other databases. Changes made with SQL aren't announced; call `storage.notify` yourself. |
+| `storage.notify(topic, payload?)` | Tells every browser subscribed with `ctx.storage.subscribeTopic(topic)`. `payload` is optional JSON. |
+| `storage.filesDir()` | A private folder (mode 0700) beside the database, for binary or large files you manage yourself. Created on first call; deleted with the rest of the data from Settings. |
+| `storage.runtimeDir()` | A short private folder under Perch's state folder (`PERCH_STATE_DIR`, or `~/.local/state/perch`) for unix sockets and other runtime files that can be regenerated. Its path stays short enough for a socket. |
+| `storage.runtimeDirOf(id)` | Another extension's runtime folder path, for reaching its socket. Only the path: nothing is created. |
+
+**Callbacks passed to `transaction` and `update` must be synchronous.** The
+database runs on Node's synchronous SQLite, and an `await` inside would let
+another write land in the middle. They reject if the callback returns a
+promise. For the same reason, don't leave a transaction you opened yourself
+with `storage.sql.exec("BEGIN")` open across an `await`.
+
+Uninstalling an extension keeps its data: reinstalling finds it again.
+**Settings → Extensions → Stored data** lists each extension's size, data
+left by extensions that are gone, and deletes either on request.
+
+Absent on Perch before 0.9. Declare `"minPerch": "0.9.0"` in the manifest,
+and check `if (!storage)` before using it.
 
 #### Credentials — `secrets`
 

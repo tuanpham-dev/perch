@@ -447,6 +447,7 @@ export default function BottomPanel({
                   onSessionSwitch={onSessionSwitch}
                   onOpenFile={onOpenFile}
                   onOpenFileSecondary={onOpenFileSecondary}
+                  terminalWindow={{ sessionName: pane.sessionName, windowIndex: pane.windowIndex, windowId: pane.windowId }}
                 />
               </div>,
             );

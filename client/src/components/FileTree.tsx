@@ -80,9 +80,10 @@ const DRAG_SCROLL_EDGE_PX = 24;
 const DRAG_SCROLL_STEP_PX = 12;
 
 function DecorationBadge({ decoration }: { decoration?: FileDecoration }) {
-  if (!decoration?.badge) return null;
+  if (!decoration?.badge && !decoration?.icon) return null;
   return (
     <span className="file-tree-git-badge" title={decoration.tooltip ?? decoration.badge}>
+      {decoration.icon && <Icon name={decoration.icon} />}
       {decoration.badge}
     </span>
   );

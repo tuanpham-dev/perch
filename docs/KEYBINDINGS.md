@@ -42,6 +42,10 @@ Keyboard Shortcuts).
 
 The other grid tab commands (`Grid: New Grid`, `Grid: Tile All Terminals`, `Grid: Add Terminal`, `Grid: Focus Next Cell`, `Grid: Focus Previous Cell`, `Grid: Toggle Zoom`, `Grid: Pop Out Cell`, `Grid: Close Cell`) have no default shortcut. Run them from the command palette, or bind them in the Keyboard Shortcuts editor.
 
+`Agents: Compose Message…` opens the Send to agents composer. It has no default shortcut either; bind it in the Keyboard Shortcuts editor if you use it often. Inside the composer, `Ctrl+Enter` (`Cmd+Enter` on Mac) sends, `Enter` adds a line, and `Esc` closes it.
+
+`Project: Open Terminal Setup` and `Project: Save Terminal Setup` (see [Project setup file](PROJECT_SETUP.md)) have no default shortcut.
+
 \* Browser-reserved outside the installed PWA — bind a different combo in Keyboard Shortcuts if you're using Perch as a regular browser tab.
 
 † Firefox reserves `Ctrl+Shift+P` for opening a private window and won't let pages intercept it — rebind it in Keyboard Shortcuts, or just type `>` into the `Ctrl+P` quick switcher instead.

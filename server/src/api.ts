@@ -23,6 +23,8 @@ import {
   snippetFor,
   uninstallHooks,
 } from "./agents.js";
+import { agentSessionMessages, listAgentSessions } from "./agentSessions.js";
+import { listNever, openProjectSetup, readProjectSetup, saveProjectSetup, setNever } from "./projectSetup.js";
 import { agentsForSession } from "./agentWindows.js";
 import { reportAgentHook, subscribedEvents, subscriberSummary } from "./agentHooks.js";
 import {
@@ -314,6 +316,103 @@ api.get("/agents", async (_req, res) => {
 // hook of their own. Same resolver host.agents.forWindow uses, so both doors
 // give the same answer — see agentWindows.ts for why core owns this rather
 // than each extension matching command names for itself.
+// The project's committed terminal setup (.perch/project.json) - see
+// projectSetup.ts for the trust rules.
+api.get("/project-setup", async (req, res) => {
+  const cwd = typeof req.query.cwd === "string" ? req.query.cwd : "";
+  if (!cwd) {
+    res.status(400).json({ error: "cwd is required" });
+    return;
+  }
+  try {
+    res.json(await readProjectSetup(cwd));
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
+api.post("/project-setup/open", async (req, res) => {
+  const { cwd, session, hash } = req.body ?? {};
+  if (typeof cwd !== "string" || typeof session !== "string" || typeof hash !== "string") {
+    res.status(400).json({ error: "cwd, session and hash are required" });
+    return;
+  }
+  try {
+    res.json(await openProjectSetup(cwd, session, hash));
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    res.status(status === 400 || status === 409 ? status : 500).json({ error: errMessage(err) });
+  }
+});
+
+api.post("/project-setup/never", async (req, res) => {
+  const { cwd, never } = req.body ?? {};
+  if (typeof cwd !== "string" || typeof never !== "boolean") {
+    res.status(400).json({ error: "cwd and never are required" });
+    return;
+  }
+  try {
+    await setNever(cwd, never);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
+api.get("/project-setup/never", async (_req, res) => {
+  try {
+    res.json({ folders: await listNever() });
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
+// Without `write`, a preview of what would be written.
+api.post("/project-setup/save", async (req, res) => {
+  const { cwd, write, overwrite } = req.body ?? {};
+  if (typeof cwd !== "string") {
+    res.status(400).json({ error: "cwd is required" });
+    return;
+  }
+  try {
+    res.json(await saveProjectSetup(cwd, { write: write === true, overwrite: overwrite === true }));
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    res.status(status === 409 ? 409 : 500).json({ error: errMessage(err) });
+  }
+});
+
+// Past agent conversations in a folder (agentSessions.ts), for the session
+// browser. Read-only.
+api.get("/agent-sessions", async (req, res) => {
+  const cwd = typeof req.query.cwd === "string" ? req.query.cwd : "";
+  if (!cwd) {
+    res.status(400).json({ error: "cwd is required" });
+    return;
+  }
+  try {
+    res.json({ sessions: await listAgentSessions(cwd) });
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
+api.get("/agent-sessions/messages", async (req, res) => {
+  const agent = typeof req.query.agent === "string" ? req.query.agent : "";
+  const id = typeof req.query.id === "string" ? req.query.id : "";
+  const cwd = typeof req.query.cwd === "string" ? req.query.cwd : "";
+  const limit = Number(req.query.limit ?? 50);
+  if (!agent || !id || !cwd) {
+    res.status(400).json({ error: "agent, id and cwd are required" });
+    return;
+  }
+  try {
+    res.json({ messages: await agentSessionMessages(agent, id, cwd, Number.isFinite(limit) ? limit : 50) });
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
 api.get("/agents/windows", async (req, res) => {
   const session = typeof req.query.session === "string" ? req.query.session : "";
   if (!session) {
@@ -635,8 +734,17 @@ api.post("/sessions/:name/windows", async (req, res) => {
   const cwd = typeof req.body?.cwd === "string" && req.body.cwd.trim() !== ""
     ? req.body.cwd.trim()
     : undefined;
+  // Optional: a window name, and a command to run in it (typed again when the
+  // window is restored after a restart).
+  const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim().slice(0, 100) : undefined;
+  const command =
+    typeof req.body?.command === "string" && req.body.command.trim() ? req.body.command.trim() : undefined;
+  if (command && (command.length > 4096 || /[\r\n]/.test(command))) {
+    res.status(400).json({ error: "command must be one line of at most 4096 characters" });
+    return;
+  }
   try {
-    const index = await createWindow(req.params.name, cwd);
+    const index = await createWindow(req.params.name, cwd, name, command);
     res.status(201).json({ index });
   } catch (err) {
     res.status(400).json({ error: errMessage(err) });
@@ -1284,12 +1392,18 @@ api.post("/fs/paste", async (req, res) => {
 
   const { paths, mode } = fsClipboard;
   const pasted: string[] = [];
+  // Source -> destination for every entry a cut moved, so a client can carry
+  // per-path state (extensions' onDidRenameFiles) along. Copies aren't moves.
+  const moved: { from: string; to: string }[] = [];
   const errors: { path: string; message: string }[] = [];
   for (const src of paths) {
     try {
       const target =
         mode === "copy" ? await copyPath(src, destDir) : await movePath(src, destDir);
-      if (target) pasted.push(target);
+      if (target) {
+        pasted.push(target);
+        if (mode === "cut") moved.push({ from: src, to: target });
+      }
     } catch (err) {
       errors.push({ path: src, message: errMessage(err) });
     }
@@ -1300,7 +1414,7 @@ api.post("/fs/paste", async (req, res) => {
   if (mode === "cut" && pasted.length > 0) {
     fsClipboard = null;
   }
-  res.status(200).json({ pasted, errors });
+  res.status(200).json({ pasted, moved, errors });
 });
 
 // Drag-and-drop move/copy within the FILES tree. Deliberately NOT routed
@@ -1326,6 +1440,7 @@ api.post("/fs/transfer", async (req, res) => {
   }
 
   const done: string[] = [];
+  const moved: { from: string; to: string }[] = [];
   const errors: { path: string; message: string }[] = [];
   for (const raw of paths as string[]) {
     const src = expandHome(raw);
@@ -1333,12 +1448,15 @@ api.post("/fs/transfer", async (req, res) => {
       const target = mode === "copy" ? await copyPath(src, destDir) : await movePath(src, destDir);
       // movePath returns null for a no-op (destDir is already src's parent) —
       // nothing moved, so nothing to report as done.
-      if (target) done.push(target);
+      if (target) {
+        done.push(target);
+        if (mode === "move") moved.push({ from: raw, to: target });
+      }
     } catch (err) {
       errors.push({ path: src, message: errMessage(err) });
     }
   }
-  res.status(200).json({ done, errors });
+  res.status(200).json({ done, moved, errors });
 });
 
 api.post("/newfile", async (req, res) => {

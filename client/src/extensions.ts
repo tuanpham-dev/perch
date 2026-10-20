@@ -32,6 +32,7 @@ import type { IconResult } from "./utils/iconThemes";
 import { getActiveThemeColors, getActiveTokenColors, subscribeColorTheme } from "./theme";
 import type { TokenColorRule } from "./theme";
 import { openSharedEventSource, type EventSourceLike } from "./lib/sharedEventSource";
+import { createStorageClient, type ExtensionStorageClient } from "./lib/extensionStorage";
 
 export interface ActiveContext {
   sessionName: string | null;
@@ -406,6 +407,17 @@ export interface ExtensionContext {
     isVisible: (path: string, isDir: boolean) => boolean;
     onClick: (path: string) => void;
   }): void;
+  // Contributes an item to a listening port's menu in the Ports extension
+  // (its right-click menu, keyboard menu and popover), after its own items.
+  // `port` is { port, address, pid?, process? }.
+  registerPortMenuItem(item: {
+    id: string;
+    label: string;
+    icon?: string;
+    order?: number;
+    isVisible?: (port: PortMenuContext) => boolean;
+    onClick: (port: PortMenuContext) => void;
+  }): void;
   // Contributes an item to a tab-group chip's windows dropdown, appended
   // after "New Window" behind a separator. See RegisteredTabGroupMenuItem.
   registerTabGroupMenuItem(item: {
@@ -480,6 +492,12 @@ export interface ExtensionContext {
     placement: TerminalAccessoryPlacement;
     component: ReactNS.ComponentType<TerminalAccessoryHostProps>;
   }): void;
+  // Renders per-file-viewer UI over a viewer tab's content (a file preview,
+  // any viewer an extension registered) - see ViewerAccessoryContext.
+  registerViewerAccessory(accessory: {
+    id: string;
+    component: ReactNS.ComponentType<ViewerAccessoryHostProps>;
+  }): void;
   // Renders a component once over the editor area (the .main region), on top
   // of whatever tab is active — a terminal, Settings, a viewer. Unlike a
   // terminal accessory (which only mounts inside a focused TerminalView),
@@ -537,6 +555,11 @@ export interface ExtensionContext {
   app: {
     getActiveContext(): ActiveContext;
     onDidChangeContext(cb: (ctx: ActiveContext) => void): () => void;
+    // Fires after the FILES panel renames, moves (drag) or cut-pastes entries,
+    // with each source path and where it landed. Copies don't fire. Lets an
+    // extension carry per-path state along; a change made outside the app
+    // (mv in a terminal) can't be told apart from a delete and isn't reported.
+    onDidRenameFiles(cb: (pairs: FileRenamePair[]) => void): () => void;
     // line jumps to that line when the path opens in nvim (ignored by a
     // "default"-mode viewer like image/media/pdf — same as a FILES-tree
     // ctrl+click "file:line" link, see openFileOrViewer).
@@ -690,6 +713,9 @@ export interface ExtensionContext {
     // global built-in command plus every registered extension command, as
     // {id,label}. Snapshot, not live; call again after the registry changes.
     getCommands(): { id: string; label: string }[];
+    // Every extension's port menu items that apply to `port`, ordered - for
+    // the Ports extension to show after its own (see registerPortMenuItem).
+    portMenuItems(port: PortMenuContext): { label: string; icon?: string; onClick: () => void }[];
     // Returns keyboard focus to the active terminal — for an extension UI
     // (a dialog, an overlay) that stole focus and whose close should let
     // the user keep typing at the prompt (e.g. press Enter on a command
@@ -744,6 +770,14 @@ export interface ExtensionContext {
     set(key: string, value: unknown, opts?: { keepalive?: boolean }): Promise<void>;
     delete(key: string, opts?: { keepalive?: boolean }): Promise<void>;
   };
+  // This extension's own records on the server (lib/extensionStorage.ts):
+  // named collections of JSON values, shared with every device and with the
+  // extension's server code (activate({ storage })). collection(name) reads,
+  // writes and lists; subscribe() hears every write, wherever it came from,
+  // plus a "resync" after the change stream reconnects. subscribeTopic()
+  // hears the server code's storage.notify(topic). Kept when the extension
+  // is uninstalled; Settings deletes it.
+  storage: ExtensionStorageClient;
   // An editor's half of quick diff: the base a file's change marks are
   // measured against, from whichever provider has one (registration order
   // decides; null when none does), and a subscription that fires when that
@@ -780,6 +814,9 @@ export interface RegisteredQuickDiffProvider {
 export interface FileDecoration {
   // Short badge text rendered at the row's right edge (e.g. "M").
   badge?: string;
+  // A codicon name drawn in the badge (before its text, if any) - an icon
+  // badge with no text is fine.
+  icon?: string;
   // Tooltip for the badge (falls back to the badge text).
   tooltip?: string;
   // Extra class(es) applied to the whole row (e.g. "git-status-modified" —
@@ -836,7 +873,10 @@ export interface SessionDecorationContext {
 
 // A badge on a PROJECTS-tree window row (the subagent count, generically).
 export interface SessionDecoration {
+  // The pill's text; may be empty when `icon` is given.
   badge: string;
+  // A codicon name drawn in the pill, before the text.
+  icon?: string;
   tooltip?: string;
   className?: string;
 }
@@ -935,6 +975,11 @@ export interface TerminalAccessoryContext {
   setSoftKeyboardSuppressed(suppressed: boolean): void;
   // Positioning container for "overlay" accessories (the terminal body).
   containerRef: ReactNS.RefObject<HTMLDivElement | null>;
+  // Which terminal window this view shows: its session, its index, and its
+  // stable id (absent until the sessions poll has resolved it). null for a
+  // view not tied to one window. A window shown in two places (a split, a
+  // grid and a tab) gets one accessory instance per view.
+  window: { sessionName: string; windowIndex: number; windowId?: string } | null;
 }
 
 export interface TerminalAccessoryHostProps {
@@ -953,6 +998,32 @@ export interface RegisteredTerminalAccessory {
   placement: TerminalAccessoryPlacement;
   component: ReactNS.ComponentType<TerminalAccessoryHostProps>;
 }
+
+// The context handed to a viewer accessory (registerViewerAccessory): drawn
+// once per open file-viewer tab, absolutely positioned over that tab's
+// content (the tab host is its containing block, so inset: 0 covers it).
+export interface ViewerAccessoryContext {
+  // The file the tab shows (the viewer's own path for a global viewer with
+  // no file, such as "agent-sessions://…").
+  filePath: string;
+  // The namespaced id of the viewer showing it (ext.<extensionId>.<id>).
+  viewerId: string;
+  // Whether the tab is showing (its group's active tab).
+  active: boolean;
+  mobilePointer: boolean;
+}
+
+export interface ViewerAccessoryHostProps {
+  context: ViewerAccessoryContext;
+}
+
+export interface RegisteredViewerAccessory {
+  id: string;
+  extensionId: string;
+  component: ReactNS.ComponentType<ViewerAccessoryHostProps>;
+}
+
+export const extensionViewerAccessories: RegisteredViewerAccessory[] = [];
 
 // The context handed to an app-global overlay (registerAppOverlay) — kept
 // minimal, sized to what a bottom swipe/gesture strip needs. No per-terminal
@@ -1183,6 +1254,38 @@ export function resolveWindowActionIcon(action: RegisteredWindowAction, ctx: Win
   }
 }
 export const extensionFileMenuItems: RegisteredFileMenuItem[] = [];
+
+export interface PortMenuContext {
+  port: number;
+  address: string;
+  pid?: number;
+  process?: string;
+}
+
+interface RegisteredPortMenuItem {
+  id: string;
+  extensionId: string;
+  label: string;
+  icon?: string;
+  order?: number;
+  isVisible?: (port: PortMenuContext) => boolean;
+  onClick: (port: PortMenuContext) => void;
+}
+
+export const extensionPortMenuItems: RegisteredPortMenuItem[] = [];
+
+function portMenuItemsFor(port: PortMenuContext): { label: string; icon?: string; onClick: () => void }[] {
+  return extensionPortMenuItems
+    .filter((item) => {
+      try {
+        return item.isVisible ? item.isVisible(port) : true;
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((item) => ({ label: item.label, icon: item.icon, onClick: () => item.onClick(port) }));
+}
 export const extensionTabGroupMenuItems: RegisteredTabGroupMenuItem[] = [];
 export const extensionSidebarTabs: RegisteredSidebarTab[] = [];
 export const extensionSidebarTabMenuItems: RegisteredSidebarTabMenuItem[] = [];
@@ -1432,12 +1535,37 @@ export function useExtensionRegistry(): {
 let activeContextValue: ActiveContext = { sessionName: null, windowIndex: null, cwd: null };
 const contextListeners = new Set<(ctx: ActiveContext) => void>();
 
+export interface FileRenamePair {
+  from: string;
+  to: string;
+}
+
+const renameListeners = new Set<(pairs: FileRenamePair[]) => void>();
+
+// Called by the FILES actions (useFileActions) after a rename, move or
+// cut-paste lands — see app.onDidRenameFiles.
+export function notifyFilesRenamed(pairs: FileRenamePair[]): void {
+  if (pairs.length === 0) return;
+  for (const l of renameListeners) {
+    try {
+      l(pairs);
+    } catch (err) {
+      console.error("onDidRenameFiles listener threw:", err);
+    }
+  }
+}
+
 // Called from App.tsx whenever the derived "active real tab" context
 // changes (session/window/cwd) — see the activeRealTab/filesRootDir
 // derivation it already computes for the FILES panel and lazygit pill.
 export function setActiveContext(ctx: ActiveContext): void {
   activeContextValue = ctx;
   for (const l of contextListeners) l(ctx);
+}
+
+// The active terminal as last reported by App (see setActiveContext).
+export function getActiveContext(): ActiveContext {
+  return activeContextValue;
 }
 
 let focusActiveTerminalHandler: (() => void) | null = null;
@@ -1990,6 +2118,17 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       // again, for an action whose state changes between session polls.
       return { refresh: notify };
     },
+    registerPortMenuItem(item) {
+      extensionPortMenuItems.push({
+        id: `ext.${ext.id}.${item.id}`,
+        extensionId: ext.id,
+        label: item.label,
+        icon: item.icon,
+        order: item.order,
+        isVisible: item.isVisible,
+        onClick: item.onClick,
+      });
+    },
     registerFileMenuItem(item) {
       extensionFileMenuItems.push({
         id: `ext.${ext.id}.${item.id}`,
@@ -2168,6 +2307,14 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       });
       notify();
     },
+    registerViewerAccessory(accessory) {
+      extensionViewerAccessories.push({
+        id: `ext.${ext.id}.${accessory.id}`,
+        extensionId: ext.id,
+        component: accessory.component,
+      });
+      notify();
+    },
     registerAppOverlay(overlay) {
       extensionAppOverlays.push({
         id: `ext.${ext.id}.${overlay.id}`,
@@ -2230,6 +2377,14 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         return () => {
           contextListeners.delete(cb);
           runtime.contextListeners.delete(cb);
+        };
+      },
+      onDidRenameFiles(cb) {
+        renameListeners.add(cb);
+        runtime.renameListeners.add(cb);
+        return () => {
+          renameListeners.delete(cb);
+          runtime.renameListeners.delete(cb);
         };
       },
       openFileTab(path, line) {
@@ -2357,6 +2512,7 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       },
       executeCommand: (commandId) => executeCommandHandler?.(commandId),
       getCommands: () => getCommandsHandler?.() ?? [],
+      portMenuItems: (port) => portMenuItemsFor(port),
       focusActiveTerminal: () => focusActiveTerminalHandler?.(),
     },
     serverFetch(path, init) {
@@ -2385,6 +2541,7 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         extensionSettingsOpener?.(ext.id);
       },
     },
+    storage: createStorageClient(ext.id),
     drafts: {
       get: (key) => getDraft(ext.id, key),
       set: (key, value, opts) => putDraft(ext.id, key, value, opts),
@@ -2408,6 +2565,8 @@ interface ExtensionRuntime {
   // shared contextListeners Set, tracked separately so deactivation can
   // remove exactly these without touching other extensions' callbacks.
   contextListeners: Set<(ctx: ActiveContext) => void>;
+  // Same, for onDidRenameFiles.
+  renameListeners: Set<(pairs: FileRenamePair[]) => void>;
   // Unsubscribe closures returned by subscribeIconTheme for this extension's
   // onDidChangeIconTheme callbacks — see makeContext's app.onDidChangeIconTheme.
   iconThemeListeners: Set<() => void>;
@@ -2433,6 +2592,8 @@ const pendingActivations = new Map<string, Promise<void>>();
 
 async function activateClientExtension(ext: ExtensionInfo): Promise<void> {
   if (activatedIds.has(ext.id) || !ext.clientEntry) return;
+  // Written for a newer Perch: its code would reach for APIs this one lacks.
+  if (ext.incompatible) return;
   const inFlight = pendingActivations.get(ext.id);
   if (inFlight) return inFlight;
   const url = extensionFileUrl(ext.id, ext.clientEntry);
@@ -2459,6 +2620,7 @@ async function activateClientExtension(ext: ExtensionInfo): Promise<void> {
     const runtime: ExtensionRuntime = {
       module: mod,
       contextListeners: new Set(),
+      renameListeners: new Set(),
       iconThemeListeners: new Set(),
       colorThemeListeners: new Set(),
     };
@@ -2514,6 +2676,9 @@ function deactivateClientExtension(extId: string): void {
   for (let i = extensionWindowActions.length - 1; i >= 0; i--) {
     if (extensionWindowActions[i].extensionId === extId) extensionWindowActions.splice(i, 1);
   }
+  for (let i = extensionPortMenuItems.length - 1; i >= 0; i--) {
+    if (extensionPortMenuItems[i].extensionId === extId) extensionPortMenuItems.splice(i, 1);
+  }
   for (let i = extensionFileMenuItems.length - 1; i >= 0; i--) {
     if (extensionFileMenuItems[i].extensionId === extId) extensionFileMenuItems.splice(i, 1);
   }
@@ -2554,6 +2719,9 @@ function deactivateClientExtension(extId: string): void {
   for (let i = extensionQuickSwitcherProviders.length - 1; i >= 0; i--) {
     if (extensionQuickSwitcherProviders[i].extensionId === extId) extensionQuickSwitcherProviders.splice(i, 1);
   }
+  for (let i = extensionViewerAccessories.length - 1; i >= 0; i--) {
+    if (extensionViewerAccessories[i].extensionId === extId) extensionViewerAccessories.splice(i, 1);
+  }
   for (let i = extensionTerminalAccessories.length - 1; i >= 0; i--) {
     if (extensionTerminalAccessories[i].extensionId === extId) extensionTerminalAccessories.splice(i, 1);
   }
@@ -2570,6 +2738,7 @@ function deactivateClientExtension(extId: string): void {
     if (extensionSettingsComponents[i].extensionId === extId) extensionSettingsComponents.splice(i, 1);
   }
   if (runtime) for (const cb of runtime.contextListeners) contextListeners.delete(cb);
+  if (runtime) for (const cb of runtime.renameListeners) renameListeners.delete(cb);
   if (runtime) for (const unsubscribe of runtime.iconThemeListeners) unsubscribe();
   if (runtime) for (const unsubscribe of runtime.colorThemeListeners) unsubscribe();
   extensionSettingsListeners.delete(extId);

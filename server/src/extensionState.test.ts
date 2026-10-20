@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stateEnabled, stateSource } from "./extensions.js";
+import { incompatibleReason, stateEnabled, stateSource } from "./extensions.js";
 
 // The extension state file has held three shapes over time: a bare boolean,
 // the "uninstalled" tombstone, and now an object carrying the registry source
@@ -43,5 +43,27 @@ describe("stateSource", () => {
   // absent rather than being handed to a fetch.
   it("treats an empty source as absent", () => {
     expect(stateSource({ enabled: true, source: "" })).toBeNull();
+  });
+});
+
+// perch.minPerch: an extension written for a newer Perch is listed with a
+// reason and never loaded. The host's own pre-release tag doesn't count, so
+// a 0.9.0-dev working copy runs extensions that need 0.9.0.
+describe("incompatibleReason", () => {
+  const needs = (minPerch?: string) => ({ name: "x", perch: { minPerch } }) as Parameters<typeof incompatibleReason>[0];
+  it("passes when there's no minimum, or it is met", () => {
+    expect(incompatibleReason(needs(), "0.8.0")).toBeNull();
+    expect(incompatibleReason(needs("0.9.0"), "0.9.0")).toBeNull();
+    expect(incompatibleReason(needs("0.9.0"), "0.10.1")).toBeNull();
+  });
+  it("names the version when the host is older", () => {
+    expect(incompatibleReason(needs("0.9.0"), "0.8.0")).toBe("Needs Perch 0.9.0 or newer");
+    expect(incompatibleReason(needs("99.0.0"), "0.9.0")).toBe("Needs Perch 99.0.0 or newer");
+  });
+  it("treats a pre-release host as its release", () => {
+    expect(incompatibleReason(needs("0.9.0"), "0.9.0-dev")).toBeNull();
+  });
+  it("ignores a minimum that isn't a version", () => {
+    expect(incompatibleReason(needs("soon"), "0.1.0")).toBeNull();
   });
 });

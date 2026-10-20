@@ -43,10 +43,10 @@ heading "Checking dependencies"
 command -v git >/dev/null 2>&1 || die "git not found — install it via your package manager"
 ok "git found"
 
-command -v node >/dev/null 2>&1 || die "node not found - install Node.js 23+ (https://nodejs.org)"
+command -v node >/dev/null 2>&1 || die "node not found - install Node.js 24+ (https://nodejs.org)"
 NODE_VERSION="$(node --version)"
 NODE_MAJOR="$(echo "$NODE_VERSION" | sed -E 's/^v([0-9]+).*/\1/')"
-[ "$NODE_MAJOR" -ge 23 ] 2>/dev/null || die "node $NODE_VERSION found, but 23+ is required - install Node.js 23+ (https://nodejs.org)"
+[ "$NODE_MAJOR" -ge 24 ] 2>/dev/null || die "node $NODE_VERSION found, but 24+ is required - install Node.js 24+ (https://nodejs.org)"
 ok "node $NODE_VERSION"
 
 TOOLCHAIN_OK=1
