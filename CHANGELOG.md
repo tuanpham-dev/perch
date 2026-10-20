@@ -3,6 +3,19 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.9.2 - 2026-10-20
+
+- **Commenting on a web preview no longer breaks the page.** The screenshot
+  taken for each comment copied the site's whole stylesheet into the live
+  page, which could change how it looked, and ran the site's own code for
+  every custom element it copied (a Shopify theme's cart or search, say),
+  leaving errors and stray listeners behind. It now only reads the page, and
+  still draws it with the site's web fonts.
+- **A dev server's preview stays on the dev server as it navigates.** A link
+  or script going to a root path such as `/about` left Perch's proxy, so the
+  next click or a reload loaded Perch itself into the preview. Reload also
+  works after a single-page app moves to such a path.
+
 ## 0.9.1 - 2026-10-20
 
 - **A window is no longer taken for Claude Code because a program in it
