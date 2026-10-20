@@ -3,6 +3,36 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.9.0 - 2026-10-20
+
+- **Every extension gets its own storage.** A private SQLite database per
+  extension, readable and writable from its server code (`storage`) and its
+  browser code (`ctx.storage`), with each change pushed to every open browser
+  within a second instead of polled. Uninstalling an extension keeps its data;
+  **Settings → Extensions → Stored data** shows each one's size and deletes
+  it, including data left by removed extensions. Notes, Automations, Agent
+  Tasks, Jira, DB Client and HTTP Client now keep their data there, and start
+  empty after updating: their old files are left as they were.
+- **Extensions can say which Perch they need.** One declaring
+  `perch.minPerch` above the running version shows **Needs Perch X or newer**
+  and isn't loaded.
+- **Perch now needs Node.js 24.** The installer, `perch doctor` and the
+  server itself check for it.
+- **Send to agents.** Select text in a terminal and choose **Send Selection
+  to Agent…**, or run **Agents: Compose Message…**, to type a message (with
+  `@file` mentions and images) into one or more agent windows, in any project.
+- **Past agent conversations.** Core reads Claude Code's and Codex's
+  transcripts and knows how to resume them; the optional Agent Sessions
+  extension lists, previews and resumes them.
+- **Project setup from a committed file.** A `.perch/project.json` in a
+  repository can open its terminals, after you review and trust the exact
+  commands. See [Project setup](docs/PROJECT_SETUP.md).
+- **Mermaid diagrams** draw in the Markdown preview.
+- **More for extensions:** terminal and viewer accessories know their window
+  and file, decorations can carry an icon, the PORTS menu takes extension
+  items, and extensions hear about renames made in FILES. Extension routes
+  accept JSON bodies up to 17 MB.
+
 ## 0.8.0 - 2026-10-20
 
 - **Extensions can open their own settings.** The new
