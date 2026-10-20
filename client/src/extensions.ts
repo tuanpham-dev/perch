@@ -110,6 +110,11 @@ export interface RegisteredFileViewer {
   // project's group). For a viewer whose content follows the active project
   // by itself, like a dashboard, rather than showing one project's file.
   global: boolean;
+  // A codicon name for this viewer's tabs in the tab bar, in place of the
+  // file-type icon matched from the path's basename — for a viewer whose
+  // path names no real file (a dashboard, a remote display), which would
+  // otherwise get the generic file icon.
+  icon?: string;
   component: ReactNS.ComponentType<FileViewerHostProps>;
 }
 
@@ -314,6 +319,8 @@ export interface ExtensionContext {
     editorFallback?: boolean;
     // See RegisteredFileViewer.global. Defaults to false.
     global?: boolean;
+    // See RegisteredFileViewer.icon.
+    icon?: string;
     component: ReactNS.ComponentType<FileViewerHostProps>;
   }): void;
   // Asynchronously claims a file open that would otherwise land in nvim —
@@ -719,6 +726,10 @@ export interface ExtensionContext {
     // and the value persists.
     set(key: string, value: unknown): void;
     onDidChange(cb: () => void): () => void;
+    // Opens the Settings tab at this extension's own section — for a
+    // panel's gear button. No-op when the extension has nothing to show
+    // there (no configuration and no settings component).
+    open(): void;
   };
   // Server-side storage for this extension's unsaved edits (a dirty editor
   // buffer, a CSV grid), keyed by any string — usually the file path. It
@@ -1886,6 +1897,14 @@ export function setExtensionSettingUpdater(
   extensionSettingUpdater = handler;
 }
 
+// Wired once from App.tsx to open the Settings tab at one extension's
+// section — backs ctx.settings.open.
+let extensionSettingsOpener: ((extId: string) => void) | null = null;
+
+export function setExtensionSettingsOpener(handler: ((extId: string) => void) | null): void {
+  extensionSettingsOpener = handler;
+}
+
 function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionContext {
   return {
     React: ReactNS,
@@ -1901,6 +1920,7 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         mode: viewer.mode ?? "default",
         editorFallback: viewer.editorFallback ?? true,
         global: viewer.global ?? false,
+        icon: viewer.icon,
         component: viewer.component,
       });
       notify();
@@ -2360,6 +2380,9 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
         }
         listeners.add(cb);
         return () => listeners.delete(cb);
+      },
+      open() {
+        extensionSettingsOpener?.(ext.id);
       },
     },
     drafts: {

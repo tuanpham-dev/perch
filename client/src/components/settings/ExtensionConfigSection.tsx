@@ -21,6 +21,17 @@ const UNLISTABLE_PROVIDER = "custom";
 
 type ConfigProperty = ExtensionInfo["configuration"][number]["properties"][number];
 
+// Most manifests title their (only) configuration section after the
+// extension itself — "Remote Desktop" under a "Remote Desktop" page
+// heading, or "AI Command" under "AI Command Search". That subheading says
+// nothing the page title doesn't, so it is dropped; a section named for
+// something else ("Advanced") still shows.
+function repeatsDisplayName(title: string, displayName: string): boolean {
+  const t = title.trim().toLowerCase();
+  const name = displayName.trim().toLowerCase();
+  return t !== "" && (name === t || name.startsWith(`${t} `));
+}
+
 function ExtensionProperties({
   ext,
   overrides,
@@ -221,7 +232,9 @@ function ExtensionProperties({
     <>
       {ext.configuration.map((section, sectionIndex) => (
         <div key={sectionIndex}>
-          {section.title && <h3 className="settings-subsection-title">{section.title}</h3>}
+          {section.title && !repeatsDisplayName(section.title, ext.displayName) && (
+            <h3 className="settings-subsection-title">{section.title}</h3>
+          )}
           {section.properties.map((prop) => (
             <Fragment key={prop.key}>
               {renderRow(prop)}

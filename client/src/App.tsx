@@ -34,6 +34,7 @@ import {
   requestTerminalRefocus,
   setExecuteCommandHandler,
   setExtensionSettingUpdater,
+  setExtensionSettingsOpener,
   setGetCommandsHandler,
   setKillSessionHandler,
   setDialogHandlers,
@@ -956,6 +957,16 @@ export default function App() {
     registryCatalog,
     detachedApiRef,
   );
+
+  // Backs ctx.settings.open — a panel's gear button lands on the same
+  // section the detail page's shortcut does.
+  useEffect(() => {
+    setExtensionSettingsOpener((extId) => {
+      setPendingFocusExtensionId(extId);
+      openSettingsTab();
+    });
+    return () => setExtensionSettingsOpener(null);
+  }, [openSettingsTab]);
 
   // Detached windows (plans/detach-tab-to-new-window.md): the registry of
   // what each one holds, the action that opens one, and the focus-instead-

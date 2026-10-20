@@ -14,3 +14,9 @@ export const OFFICIAL_PUBLISHER = "perch";
 export function isOfficialPublisher(publisher: string | undefined): boolean {
   return publisher === OFFICIAL_PUBLISHER;
 }
+
+// Extension lists (the Extensions tab, the Settings nav) read alphabetically
+// by the name the user sees, not in the server's discovery order.
+export function byDisplayName(a: { displayName: string }, b: { displayName: string }): number {
+  return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
+}

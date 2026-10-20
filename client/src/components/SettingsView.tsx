@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
 import { extensionSettingsComponents, useExtensionRegistryVersion } from "../extensions";
+import { byDisplayName } from "../lib/extensionId";
 import { DEFAULT_SETTINGS, type AppSettings, type ExtensionSettingsValues } from "../settings";
 import type { ExtensionInfo } from "../types";
 import AiProvidersSection from "./settings/AiProvidersSection";
@@ -117,12 +118,14 @@ export default function SettingsView({
   // Re-render when an extension registers a custom settings component —
   // that alone earns it a settings section, even with no scalar properties.
   useExtensionRegistryVersion();
-  const configurableExtensions = extensions.filter(
-    (ext) =>
-      ext.enabled &&
-      (ext.configuration.length > 0 ||
-        extensionSettingsComponents.some((c) => c.extensionId === ext.id)),
-  );
+  const configurableExtensions = extensions
+    .filter(
+      (ext) =>
+        ext.enabled &&
+        (ext.configuration.length > 0 ||
+          extensionSettingsComponents.some((c) => c.extensionId === ext.id)),
+    )
+    .sort(byDisplayName);
 
   // If the active extension section's extension gets disabled/uninstalled
   // out from under it (in the Extensions tab, in another browser tab, or

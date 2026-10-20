@@ -591,6 +591,7 @@ ctx.registerFileViewer({
   mode?: "default" | "preview" | (() => "default" | "preview"), // default "default"; a thunk is re-read on every lookup
   editorFallback?: boolean,       // default true; "default"-mode only
   global?: boolean,               // default false; tabs never join a project's group
+  icon?: string,                  // codicon for this viewer's tabs; default: the path's file-type icon
   component: React.ComponentType<FileViewerHostProps>,
 });
 ```
@@ -608,6 +609,10 @@ ctx.registerFileViewer({
   when you switch to another project or worktree. Use it for a viewer whose
   content follows the active project by itself, like a dashboard, rather
   than one project's file. Open it with a fixed path so there is one tab.
+- `icon` gives the viewer's tabs a codicon instead of the file-type icon
+  the tab bar matches from the path's basename. Use it when the path names
+  no real file (`remote-desktop://display`), which would otherwise get the
+  generic file icon.
 
 ```ts
 interface FileViewerHostProps {
@@ -1763,6 +1768,7 @@ Older Perch versions lack it; fall back to `new EventSource(...)` when
 ctx.settings.get(key: string): unknown          // full dotted key
 ctx.settings.set(key: string, value: unknown): void
 ctx.settings.onDidChange(cb: () => void): () => void
+ctx.settings.open(): void                       // Settings tab, at this extension's section
 ```
 
 Your `contributes.configuration` values: manifest default overridden by the
@@ -1770,7 +1776,9 @@ user's stored value. `set` writes to the same server-synced store the
 Settings UI edits — the value persists, syncs across the user's devices,
 and fires `onDidChange` (which also fires for edits made in Settings or on
 another device; it passes no arguments — re-`get` whatever you care
-about). Only write keys you declared.
+about). Only write keys you declared. `open` is for a gear button in your
+own panel: it opens the Settings tab at your section, the same place the
+Extensions tab's "Extension Settings" shortcut lands.
 
 `ctx.React` is the host's own React instance, for no-build extensions.
 

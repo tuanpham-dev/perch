@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { extensionFileViewers, useExtensionRegistryVersion } from "../extensions";
 import type { AppSettings } from "../settings";
 import type { MenuItem, Tab, TabGroupState } from "../types";
 import { isRealTab } from "../lib/tabs";
@@ -8,6 +9,11 @@ import FileIcon from "./FileIcon";
 import Icon from "./Icon";
 
 type TabBarScope = AppSettings["tabBarScope"];
+
+function viewerIcon(tab: Tab): string | undefined {
+  if (tab.extViewerId === undefined) return undefined;
+  return extensionFileViewers.find((v) => v.id === tab.extViewerId)?.icon;
+}
 
 interface Props {
   tabs: Tab[];
@@ -160,6 +166,9 @@ export default function TabBar({
   // reads module-level state directly, same subscribe-to-force-render shape
   // FileTree uses (see utils/iconThemes.ts's useIconThemeVersion).
   useIconThemeVersion();
+  // A viewer's own tab icon (RegisteredFileViewer.icon) is read straight
+  // from the registry too, which can fill in after the tabs have rendered.
+  useExtensionRegistryVersion();
 
   const [dragGroupKey, setDragGroupKey] = useState<string | null>(null);
   const [groupDropIndicator, setGroupDropIndicator] = useState<{ id: string; edge: "left" | "right" } | null>(null);
@@ -504,12 +513,15 @@ export default function TabBar({
         {tab.keyboardView && <Icon name="keyboard" className="tab-type-icon" />}
         {tab.extensionPageId !== undefined && <Icon name="extensions" className="tab-type-icon" />}
         {tab.gridId !== undefined && <Icon name={gridTabIcon?.(tab) ?? "layout"} className="tab-type-icon" />}
-        {tab.extViewerPath && (
-          <FileIcon
-            className="tab-file-icon"
-            result={getFileIconResult(tab.extViewerPath.split("/").pop() ?? tab.extViewerPath)}
-          />
-        )}
+        {tab.extViewerPath &&
+          (viewerIcon(tab) ? (
+            <Icon name={viewerIcon(tab)!} className="tab-type-icon" />
+          ) : (
+            <FileIcon
+              className="tab-file-icon"
+              result={getFileIconResult(tab.extViewerPath.split("/").pop() ?? tab.extViewerPath)}
+            />
+          ))}
         <span className="tab-title">{label(tab)}</span>
         <button
           className="tab-close"

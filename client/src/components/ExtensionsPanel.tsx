@@ -3,7 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import * as api from "../api";
 import { reloadPendingIds, useExtensionRegistryVersion } from "../extensions";
 import { useListNavigation } from "../hooks/useListNavigation";
-import { isOfficialPublisher, parsePublisher } from "../lib/extensionId";
+import { byDisplayName, isOfficialPublisher, parsePublisher } from "../lib/extensionId";
 import { outdatedExtensions } from "../lib/extensionUpdates";
 import type { ExtensionInfo, RegistryCatalogEntry, RegistrySourceResult } from "../types";
 import Icon from "./Icon";
@@ -140,8 +140,9 @@ export default function ExtensionsPanel({
   // them) but surface in the Available section, not Installed — they read as
   // normal available extensions whose "Install" re-enables the bundled copy
   // (see runReinstall). Everything else is genuinely installed.
-  const installedExtensions = extensions.filter((e) => !e.uninstalled);
-  const uninstalledBuiltins = extensions.filter((e) => e.uninstalled);
+  const sortedExtensions = [...extensions].sort(byDisplayName);
+  const installedExtensions = sortedExtensions.filter((e) => !e.uninstalled);
+  const uninstalledBuiltins = sortedExtensions.filter((e) => e.uninstalled);
   const installedIds = new Set(installedExtensions.map((e) => e.id));
   // User sources with the built-in default prepended (deduped) — the effective
   // source list this panel displays and filters the catalog by. The default is
@@ -185,6 +186,7 @@ export default function ExtensionsPanel({
       availableEntries.push({ source: src.source, ...entry });
     }
   }
+  availableEntries.sort(byDisplayName);
 
   const searchLower = search.trim().toLowerCase();
   const matches = (displayName: string, description: string, id: string) =>
