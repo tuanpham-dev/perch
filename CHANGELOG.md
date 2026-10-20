@@ -3,6 +3,24 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.7.0 - 2026-10-19
+
+- **Terminal grids can span projects.** A grid can now hold windows from
+  different projects: **Move to Grid** lists every grid, and the grid tab's
+  menu has **Add Terminal from Project…** (also in the command palette).
+  Each cell's title reads `project · window`, and a grid that mixes projects
+  sits on its own outside the project tab groups.
+- **Grid cells show window decorations**, such as an extension's status
+  marks, in their headers.
+- **Extensions can keep a grid of their own windows** with the new
+  `registerManagedGrid` API. Windows join and leave it as the extension
+  says; a cell you close stays out until the extension drops and re-adds
+  it, and terminals you add yourself are never removed. Agent Monitor 1.7.0
+  uses it for its Agents Grid.
+- **Shopify storefronts no longer rate-limit the web preview.** Theme
+  previews showed a 429 "You have sent too many requests" page after a
+  request or two, and variant options on product cards silently failed.
+
 ## 0.6.0 - 2026-10-19
 
 - **Open a port inside Perch.** In the PORTS view and the status bar's
