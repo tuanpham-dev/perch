@@ -3,6 +3,20 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.8.0 - 2026-10-20
+
+- **Extensions can open their own settings.** The new
+  `ctx.settings.open()` opens the Settings tab at the extension's section,
+  for a gear button in its panel. Remote Desktop 2.3.0 adds one.
+- **Extension tabs can have their own icon.** A file viewer registered with
+  `icon` shows that codicon in the tab bar instead of the generic file icon
+  its path would get. Remote Desktop's display tab now shows a monitor.
+- **Extensions are listed by name**, in the Extensions tab and in the
+  Settings list alike.
+- **No more repeated headings in extension settings.** A configuration
+  section titled after its extension ("Remote Desktop" under "Remote
+  Desktop") no longer repeats the page title.
+
 ## 0.7.0 - 2026-10-19
 
 - **Terminal grids can span projects.** A grid can now hold windows from
