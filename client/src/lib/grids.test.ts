@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { TerminalSession } from "../types";
 import {
   addCell,
+  adoptCell,
   adjacentCellId,
+  gridChipKey,
+  hideCellWindow,
+  reconcileManagedGrid,
+  type ManagedGridWindow,
   cellPlacements,
   directionalCellId,
   evenTracks,
@@ -219,5 +224,120 @@ describe("directionalCellId", () => {
     expect(directionalCellId(g, "c1", "down", true)).toBe("c2");
     expect(directionalCellId(g, "c0", "up", true)).toBe("c4");
     expect(directionalCellId(g, "c1", "right", true)).toBeUndefined();
+  });
+});
+
+describe("gridChipKey", () => {
+  const key = (name: string) => (name.startsWith("b") ? "~/b" : "~/a");
+  const base: Grid = { id: "g", projectKey: "~/a", name: "Grid", cells: [], colSizes: [1], rowSizes: [1], zoomedCellId: null };
+  it("is the one project of every cell", () => {
+    expect(gridChipKey({ ...base, cells: [cell(0, "a1"), cell(1, "a2")] }, key)).toBe("~/a");
+    expect(gridChipKey({ ...base, cells: [cell(0, "b1")] }, key)).toBe("~/b");
+  });
+  it("is null for mixed or managed grids", () => {
+    expect(gridChipKey({ ...base, cells: [cell(0, "a1"), cell(1, "b1")] }, key)).toBeNull();
+    expect(gridChipKey({ ...base, providerId: "ext.x.y", cells: [cell(0, "a1")] }, key)).toBeNull();
+    expect(gridChipKey({ ...base, providerId: "ext.x.y" }, key)).toBeNull();
+  });
+  it("keeps the home project with no cells", () => {
+    expect(gridChipKey(base, key)).toBe("~/a");
+  });
+});
+
+describe("reconcileManagedGrid", () => {
+  let n = 0;
+  const mint = () => `m${n++}`;
+  const managed: Grid = {
+    id: "g",
+    projectKey: "",
+    name: "Agents",
+    cells: [],
+    colSizes: [1],
+    rowSizes: [1],
+    zoomedCellId: null,
+    providerId: "ext.a.agents",
+    hiddenWindowIds: [],
+  };
+  const w = (id: string, session = "s", index = 0): ManagedGridWindow => ({ windowId: id, sessionName: session, windowIndex: index });
+  const known = new Set(["w1", "w2", "w3"]);
+
+  it("appends wanted windows in order and removes them when they leave", () => {
+    const g1 = reconcileManagedGrid(managed, [w("w1", "s", 1), w("w2", "s", 2)], known, mint);
+    expect(g1.cells.map((c) => [c.windowId, c.attachName, c.byProvider])).toEqual([
+      ["w1", "@w1", true],
+      ["w2", "@w2", true],
+    ]);
+    expect(g1.colSizes).toHaveLength(2);
+    const g2 = reconcileManagedGrid(g1, [w("w2", "s", 2)], known, mint);
+    expect(g2.cells.map((c) => c.windowId)).toEqual(["w2"]);
+    expect(reconcileManagedGrid(g2, [w("w2", "s", 2)], known, mint)).toBe(g2);
+  });
+
+  it("never removes a user cell", () => {
+    const user: GridCell = { id: "u", sessionName: "s", windowIndex: 9, attachName: "@w9", windowId: "w9" };
+    const g = reconcileManagedGrid({ ...managed, cells: [user] }, [], known, mint);
+    expect(g.cells).toEqual([user]);
+  });
+
+  it("does not add a window the session poll has not seen", () => {
+    expect(reconcileManagedGrid(managed, [w("w7")], known, mint)).toBe(managed);
+  });
+
+  it("keeps a hidden window out until it leaves the list", () => {
+    const g1 = reconcileManagedGrid(managed, [w("w1", "s", 1)], known, mint);
+    const hidden = removeCell(hideCellWindow(g1, g1.cells[0].id), g1.cells[0].id);
+    expect(hidden.hiddenWindowIds).toEqual(["w1"]);
+    expect(reconcileManagedGrid(hidden, [w("w1", "s", 1)], known, mint)).toBe(hidden);
+    const left = reconcileManagedGrid(hidden, [], known, mint);
+    expect(left.hiddenWindowIds).toEqual([]);
+    const back = reconcileManagedGrid(left, [w("w1", "s", 1)], known, mint);
+    expect(back.cells.map((c) => c.windowId)).toEqual(["w1"]);
+  });
+
+  it("follows the list's session names and indexes", () => {
+    const g1 = reconcileManagedGrid(managed, [w("w1", "s", 1)], known, mint);
+    const g2 = reconcileManagedGrid(g1, [w("w1", "renamed", 4)], known, mint);
+    expect([g2.cells[0].sessionName, g2.cells[0].windowIndex, g2.cells[0].id]).toEqual(["renamed", 4, g1.cells[0].id]);
+  });
+
+  it("adopted cells stay after their window leaves the list", () => {
+    const g1 = reconcileManagedGrid(managed, [w("w1", "s", 1)], known, mint);
+    const adopted = adoptCell(g1, g1.cells[0].id);
+    expect(reconcileManagedGrid(adopted, [], known, mint).cells).toHaveLength(1);
+  });
+});
+
+describe("managed grids in storage and polls", () => {
+  const managed: Grid = {
+    id: "g",
+    projectKey: "",
+    name: "Agents",
+    cells: [],
+    colSizes: [1],
+    rowSizes: [1],
+    zoomedCellId: null,
+    providerId: "ext.a.agents",
+    hiddenWindowIds: ["w1"],
+  };
+  it("parses an empty managed grid", () => {
+    expect(parseStoredGrids({ g: managed })).toEqual({ g: managed });
+  });
+  it("keeps an emptied managed grid", () => {
+    const withCell = { ...managed, cells: [{ ...cell(0), sessionId: "sid", windowId: "w0" }] };
+    const next = reconcileGridCells({ g: withCell }, []);
+    expect(next.g.cells).toEqual([]);
+  });
+  it("finds a cell's session by window id when it has no session id", () => {
+    const c: GridCell = { id: "c", sessionName: "old", windowIndex: 0, attachName: "@w0", windowId: "w0" };
+    const s: TerminalSession = {
+      id: "sid",
+      name: "new",
+      created: 0,
+      attached: 0,
+      path: "~/p",
+      windows: [{ id: "w0", index: 0, name: "zsh", active: false, cwd: "~/p", activity: false, command: "zsh" }],
+    };
+    const next = reconcileGridCells({ g: { ...managed, cells: [c] } }, [s]);
+    expect(next.g.cells[0].sessionName).toBe("new");
   });
 });

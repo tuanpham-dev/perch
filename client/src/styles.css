@@ -2364,6 +2364,32 @@ body.tab-dragging .split-content-host {
   flex: 1;
 }
 
+/* A managed grid's mark for the cell's window (an agent's logo). */
+.grid-cell-mark {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  font-size: 14px !important;
+  object-fit: contain;
+}
+
+.grid-cell-header .window-decoration-badge {
+  margin-left: 2px;
+}
+
+/* A managed grid with no cells keeps its tab and says why it is empty. */
+.grid-empty {
+  grid-area: 1 / 1 / -1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg);
+  color: var(--fg-inactive);
+  text-align: center;
+  line-height: 1.5;
+}
+
 .grid-cell-header-btn {
   display: flex;
   align-items: center;

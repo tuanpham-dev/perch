@@ -19,13 +19,21 @@ export interface GridCell {
   // out-of-band rename/renumber, mirroring Tab's own sessionId/windowId.
   sessionId?: string;
   windowId?: string;
+  // Added by a managed grid's provider (see reconcileManagedGrid) — the
+  // provider may take it away again. A cell the user added, or moved in
+  // over a provider cell, never has it.
+  byProvider?: boolean;
 }
 
-// A grid belongs to one project (projectKey = useTabs' projectKeyForSession)
-// and is shared by every tab whose Tab.gridId points at it — split copies are
-// linked, so cells, tracks and zoom are grid state, not tab state.
+// A grid may hold windows of any project, and is shared by every tab whose
+// Tab.gridId points at it — split copies are linked, so cells, tracks and
+// zoom are grid state, not tab state. Which chip its tab sits in is derived
+// from its cells (gridChipKey), never stored.
 export interface Grid {
   id: string;
+  // The project the grid was created in (useTabs' projectKeyForSession):
+  // its default-name scope, and where Add Terminal goes with no cells to
+  // follow. Empty for a managed grid.
   projectKey: string;
   name: string;
   cells: GridCell[];
@@ -33,6 +41,12 @@ export interface Grid {
   colSizes: number[];
   rowSizes: number[];
   zoomedCellId: string | null;
+  // Set on a grid an extension manages (ctx.registerManagedGrid): the
+  // provider's namespaced id. A managed grid survives having no cells.
+  providerId?: string;
+  // Managed grids: wanted windows the user closed or popped out, kept out
+  // until they leave the provider's list (spec R14).
+  hiddenWindowIds?: string[];
 }
 
 export const GRIDS_STORAGE_KEY = "grids";
@@ -81,6 +95,21 @@ function refit(grid: Grid, cells: GridCell[]): Grid {
     rowSizes: fitTracks(grid.rowSizes, rows),
     zoomedCellId: null,
   };
+}
+
+// The distinct projects of a grid's cells, in cell order.
+export function gridProjectKeys(grid: Grid, keyForSession: (sessionName: string) => string): string[] {
+  return [...new Set(grid.cells.map((c) => keyForSession(c.sessionName)))];
+}
+
+// The chip a grid tab belongs in: its one project, or null — outside chips —
+// when its cells span several projects or an extension manages it. A grid
+// with no cells keeps its home project.
+export function gridChipKey(grid: Grid, keyForSession: (sessionName: string) => string): string | null {
+  if (grid.providerId !== undefined) return null;
+  const keys = gridProjectKeys(grid, keyForSession);
+  if (keys.length === 0) return grid.projectKey;
+  return keys.length === 1 ? keys[0] : null;
 }
 
 export function hasWindow(grid: Grid, sessionName: string, windowIndex: number): GridCell | undefined {
@@ -214,7 +243,8 @@ export function reconcileGridCells(
     for (const cell of grid.cells) {
       const session = cell.sessionId
         ? sessions.find((s) => s.id === cell.sessionId)
-        : sessions.find((s) => s.name === cell.sessionName);
+        : ((cell.windowId ? sessions.find((s) => s.windows.some((w) => w.id === cell.windowId)) : undefined) ??
+          sessions.find((s) => s.name === cell.sessionName));
       const win = session
         ? cell.windowId
           ? session.windows.find((w) => w.id === cell.windowId)
@@ -248,7 +278,7 @@ export function reconcileGridCells(
       continue;
     }
     changed = true;
-    if (kept.length === 0) continue;
+    if (kept.length === 0 && grid.providerId === undefined) continue;
     // Removing cells refits tracks; renames alone keep the grid's layout.
     next[id] =
       kept.length === grid.cells.length
@@ -268,7 +298,8 @@ function isValidCell(c: unknown): c is GridCell {
     typeof o.windowIndex === "number" &&
     Number.isInteger(o.windowIndex) &&
     (o.sessionId === undefined || typeof o.sessionId === "string") &&
-    (o.windowId === undefined || typeof o.windowId === "string")
+    (o.windowId === undefined || typeof o.windowId === "string") &&
+    (o.byProvider === undefined || typeof o.byProvider === "boolean")
   );
 }
 
@@ -281,7 +312,9 @@ export function parseStoredGrids(json: unknown): Record<string, Grid> {
     if (typeof value !== "object" || value === null) continue;
     const g = value as Record<string, unknown>;
     if (g.id !== key || typeof g.projectKey !== "string" || typeof g.name !== "string") continue;
-    if (!Array.isArray(g.cells) || g.cells.length === 0 || !g.cells.every(isValidCell)) continue;
+    const providerId = typeof g.providerId === "string" ? g.providerId : undefined;
+    if (!Array.isArray(g.cells) || !g.cells.every(isValidCell)) continue;
+    if (g.cells.length === 0 && providerId === undefined) continue;
     const cells = g.cells as GridCell[];
     const { cols, rows } = tiledShape(cells.length);
     const zoomed =
@@ -294,6 +327,14 @@ export function parseStoredGrids(json: unknown): Record<string, Grid> {
       colSizes: validSizes(g.colSizes, cols) ? g.colSizes : evenTracks(cols),
       rowSizes: validSizes(g.rowSizes, rows) ? g.rowSizes : evenTracks(rows),
       zoomedCellId: zoomed,
+      ...(providerId !== undefined
+        ? {
+            providerId,
+            hiddenWindowIds: Array.isArray(g.hiddenWindowIds)
+              ? g.hiddenWindowIds.filter((w): w is string => typeof w === "string")
+              : [],
+          }
+        : {}),
     };
   }
   return out;
@@ -305,4 +346,89 @@ export function loadStoredGrids(): Record<string, Grid> {
   } catch {
     return {};
   }
+}
+
+// One window a managed grid's provider wants shown (ctx.registerManagedGrid's
+// setWindows). icon / iconUrl are the window's mark in its cell header.
+export interface ManagedGridWindow {
+  windowId: string;
+  sessionName: string;
+  windowIndex: number;
+  icon?: string;
+  iconUrl?: string;
+}
+
+// Folds a provider's wanted list into its grid (spec R13, R14): provider
+// cells whose window left the list go, a hidden window that left the list is
+// forgotten (so it comes back next time), provider cells follow the list's
+// session names and indexes, and wanted windows not yet shown are appended in
+// list order. Only windows in `knownWindowIds` (the client's own session
+// poll) are added, so reconcileGridCells never drops a cell the poll has not
+// caught up with yet. User cells are never touched. Same reference when
+// nothing changed.
+export function reconcileManagedGrid(
+  grid: Grid,
+  wanted: ManagedGridWindow[],
+  knownWindowIds: ReadonlySet<string>,
+  mintId: () => string,
+): Grid {
+  const byId = new Map(wanted.map((w) => [w.windowId, w]));
+  let changed = false;
+  const cells: GridCell[] = [];
+  for (const cell of grid.cells) {
+    if (!cell.byProvider) {
+      cells.push(cell);
+      continue;
+    }
+    const w = cell.windowId ? byId.get(cell.windowId) : undefined;
+    if (!w) {
+      changed = true;
+      continue;
+    }
+    if (w.sessionName !== cell.sessionName || w.windowIndex !== cell.windowIndex) {
+      changed = true;
+      cells.push({ ...cell, sessionName: w.sessionName, windowIndex: w.windowIndex });
+    } else cells.push(cell);
+  }
+  const prevHidden = grid.hiddenWindowIds ?? [];
+  const hidden = prevHidden.filter((id) => byId.has(id));
+  if (hidden.length !== prevHidden.length) changed = true;
+  const hiddenSet = new Set(hidden);
+  const removedCount = grid.cells.length - cells.length;
+  let added = 0;
+  for (const w of wanted) {
+    if (hiddenSet.has(w.windowId) || !knownWindowIds.has(w.windowId)) continue;
+    if (cells.some((c) => c.windowId === w.windowId || (c.sessionName === w.sessionName && c.windowIndex === w.windowIndex)))
+      continue;
+    cells.push({
+      id: mintId(),
+      sessionName: w.sessionName,
+      windowIndex: w.windowIndex,
+      windowId: w.windowId,
+      attachName: `@${w.windowId}`,
+      byProvider: true,
+    });
+    added++;
+  }
+  if (!changed && added === 0) return grid;
+  const next = { ...grid, hiddenWindowIds: hidden };
+  return removedCount > 0 || added > 0 ? refit(next, cells) : { ...next, cells };
+}
+
+// Close / pop out on a provider cell keeps its window out of the grid while
+// the provider still wants it (spec R14). No-op for a user cell.
+export function hideCellWindow(grid: Grid, cellId: string): Grid {
+  const cell = grid.cells.find((c) => c.id === cellId);
+  if (!cell?.byProvider || !cell.windowId || grid.providerId === undefined) return grid;
+  const hidden = grid.hiddenWindowIds ?? [];
+  if (hidden.includes(cell.windowId)) return grid;
+  return { ...grid, hiddenWindowIds: [...hidden, cell.windowId] };
+}
+
+// A window the user moves into a grid where the provider already shows it
+// becomes the user's: the provider never removes it.
+export function adoptCell(grid: Grid, cellId: string): Grid {
+  const cell = grid.cells.find((c) => c.id === cellId);
+  if (!cell?.byProvider) return grid;
+  return { ...grid, cells: grid.cells.map((c) => (c.id === cellId ? { ...c, byProvider: false } : c)) };
 }

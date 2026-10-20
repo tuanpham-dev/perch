@@ -16,6 +16,7 @@ interface Props {
   // highlighted to say "drop to add as a cell" (plans/project-grid-tab.md).
   dropGridTabId?: string | null;
   label: (tab: Tab) => string;
+  gridTabIcon?: (tab: Tab) => string | undefined;
   activity: (tab: Tab) => boolean;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
@@ -120,6 +121,7 @@ export default function TabBar({
   tabs,
   activeTabId,
   label,
+  gridTabIcon,
   activity,
   onActivate,
   onClose,
@@ -501,7 +503,7 @@ export default function TabBar({
         {tab.settingsView && <Icon name="settings-gear" className="tab-type-icon" />}
         {tab.keyboardView && <Icon name="keyboard" className="tab-type-icon" />}
         {tab.extensionPageId !== undefined && <Icon name="extensions" className="tab-type-icon" />}
-        {tab.gridId !== undefined && <Icon name="layout" className="tab-type-icon" />}
+        {tab.gridId !== undefined && <Icon name={gridTabIcon?.(tab) ?? "layout"} className="tab-type-icon" />}
         {tab.extViewerPath && (
           <FileIcon
             className="tab-file-icon"

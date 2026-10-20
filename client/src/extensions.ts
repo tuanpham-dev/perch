@@ -21,6 +21,7 @@ import {
 } from "./api";
 import type { CreateTerminalEngine } from "./engines/types";
 import { loadCodiconItems } from "./lib/codiconCatalog";
+import type { ManagedGridWindow } from "./lib/grids";
 import type { PickItem } from "./lib/pickFilter";
 import type { SidebarSide } from "./lib/sidebarLayout";
 import type { ExtensionSettingsValues } from "./settings";
@@ -418,9 +419,13 @@ export interface ExtensionContext {
     provideDecoration: (path: string, isDir: boolean) => FileDecoration | undefined;
     provideRootDecoration?: (rootPath: string) => RootDecoration | undefined;
   }): { refresh(): void };
+  // A grid whose windows the extension supplies (see RegisteredManagedGrid).
+  // open() shows its tab; setWindows() says which windows it should hold.
+  registerManagedGrid(grid: { id: string; title: string; icon?: string; emptyText?: string }): ManagedGridHandle;
   // Contributes badges to PROJECTS-tree window rows (where the built-in
-  // subagent count rendered before extraction). Same sync-from-cache +
-  // refresh() contract as registerFileDecorationProvider.
+  // subagent count rendered before extraction) and to grid cell headers.
+  // Same sync-from-cache + refresh() contract as
+  // registerFileDecorationProvider.
   registerSessionDecorationProvider(provider: {
     id: string;
     provideWindowDecoration: (ctx: SessionDecorationContext) => SessionDecoration | undefined;
@@ -788,6 +793,27 @@ export interface RegisteredFileDecorationProvider {
   provideRootDecoration?(rootPath: string): RootDecoration | undefined;
 }
 
+// A grid an extension manages (ctx.registerManagedGrid, spec R12-R18). Core
+// keeps one per registration per browser window: a window newly on
+// `windows` is appended, a cell the provider added goes when its window
+// leaves the list, a cell the user closed stays out until its window leaves
+// and comes back, and cells the user added are never touched. The tab sits
+// outside project chips and stays open, showing `emptyText`, with no cells.
+export interface RegisteredManagedGrid {
+  // Namespaced ext.<extensionId>.<id>.
+  id: string;
+  extensionId: string;
+  title: string;
+  icon: string;
+  emptyText: string;
+  windows: ManagedGridWindow[];
+}
+
+export interface ManagedGridHandle {
+  open(): void;
+  setWindows(windows: ManagedGridWindow[]): void;
+}
+
 // What a session-window decoration's provide/onClick are evaluated against —
 // same plain-snapshot shape as WindowActionContext.
 export interface SessionDecorationContext {
@@ -1151,6 +1177,7 @@ export const extensionSidebarTabs: RegisteredSidebarTab[] = [];
 export const extensionSidebarTabMenuItems: RegisteredSidebarTabMenuItem[] = [];
 export const extensionFileDecorationProviders: RegisteredFileDecorationProvider[] = [];
 export const extensionSessionDecorationProviders: RegisteredSessionDecorationProvider[] = [];
+export const extensionManagedGrids: RegisteredManagedGrid[] = [];
 export const extensionQuickDiffProviders: RegisteredQuickDiffProvider[] = [];
 export const extensionTerminalEngines: RegisteredTerminalEngine[] = [];
 export const extensionEditors: RegisteredEditor[] = [];
@@ -1288,6 +1315,31 @@ export function getWindowDecorations(
   return out;
 }
 
+// A managed grid's entry for one of its windows — the mark a cell header
+// draws for it.
+export function getManagedGridWindow(providerId: string | undefined, windowId: string | undefined): ManagedGridWindow | undefined {
+  if (providerId === undefined || windowId === undefined) return undefined;
+  return extensionManagedGrids.find((g) => g.id === providerId)?.windows.find((w) => w.windowId === windowId);
+}
+
+export function getManagedGrid(providerId: string | undefined): RegisteredManagedGrid | undefined {
+  return providerId === undefined ? undefined : extensionManagedGrids.find((g) => g.id === providerId);
+}
+
+function sameManagedWindows(a: ManagedGridWindow[], b: ManagedGridWindow[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (w, i) =>
+        w.windowId === b[i].windowId &&
+        w.sessionName === b[i].sessionName &&
+        w.windowIndex === b[i].windowIndex &&
+        w.icon === b[i].icon &&
+        w.iconUrl === b[i].iconUrl,
+    )
+  );
+}
+
 // Matches by extension + mode ("default": FILES-tree click target;
 // "preview": hover icon / "Preview" menu / Shift+Enter target — see
 // FileViewerMode). Among ties, a non-builtin (user-installed) viewer wins
@@ -1341,6 +1393,7 @@ export function useExtensionRegistry(): {
   extensionsSettled: boolean;
   windowActions: RegisteredWindowAction[];
   appOverlays: RegisteredAppOverlay[];
+  managedGrids: RegisteredManagedGrid[];
 } {
   const [tick, setTick] = ReactNS.useState(0);
   ReactNS.useEffect(() => subscribeExtensionRegistry(() => setTick((t) => t + 1)), []);
@@ -1359,6 +1412,7 @@ export function useExtensionRegistry(): {
       extensionsSettled,
       windowActions: [...extensionWindowActions],
       appOverlays: [...extensionAppOverlays],
+      managedGrids: [...extensionManagedGrids],
     }),
     [tick],
   );
@@ -1472,6 +1526,14 @@ let closeViewerTabHandler: ((namespacedViewerId: string, path: string) => void) 
 // Wired once from App.tsx to closeExtViewerTab — see ExtensionContext.app.closeViewerTab.
 export function setCloseViewerTabHandler(handler: (namespacedViewerId: string, path: string) => void): void {
   closeViewerTabHandler = handler;
+}
+
+let openManagedGridHandler: ((providerId: string) => void) | null = null;
+
+// Wired from App.tsx to useGrids' openManagedGrid — backs a managed grid
+// handle's open(). Nulled on unmount.
+export function setOpenManagedGridHandler(handler: ((providerId: string) => void) | null): void {
+  openManagedGridHandler = handler;
 }
 
 let openSessionWindowHandler:
@@ -2004,6 +2066,39 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       });
       quickDiffProvidersChanged();
     },
+    registerManagedGrid(grid) {
+      const id = `ext.${ext.id}.${grid.id}`;
+      const existing = extensionManagedGrids.findIndex((g) => g.id === id);
+      if (existing !== -1) extensionManagedGrids.splice(existing, 1);
+      extensionManagedGrids.push({
+        id,
+        extensionId: ext.id,
+        title: grid.title,
+        icon: grid.icon ?? "layout",
+        emptyText: grid.emptyText ?? "",
+        windows: [],
+      });
+      notify();
+      return {
+        open: () => openManagedGridHandler?.(id),
+        setWindows: (windows) => {
+          const i = extensionManagedGrids.findIndex((g) => g.id === id);
+          if (i === -1) return;
+          const clean = windows
+            .filter((w) => typeof w?.windowId === "string" && typeof w.sessionName === "string" && Number.isInteger(w.windowIndex))
+            .map((w) => ({
+              windowId: w.windowId,
+              sessionName: w.sessionName,
+              windowIndex: w.windowIndex,
+              ...(typeof w.icon === "string" ? { icon: w.icon } : {}),
+              ...(typeof w.iconUrl === "string" && w.iconUrl !== "" ? { iconUrl: w.iconUrl } : {}),
+            }));
+          if (sameManagedWindows(extensionManagedGrids[i].windows, clean)) return;
+          extensionManagedGrids[i] = { ...extensionManagedGrids[i], windows: clean };
+          notify();
+        },
+      };
+    },
     registerSessionDecorationProvider(provider) {
       extensionSessionDecorationProviders.push({
         id: `ext.${ext.id}.${provider.id}`,
@@ -2415,6 +2510,9 @@ function deactivateClientExtension(extId: string): void {
   }
   for (let i = extensionSessionDecorationProviders.length - 1; i >= 0; i--) {
     if (extensionSessionDecorationProviders[i].extensionId === extId) extensionSessionDecorationProviders.splice(i, 1);
+  }
+  for (let i = extensionManagedGrids.length - 1; i >= 0; i--) {
+    if (extensionManagedGrids[i].extensionId === extId) extensionManagedGrids.splice(i, 1);
   }
   let hadQuickDiffProvider = false;
   for (let i = extensionQuickDiffProviders.length - 1; i >= 0; i--) {

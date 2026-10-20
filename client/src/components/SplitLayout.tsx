@@ -48,6 +48,8 @@ interface SharedProps {
   activeGroupId: string;
   groupActive: Record<string, string | null>;
   label: (tab: Tab) => string;
+  // A grid tab's icon (a managed grid's own); "layout" when undefined.
+  gridTabIcon?: (tab: Tab) => string | undefined;
   activity: (tab: Tab) => boolean;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
@@ -179,6 +181,7 @@ function Leaf({
   activeGroupId,
   groupActive,
   label,
+  gridTabIcon,
   activity,
   onActivate,
   onClose,
@@ -240,6 +243,7 @@ function Leaf({
         tabs={groupTabs}
         activeTabId={groupActive[groupId] ?? null}
         label={label}
+        gridTabIcon={gridTabIcon}
         activity={activity}
         onActivate={onActivate}
         onClose={onClose}

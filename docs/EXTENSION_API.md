@@ -32,6 +32,7 @@ to read).
   - [Window actions](#window-actions--registerwindowaction)
   - [File decorations](#file-decorations--registerfiledecorationprovider)
   - [Session decorations](#session-decorations--registersessiondecorationprovider)
+  - [Managed grids](#managed-grids--registermanagedgrid)
   - [Terminal engines](#terminal-engines--registerterminalengine)
   - [Editors](#editors--registereditor)
   - [Terminal accessories](#terminal-accessories--registerterminalaccessory)
@@ -1001,14 +1002,60 @@ interface SessionDecoration {
 }
 ```
 
-Renders a clickable badge on PROJECTS-tree window rows (styled like the core
-`.window-decoration-badge` pill). A window row can carry one badge per
+Renders a clickable badge on PROJECTS-tree window rows and on grid cell
+headers (styled like the core `.window-decoration-badge` pill). A window row can carry one badge per
 provider. `onClick` receives the badge's bounding rect — position your own
 popover from it, rendered into a root **you** own (via the
 `react-dom/client` shim's `createRoot`) and torn down in `deactivate()`;
 there is no host-rendered popover surface. Reference: `subagent-viewer`
 (badge + popover + the "learn cwds from provide calls, poll, refresh"
 cache pattern).
+
+### Managed grids — `registerManagedGrid`
+
+```ts
+const grid = ctx.registerManagedGrid({
+  id: string,
+  title: string,       // the grid's name and tab label
+  icon?: string,       // codicon for its tab; defaults to "layout"
+  emptyText?: string,  // shown in place of cells while it has none
+});
+grid.open(): void                                   // show its tab
+grid.setWindows(windows: ManagedGridWindow[]): void // what it should hold
+
+interface ManagedGridWindow {
+  windowId: string;     // the window's stable id (TerminalWindow.id, $PERCH_WINDOW)
+  sessionName: string;
+  windowIndex: number;
+  icon?: string;        // codicon drawn before the cell's title...
+  iconUrl?: string;     // ...or an image URL, which wins
+}
+```
+
+A grid tab whose contents your extension supplies: hand it the windows it
+should show, and core keeps the grid in step. One grid exists per
+registration per browser window.
+
+- `open()` activates the grid's tab (the active pane's copy first, then any
+  pane's), or creates the grid and opens its tab in the active pane.
+- On every `setWindows`, core appends the windows it does not show yet, in
+  list order, and removes a cell it added once that cell's window leaves the
+  list. A window the user closed or popped out stays out while it is still
+  on the list, and comes back after it leaves the list and returns. Cells
+  the user added (Move to Grid, a dropped tab, Add Terminal) are never
+  removed by you; moving a window you already show into the grid makes it
+  the user's. A window is added only once the client's own session list
+  knows it, so a window created a moment ago appears on the next poll.
+- The tab always sits outside project chips, labeled with `title` (the user
+  may rename it). With no cells it stays open and shows `emptyText`.
+- Otherwise it is an ordinary grid: resize, swap, zoom, split copies and
+  Add Terminal all work. Its layout and hidden windows persist with the
+  device's grids while a tab shows it.
+- Calling `setWindows` with an unchanged list is free, so poll freely. When
+  your extension is disabled or uninstalled, its grid's tabs close.
+
+Grid cell headers also render every [session decoration](#session-decorations--registersessiondecorationprovider)
+for the cell's window. Reference: the Agent Monitor extension's Agents Grid (perch-extensions, `agent-monitor/src/client.tsx`).
 
 ### Terminal engines — `registerTerminalEngine`
 

@@ -1,8 +1,14 @@
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import * as api from "../api";
+import type { RegisteredManagedGrid } from "../extensions";
+import type { PickItem } from "../lib/pickFilter";
 import {
   addCell,
+  adoptCell,
   adjacentCellId,
+  gridChipKey,
+  hideCellWindow,
+  reconcileManagedGrid,
   directionalCellId,
   type GridDirection,
   hasWindow,
@@ -34,8 +40,15 @@ export interface UseGridsDeps {
   focusGroup: (groupId: string) => void;
   removeTabsForMove: (ids: string[]) => void;
   projectKeyForSession: (sessionName: string) => string;
+  projectLabelForSession: (sessionName: string) => string;
   refresh: () => Promise<void>;
   promptDialog: (message: string, defaultValue?: string) => Promise<string | null>;
+  pickDialog: (opts: { title: string; items: PickItem[]; current?: string; placeholder?: string }) => Promise<string | null>;
+  // Extension-managed grids (ctx.registerManagedGrid) and whether the first
+  // extension load has settled — a managed grid whose provider is missing
+  // after that is dropped (spec R18).
+  managedGrids: RegisteredManagedGrid[];
+  extensionsSettled: boolean;
   showError: (err: unknown) => void;
 }
 
@@ -77,10 +90,28 @@ export function useGrids(deps: UseGridsDeps) {
     focusGroup,
     removeTabsForMove,
     projectKeyForSession,
+    projectLabelForSession,
     refresh,
     promptDialog,
+    pickDialog,
+    managedGrids,
+    extensionsSettled,
     showError,
   } = deps;
+
+  const chipKeyOf = useCallback((g: Grid) => gridChipKey(g, projectKeyForSession), [projectKeyForSession]);
+
+  // The grid's tab label (same rule as useTabs' tabLabel): its name alone
+  // outside chips, prefixed by its project inside one.
+  const gridLabel = useCallback(
+    (g: Grid): string => {
+      const chip = chipKeyOf(g);
+      if (chip === null) return g.name;
+      const session = g.cells.find((c) => projectKeyForSession(c.sessionName) === chip)?.sessionName;
+      return session ? `${projectLabelForSession(session)} · ${g.name}` : g.name;
+    },
+    [chipKeyOf, projectKeyForSession, projectLabelForSession],
+  );
 
   const primarySessionForProject = useCallback(
     (projectKey: string): TerminalSession | undefined =>
@@ -133,7 +164,7 @@ export function useGrids(deps: UseGridsDeps) {
         const next = update(g);
         if (next === g) return prev;
         const out = { ...prev };
-        if (next === null || next.cells.length === 0) delete out[gridId];
+        if (next === null || (next.cells.length === 0 && next.providerId === undefined)) delete out[gridId];
         else out[gridId] = next;
         return out;
       });
@@ -268,8 +299,10 @@ export function useGrids(deps: UseGridsDeps) {
       let focusCellId: string | undefined;
       for (const { cell } of pairs) {
         const existing = hasWindow(grid, cell.sessionName, cell.windowIndex);
-        if (existing) focusCellId = existing.id;
-        else {
+        if (existing) {
+          focusCellId = existing.id;
+          grid = adoptCell(grid, existing.id);
+        } else {
           grid = addCell(grid, cell);
           focusCellId = cell.id;
         }
@@ -335,30 +368,87 @@ export function useGrids(deps: UseGridsDeps) {
         (t) =>
           t.groupId === editorGroupId &&
           t.gridId !== undefined &&
-          gridsRef.current[t.gridId]?.projectKey === projectKey,
+          gridsRef.current[t.gridId] !== undefined &&
+          chipKeyOf(gridsRef.current[t.gridId]) === projectKey,
       );
       await moveTabsToGrid(
         ids,
         existing?.gridId ? { gridId: existing.gridId, preferTabId: existing.id } : { newInProject: projectKey },
       );
     },
-    [projectTerminalTabIds, tabsRef, gridsRef, moveTabsToGrid],
+    [projectTerminalTabIds, tabsRef, gridsRef, chipKeyOf, moveTabsToGrid],
   );
 
-  // Add Terminal (R22, R23): a new window in the grid's project, appended
-  // and focused in `tabId`.
-  const addTerminalToGrid = useCallback(
-    async (gridId: string, tabId: string) => {
-      const grid = gridsRef.current[gridId];
-      if (!grid) return;
-      const sessionName = grid.cells[0]?.sessionName ?? primarySessionForProject(grid.projectKey)?.name;
-      if (!sessionName) return;
+  const appendNewWindow = useCallback(
+    async (gridId: string, tabId: string, sessionName: string) => {
       const cell = await newWindowCell(sessionName);
       if (!cell) return;
       setGrid(gridId, (g) => addCell(g, cell));
       setTabFocus(tabId, cell.id);
     },
-    [gridsRef, primarySessionForProject, newWindowCell, setGrid, setTabFocus],
+    [newWindowCell, setGrid, setTabFocus],
+  );
+
+  // The session of the tab's focused cell, else the grid's first cell.
+  const focusedSessionOf = useCallback(
+    (grid: Grid, tabId: string): string | undefined => {
+      const focused = tabsRef.current.find((t) => t.id === tabId)?.gridFocusedCellId;
+      return (grid.cells.find((c) => c.id === focused) ?? grid.cells[0])?.sessionName;
+    },
+    [tabsRef],
+  );
+
+  // Add Terminal from Project… (spec R7): pick any project with a live
+  // session, the focused cell's first; a new window there joins the grid.
+  const addTerminalFromProject = useCallback(
+    async (gridId: string, tabId: string) => {
+      const grid = gridsRef.current[gridId];
+      if (!grid) return;
+      const byProject = new Map<string, TerminalSession>();
+      for (const s of sessionsRef.current) {
+        const key = s.path || s.name;
+        if (!byProject.has(key)) byProject.set(key, s);
+      }
+      if (byProject.size === 0) return;
+      const focusedSession = focusedSessionOf(grid, tabId);
+      const currentKey = focusedSession ? projectKeyForSession(focusedSession) : grid.projectKey;
+      const entries = [...byProject.entries()];
+      entries.sort(([a], [b]) => (a === currentKey ? -1 : b === currentKey ? 1 : 0));
+      const picked = await pickDialog({
+        title: "Add Terminal from Project",
+        placeholder: "Pick a project",
+        items: entries.map(([key, s]) => ({
+          id: s.name,
+          label: projectLabelForSession(s.name),
+          detail: s.path || undefined,
+          icon: "folder",
+          keywords: [key],
+        })),
+        current: byProject.get(currentKey)?.name,
+      });
+      if (!picked || !gridsRef.current[gridId]) return;
+      await appendNewWindow(gridId, tabId, picked);
+    },
+    [gridsRef, sessionsRef, focusedSessionOf, projectKeyForSession, projectLabelForSession, pickDialog, appendNewWindow],
+  );
+
+  // Add Terminal (R8, R22, R23): a new window in the focused cell's project,
+  // appended and focused in `tabId`. A managed grid with no cells has no
+  // project to follow, so it asks.
+  const addTerminalToGrid = useCallback(
+    async (gridId: string, tabId: string) => {
+      const grid = gridsRef.current[gridId];
+      if (!grid) return;
+      const sessionName =
+        focusedSessionOf(grid, tabId) ??
+        (grid.providerId === undefined ? primarySessionForProject(grid.projectKey)?.name : undefined);
+      if (!sessionName) {
+        await addTerminalFromProject(gridId, tabId);
+        return;
+      }
+      await appendNewWindow(gridId, tabId, sessionName);
+    },
+    [gridsRef, focusedSessionOf, primarySessionForProject, addTerminalFromProject, appendNewWindow],
   );
 
   // A window tab for `cell`, right after `anchorId` in `groupId` — or the
@@ -388,7 +478,7 @@ export function useGrids(deps: UseGridsDeps) {
       const tab = existing ?? windowTabFor(cell, fromTab.groupId);
       if (!existing) setTabs((prev) => insertAfter(prev, tab, fromTabId));
       const neighbor = neighborAfterRemoval(grid, cellId);
-      setGrid(gridId, (g) => removeCell(g, cellId));
+      setGrid(gridId, (g) => removeCell(hideCellWindow(g, cellId), cellId));
       setTabs((prev) =>
         prev.map((t) => (t.gridId === gridId && t.gridFocusedCellId === cellId ? { ...t, gridFocusedCellId: neighbor } : t)),
       );
@@ -419,21 +509,29 @@ export function useGrids(deps: UseGridsDeps) {
         }
         return out;
       });
-      setGrid(gridId, () => null);
+      // A managed grid stays, empty, with its provider's windows hidden
+      // (spec R16); any other grid ends.
+      setGrid(gridId, (g) =>
+        g.providerId === undefined
+          ? null
+          : g.cells.reduce((acc, c) => removeCell(hideCellWindow(acc, c.id), c.id), g),
+      );
       if (fromTab.groupId) focusGroup(fromTab.groupId);
-      setActiveTabId(created[focusIdx].id, fromTab.groupId);
+      if (created.length > 0) setActiveTabId(created[focusIdx].id, fromTab.groupId);
     },
     [gridsRef, tabsRef, setTabs, setGrid, focusGroup, setActiveTabId],
   );
 
   // Close (R14): detach only — the window stays alive. Focus moves to the
   // next cell (previous when it was last); the last cell's close ends the grid.
+  // `hide` (a user's close, not a window's exit) keeps a provider cell's
+  // window out of a managed grid until the provider stops wanting it.
   const closeCell = useCallback(
-    (gridId: string, cellId: string) => {
+    (gridId: string, cellId: string, hide = true) => {
       const grid = gridsRef.current[gridId];
       if (!grid) return;
       const neighbor = neighborAfterRemoval(grid, cellId);
-      setGrid(gridId, (g) => removeCell(g, cellId));
+      setGrid(gridId, (g) => removeCell(hide ? hideCellWindow(g, cellId) : g, cellId));
       setTabs((prev) =>
         prev.some((t) => t.gridId === gridId && t.gridFocusedCellId === cellId)
           ? prev.map((t) =>
@@ -498,6 +596,79 @@ export function useGrids(deps: UseGridsDeps) {
     [moveFocus],
   );
 
+  // ---- Managed grids (ctx.registerManagedGrid) -------------------------------
+
+  const knownWindowIds = useCallback(
+    () => new Set(sessionsRef.current.flatMap((s) => s.windows.map((w) => w.id))),
+    [sessionsRef],
+  );
+
+  // A provider's grid tab (spec R12, R17): the grid's tab in the active pane,
+  // else in any pane, else a new grid with a tab in the active pane.
+  const openManagedGrid = useCallback(
+    (providerId: string) => {
+      const provider = managedGrids.find((m) => m.id === providerId);
+      if (!provider) return;
+      const activeGroupId = splitLayoutRef.current.activeGroupId;
+      const grid = Object.values(gridsRef.current).find((g) => g.providerId === providerId);
+      if (grid) {
+        const tab =
+          tabsRef.current.find((t) => t.gridId === grid.id && t.groupId === activeGroupId) ??
+          tabsRef.current.find((t) => t.gridId === grid.id);
+        if (tab?.groupId) {
+          focusGroup(tab.groupId);
+          setActiveTabId(tab.id, tab.groupId);
+          return;
+        }
+        openGridTab(grid.id, activeGroupId);
+        return;
+      }
+      const fresh = reconcileManagedGrid(
+        { ...emptyGrid("", []), name: provider.title, providerId, hiddenWindowIds: [], colSizes: [1], rowSizes: [1] },
+        provider.windows,
+        knownWindowIds(),
+        randomUUID,
+      );
+      const tab = gridTabFor(fresh, activeGroupId, fresh.cells[0]?.id);
+      const anchor = splitLayoutRef.current.groupActive[activeGroupId] ?? null;
+      setGrids((prev) => ({ ...prev, [fresh.id]: fresh }));
+      setTabs((prev) => insertAfter(prev, tab, anchor));
+      focusGroup(activeGroupId);
+      setActiveTabId(tab.id, activeGroupId);
+    },
+    [managedGrids, splitLayoutRef, gridsRef, tabsRef, focusGroup, setActiveTabId, openGridTab, knownWindowIds, gridTabFor, setGrids, setTabs],
+  );
+
+  // Keeps every managed grid in step with its provider's wanted windows
+  // (spec R13, R14), and drops one whose provider is gone once extensions
+  // have settled (R18) — the prune effect then closes its tabs.
+  useEffect(() => {
+    const known = new Set(sessions.flatMap((s) => s.windows.map((w) => w.id)));
+    setGrids((prev) => {
+      let changed = false;
+      const next: Record<string, Grid> = {};
+      for (const [id, g] of Object.entries(prev)) {
+        if (g.providerId === undefined) {
+          next[id] = g;
+          continue;
+        }
+        const provider = managedGrids.find((m) => m.id === g.providerId);
+        if (!provider) {
+          if (extensionsSettled) {
+            changed = true;
+            continue;
+          }
+          next[id] = g;
+          continue;
+        }
+        const r = reconcileManagedGrid(g, provider.windows, known, randomUUID);
+        if (r !== g) changed = true;
+        next[id] = r;
+      }
+      return changed ? next : prev;
+    });
+  }, [managedGrids, extensionsSettled, sessions, setGrids]);
+
   // ---- Menu items -----------------------------------------------------------
 
   const gridTabMenuItems = useCallback(
@@ -507,24 +678,30 @@ export function useGrids(deps: UseGridsDeps) {
       return [
         { label: "Rename Grid…", onClick: () => void renameGrid(gridId) },
         { label: "Add Terminal", onClick: () => void addTerminalToGrid(gridId, tab.id) },
+        { label: "Add Terminal from Project…", onClick: () => void addTerminalFromProject(gridId, tab.id) },
         { label: "Pop Out All", onClick: () => popOutAll(gridId, tab.id) },
       ];
     },
-    [renameGrid, addTerminalToGrid, popOutAll],
+    [renameGrid, addTerminalToGrid, addTerminalFromProject, popOutAll],
   );
 
-  // A terminal tab's "Move to Grid" submenu (R19): the project's grids,
-  // then New Grid.
+  // A terminal tab's "Move to Grid" submenu (spec R4): the grids in its
+  // project's chip, then every other grid under its tab label, then New Grid.
   const moveToGridMenuItem = useCallback(
     (tab: Tab): MenuItem | null => {
       if (!isRealTab(tab)) return null;
       const projectKey = projectKeyForSession(tab.sessionName);
-      const projectGrids = Object.values(grids).filter((g) => g.projectKey === projectKey);
-      const submenu: MenuItem[] = projectGrids.map((g) => ({
-        label: g.name,
+      const all = Object.values(grids);
+      const own = all.filter((g) => chipKeyOf(g) === projectKey);
+      const others = all.filter((g) => chipKeyOf(g) !== projectKey);
+      const item = (g: Grid, label: string): MenuItem => ({
+        label,
         icon: "layout",
         onClick: () => void moveTabsToGrid([tab.id], { gridId: g.id }),
-      }));
+      });
+      const submenu: MenuItem[] = own.map((g) => item(g, g.name));
+      if (own.length > 0 && others.length > 0) submenu.push({ label: "", separator: true, onClick: () => {} });
+      submenu.push(...others.map((g) => item(g, gridLabel(g))));
       if (submenu.length > 0) submenu.push({ label: "", separator: true, onClick: () => {} });
       submenu.push({
         label: "New Grid",
@@ -533,7 +710,7 @@ export function useGrids(deps: UseGridsDeps) {
       });
       return { label: "Move to Grid", onClick: () => {}, submenu };
     },
-    [grids, projectKeyForSession, moveTabsToGrid],
+    [grids, projectKeyForSession, chipKeyOf, gridLabel, moveTabsToGrid],
   );
 
   // The chip's right-click menu (R17, R18).
@@ -554,14 +731,14 @@ export function useGrids(deps: UseGridsDeps) {
   const chipGridDropdownItems = useCallback(
     (editorGroupId: string, chipKey: string): MenuItem[] =>
       Object.values(grids)
-        .filter((g) => g.projectKey === chipKey)
+        .filter((g) => chipKeyOf(g) === chipKey)
         .map((g) => ({
           label: g.name,
           icon: "layout",
           checked: tabsRef.current.some((t) => t.gridId === g.id && t.groupId === editorGroupId),
           onClick: () => openGridTab(g.id, editorGroupId),
         })),
-    [grids, tabsRef, openGridTab],
+    [grids, tabsRef, chipKeyOf, openGridTab],
   );
 
   return {
@@ -569,6 +746,9 @@ export function useGrids(deps: UseGridsDeps) {
     moveTabsToGrid,
     tileAll,
     addTerminalToGrid,
+    addTerminalFromProject,
+    openManagedGrid,
+    gridLabel,
     popOutCell,
     popOutAll,
     closeCell,

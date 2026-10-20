@@ -75,6 +75,7 @@ export const COMMANDS: Command[] = [
   { id: "grid.new", label: "Grid: New Grid", defaultBindings: [], scope: "global" },
   { id: "grid.tileAll", label: "Grid: Tile All Terminals", defaultBindings: [], scope: "global" },
   { id: "grid.addTerminal", label: "Grid: Add Terminal", defaultBindings: [], scope: "global" },
+  { id: "grid.addTerminalFromProject", label: "Grid: Add Terminal from Project…", defaultBindings: [], scope: "global" },
   { id: "grid.focusNextCell", label: "Grid: Focus Next Cell", defaultBindings: [], scope: "global" },
   { id: "grid.focusPreviousCell", label: "Grid: Focus Previous Cell", defaultBindings: [], scope: "global" },
   // tmux's own no-prefix pane switching (bind -n M-Left select-pane -L), only

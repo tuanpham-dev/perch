@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { getManagedGrid, getManagedGridWindow, getWindowDecorations, useExtensionRegistryVersion } from "../extensions";
 import { cellPlacements, evenTracks, type Grid } from "../lib/grids";
 import type { Keybinding } from "../keybindings";
 import type { AppSettings } from "../settings";
@@ -31,6 +32,8 @@ interface Props {
   // ...and its pane holds keyboard focus (see App's `focused`).
   focused: boolean;
   sessions: TerminalSession[];
+  // A cell's title is `project · window` in every grid (spec R6).
+  projectLabelForSession: (sessionName: string) => string;
   onFocusCell: (cellId: string) => void;
   onCloseCell: (cellId: string) => void;
   onPopOutCell: (cellId: string) => void;
@@ -72,6 +75,7 @@ export default function GridView({
   visible,
   focused,
   sessions,
+  projectLabelForSession,
   onFocusCell,
   onCloseCell,
   onPopOutCell,
@@ -83,6 +87,9 @@ export default function GridView({
   terminal,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // Re-render when a decoration provider refresh()es or a managed grid's
+  // window marks change — both are read from the registry per render.
+  useExtensionRegistryVersion();
   const [phone, setPhone] = useState(() => window.matchMedia(PHONE_MQ).matches);
   useEffect(() => {
     const mq = window.matchMedia(PHONE_MQ);
@@ -237,6 +244,10 @@ export default function GridView({
         const session = sessions.find((s) => s.name === cell.sessionName);
         const win = session?.windows.find((w) => w.index === cell.windowIndex);
         const isFocused = cell.id === focusedCellId;
+        const mark = getManagedGridWindow(grid.providerId, cell.windowId);
+        const decorationCtx = win
+          ? { sessionName: cell.sessionName, windowIndex: cell.windowIndex, cwd: win.cwd, command: win.command }
+          : null;
         const classes = [
           "grid-cell",
           isFocused && n > 1 ? "focused" : "",
@@ -274,7 +285,30 @@ export default function GridView({
               }}
             >
               <Icon name="circle-filled" className="grid-cell-focus-icon" />
-              <span className="grid-cell-title">{win?.name ?? `terminal ${cell.windowIndex}`}</span>
+              {mark?.iconUrl ? (
+                <img src={mark.iconUrl} alt="" className="grid-cell-mark" />
+              ) : mark?.icon ? (
+                <Icon name={mark.icon} className="grid-cell-mark" />
+              ) : null}
+              <span className="grid-cell-title">
+                {projectLabelForSession(cell.sessionName)} · {win?.name ?? `terminal ${cell.windowIndex}`}
+              </span>
+              {decorationCtx &&
+                getWindowDecorations(decorationCtx).map(({ provider, decoration }) => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    className={`window-decoration-badge${decoration.className ? ` ${decoration.className}` : ""}`}
+                    title={decoration.tooltip ?? decoration.badge}
+                    tabIndex={-1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      provider.onClick?.((e.currentTarget as HTMLElement).getBoundingClientRect(), decorationCtx);
+                    }}
+                  >
+                    {decoration.badge}
+                  </button>
+                ))}
               <span className="grid-cell-spacer" />
               <button
                 type="button"
@@ -328,6 +362,9 @@ export default function GridView({
         );
       })}
       {sashes}
+      {n === 0 && (
+        <div className="grid-empty">{getManagedGrid(grid.providerId)?.emptyText || "No terminals in this grid."}</div>
+      )}
     </div>
   );
 }

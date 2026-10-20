@@ -37,6 +37,7 @@ import {
   setGetCommandsHandler,
   setKillSessionHandler,
   setDialogHandlers,
+  setOpenManagedGridHandler,
   setOpenSessionWindowHandler,
   reloadPendingIds,
   resolveWindowActionIcon,
@@ -621,6 +622,7 @@ export default function App() {
     extensionsSettled,
     windowActions: extWindowActions,
     appOverlays: extAppOverlays,
+    managedGrids: extManagedGrids,
   } = useExtensionRegistry();
 
   // Real phone/tablet detection for app-global overlays (registerAppOverlay),
@@ -1011,6 +1013,8 @@ export default function App() {
     moveTabsToGrid,
     tileAll,
     addTerminalToGrid,
+    addTerminalFromProject,
+    openManagedGrid,
     popOutCell,
     closeCell,
     swapGridCells,
@@ -1036,10 +1040,26 @@ export default function App() {
     focusGroup,
     removeTabsForMove,
     projectKeyForSession,
+    projectLabelForSession,
     refresh,
     promptDialog,
+    pickDialog,
+    managedGrids: extManagedGrids,
+    extensionsSettled,
     showError,
   });
+  // A managed grid's tab shows its provider's icon.
+  const gridTabIcon = useCallback(
+    (tab: Tab): string | undefined => {
+      const providerId = tab.gridId !== undefined ? grids[tab.gridId]?.providerId : undefined;
+      return providerId === undefined ? undefined : extManagedGrids.find((m) => m.id === providerId)?.icon;
+    },
+    [grids, extManagedGrids],
+  );
+  useEffect(() => {
+    setOpenManagedGridHandler(openManagedGrid);
+    return () => setOpenManagedGridHandler(null);
+  }, [openManagedGrid]);
   const moveTabToNewWindow = useCallback(
     (tabId: string) => {
       const tab = tabsRef.current.find((t) => t.id === tabId);
@@ -2063,6 +2083,9 @@ export default function App() {
       "grid.addTerminal": () => {
         if (activeTab?.gridId !== undefined) void addTerminalToGrid(activeTab.gridId, activeTab.id);
       },
+      "grid.addTerminalFromProject": () => {
+        if (activeTab?.gridId !== undefined) void addTerminalFromProject(activeTab.gridId, activeTab.id);
+      },
       "grid.focusNextCell": () => {
         if (activeTab?.gridId !== undefined) focusAdjacentCell(activeTab.id, 1);
       },
@@ -2175,6 +2198,7 @@ export default function App() {
       newGrid,
       tileAll,
       addTerminalToGrid,
+      addTerminalFromProject,
       focusAdjacentCell,
       focusCellInDirection,
       toggleGridZoom,
@@ -2834,6 +2858,7 @@ export default function App() {
           activeGroupId={activeGroupId}
           groupActive={groupActive}
           label={tabLabel}
+          gridTabIcon={gridTabIcon}
           activity={tabActivityWithGrids}
           onActivate={setActiveTabId}
           onClose={closeTab}
@@ -2935,13 +2960,14 @@ export default function App() {
                 visible={visible}
                 focused={focused}
                 sessions={sessions}
+                projectLabelForSession={projectLabelForSession}
                 onFocusCell={(cellId) => focusCell(tab.id, cellId)}
                 onCloseCell={(cellId) => closeCell(grid.id, cellId)}
                 onPopOutCell={(cellId) => popOutCell(grid.id, cellId, tab.id)}
                 onToggleZoom={(cellId) => toggleGridZoom(grid.id, cellId)}
                 onSwapCells={(a, b) => swapGridCells(grid.id, a, b)}
                 onSetTracks={(axis, sizes) => setGridTracks(grid.id, axis, sizes)}
-                onCellExit={(cellId) => closeCell(grid.id, cellId)}
+                onCellExit={(cellId) => closeCell(grid.id, cellId, false)}
                 onOutput={() => markGridOutput(grid.id)}
                 terminal={{
                   settings: effectiveSettings,

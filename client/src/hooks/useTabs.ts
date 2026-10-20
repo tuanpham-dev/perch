@@ -25,7 +25,7 @@ import {
   type SplitNode,
 } from "../lib/splits";
 import { projectName } from "../lib/projects";
-import { GRIDS_STORAGE_KEY, loadStoredGrids, reconcileGridCells, type Grid } from "../lib/grids";
+import { GRIDS_STORAGE_KEY, gridChipKey, loadStoredGrids, reconcileGridCells, type Grid } from "../lib/grids";
 import type { AppSettings } from "../settings";
 import { tabStorage } from "../lib/detachedWindows";
 import type { ExtensionInfo, RegistrySourceResult, Tab, TerminalSession } from "../types";
@@ -1007,6 +1007,26 @@ export function useTabs(
     });
   }, [extFileViewers]);
 
+  // Folder-derived display name for a session's project — the label every
+  // surface (tabs, chips, quick switcher) uses instead of the session
+  // name; pathless sessions keep their name. projectKeyForSession is the
+  // grouping counterpart: same-folder sessions share a key, so a merged
+  // project gets one tab-group chip (see useTabGroups).
+  const projectLabelForSession = useCallback(
+    (name: string): string => {
+      const s = sessions.find((x) => x.name === name);
+      return s?.path ? projectName(s.path) : name;
+    },
+    [sessions],
+  );
+  const projectKeyForSession = useCallback(
+    (name: string): string => {
+      const s = sessions.find((x) => x.name === name);
+      return s?.path || name;
+    },
+    [sessions],
+  );
+
   // Grid cells follow out-of-band renames/renumbers by stable id, and a
   // cell whose window is gone (shell exited, window killed elsewhere)
   // leaves its grid; an emptied grid is deleted, and the prune effect below
@@ -1040,30 +1060,45 @@ export function useTabs(
   }, [tabs, grids, dropTabs]);
 
   // Per grid tab: the focused cell must be a cell of its grid (first cell
-  // otherwise), and its origin session — what puts the tab in its
-  // project's chip — follows the grid's first cell, so the tab stays
-  // grouped when the session it was created from goes away.
+  // otherwise), and its origin session — what puts the tab in a chip —
+  // follows the grid's cells (spec R2): a cell of the grid's one project, or
+  // none at all when the cells span several projects or the grid is managed,
+  // which puts the tab outside chips. normalizeWithinGroups then regroups it.
   useEffect(() => {
     setTabs((prev) => {
       let changed = false;
       const next = prev.map((tab) => {
         if (tab.gridId === undefined) return tab;
         const grid = grids[tab.gridId];
-        if (!grid || grid.cells.length === 0) return tab;
+        if (!grid) return tab;
+        const chip = gridChipKey(grid, projectKeyForSession);
         const first = grid.cells[0];
-        const focusOk = grid.cells.some((c) => c.id === tab.gridFocusedCellId);
-        const originOk = grid.cells.some((c) => c.sessionName === tab.originSessionName);
+        const focusOk = !first || grid.cells.some((c) => c.id === tab.gridFocusedCellId);
+        const inChip = (sessionName: string) => projectKeyForSession(sessionName) === chip;
+        const originOk =
+          chip === null || !first
+            ? chip === null
+              ? tab.originSessionName === undefined
+              : true
+            : grid.cells.some((c) => c.sessionName === tab.originSessionName) &&
+              inChip(tab.originSessionName ?? "");
         if (focusOk && originOk) return tab;
         changed = true;
-        return {
-          ...tab,
-          gridFocusedCellId: focusOk ? tab.gridFocusedCellId : first.id,
-          ...(originOk ? {} : { originSessionName: first.sessionName, originSessionId: first.sessionId }),
-        };
+        let out: Tab = { ...tab, gridFocusedCellId: focusOk ? tab.gridFocusedCellId : first?.id };
+        if (!originOk) {
+          if (chip === null) {
+            const { originSessionName: _n, originSessionId: _i, ...rest } = out;
+            out = rest;
+          } else {
+            const home = grid.cells.find((c) => inChip(c.sessionName)) ?? first;
+            out = { ...out, originSessionName: home.sessionName, originSessionId: home.sessionId };
+          }
+        }
+        return out;
       });
       return changed ? next : prev;
     });
-  }, [grids, tabs]);
+  }, [grids, tabs, projectKeyForSession]);
 
   // A viewer tab's origin session (see openExtViewerTab) can go away —
   // killed, or its last real tab closed independently of the viewer tab.
@@ -1152,26 +1187,6 @@ export function useTabs(
     });
   }, [activeSessionName, activeWindow, filesRootDir]);
 
-  // Folder-derived display name for a session's project — the label every
-  // surface (tabs, chips, quick switcher) uses instead of the session
-  // name; pathless sessions keep their name. projectKeyForSession is the
-  // grouping counterpart: same-folder sessions share a key, so a merged
-  // project gets one tab-group chip (see useTabGroups).
-  const projectLabelForSession = useCallback(
-    (name: string): string => {
-      const s = sessions.find((x) => x.name === name);
-      return s?.path ? projectName(s.path) : name;
-    },
-    [sessions],
-  );
-  const projectKeyForSession = useCallback(
-    (name: string): string => {
-      const s = sessions.find((x) => x.name === name);
-      return s?.path || name;
-    },
-    [sessions],
-  );
-
   const tabLabel = useCallback(
     (tab: Tab): string => {
       if (tab.settingsView) return "Settings";
@@ -1187,7 +1202,8 @@ export function useTabs(
       }
       if (tab.gridId !== undefined) {
         const grid = grids[tab.gridId];
-        const session = grid?.cells[0]?.sessionName ?? tab.originSessionName ?? "";
+        if (grid && gridChipKey(grid, projectKeyForSession) === null) return grid.name;
+        const session = tab.originSessionName ?? grid?.cells[0]?.sessionName ?? "";
         return `${projectLabelForSession(session)} · ${grid?.name ?? "Grid"}`;
       }
       if (tab.extViewerTitle !== undefined) return tab.extViewerTitle;
@@ -1200,7 +1216,7 @@ export function useTabs(
       const win = session?.windows.find((w) => w.index === tab.windowIndex);
       return `${projectLabelForSession(tab.sessionName)} · ${win?.name ?? `terminal ${tab.windowIndex}`}`;
     },
-    [sessions, extensions, registryCatalog, projectLabelForSession, grids],
+    [sessions, extensions, registryCatalog, projectLabelForSession, projectKeyForSession, grids],
   );
 
   // Suppressed on the active tab — you're already looking at it, a dot
