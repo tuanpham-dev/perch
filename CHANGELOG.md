@@ -3,6 +3,15 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.9.1 - 2026-10-20
+
+- **A window is no longer taken for Claude Code because a program in it
+  started `claude`.** A remote desktop run in a terminal starts Chrome, and
+  Chrome starts `claude --chrome-native-host` for the Claude in Chrome
+  extension, which labelled that terminal as running Claude Code. Only an
+  agent run from the window itself - in the foreground, through a wrapper, or
+  left running in the background - counts now (Linux and macOS).
+
 ## 0.9.0 - 2026-10-20
 
 - **Every extension gets its own storage.** A private SQLite database per
