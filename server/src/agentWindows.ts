@@ -118,6 +118,24 @@ function entry(
   };
 }
 
+// Whether a process below the window's shell is something run FROM the
+// window: in the terminal's foreground job, in the shell's own group, or in a
+// job the shell started (an agent left running in the background). Anything
+// else is a process some program in the window started on its own - say, a
+// desktop the window runs, whose Chrome starts `claude --chrome-native-host`
+// for the Claude in Chrome extension. That one shares the window's terminal
+// and session but sits in the desktop's process group. Without group facts
+// (Windows), or when a group's leader has exited, every descendant counts,
+// as it always did.
+export function runFromWindow(pid: number, shellPid: number, map: Map<number, ProcInfo>): boolean {
+  const proc = map.get(pid);
+  const shell = map.get(shellPid);
+  if (proc?.pgid === undefined || shell?.tpgid === undefined) return true;
+  if (proc.pgid === shell.tpgid || proc.pgid === shellPid) return true;
+  const leader = map.get(proc.pgid);
+  return !leader || leader.ppid === shellPid;
+}
+
 // Breadth-first, so an agent that started another agent reports the outer
 // one — the one the window is "running".
 function firstDescendantAgent(
@@ -128,7 +146,7 @@ function firstDescendantAgent(
   const matches = findDescendants(rootPid, map, (comm) => byProgram.has(comm));
   for (const pid of matches) {
     const agent = byProgram.get(map.get(pid)?.comm ?? "");
-    if (agent) return { agent, pid };
+    if (agent && runFromWindow(pid, rootPid, map)) return { agent, pid };
   }
   return null;
 }

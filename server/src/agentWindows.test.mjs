@@ -107,3 +107,42 @@ test("an agent started from inside another reports the outer one", () => {
   assert.equal(found.agentId, CLAUDE.id);
   assert.equal(found.agentPid, 101);
 });
+
+// pid -> { ppid, comm, pgid, tpgid }: the process-group facts Linux and macOS give.
+const grouped = (entries) => new Map(entries.map(([pid, ppid, comm, pgid, tpgid = -1]) => [pid, { ppid, comm, pgid, tpgid }]));
+
+test("an agent a program in the window started on its own isn't the window's agent", () => {
+  // zsh runs qr-host (a remote desktop) in the foreground; the desktop's
+  // Chrome starts claude --chrome-native-host in the desktop's own group.
+  const map = grouped([
+    [100, 1, "zsh", 100, 200],
+    [200, 100, "qr-host", 200, 200],
+    [300, 200, "sh", 300, 200],
+    [310, 300, "xfce4-session", 300, 200],
+    [320, 310, "chrome", 300, 200],
+    [330, 320, "claude", 300, 200],
+  ]);
+  assert.deepEqual(resolveAgentWindows([window({ command: "qr-host" })], [CLAUDE], map), []);
+});
+
+test("an agent in the terminal's foreground job, under a wrapper, is the window's agent", () => {
+  const map = grouped([
+    [100, 1, "zsh", 100, 200],
+    [200, 100, "my-wrapper", 200, 200],
+    [210, 200, "claude", 200, 200],
+  ]);
+  const [found] = resolveAgentWindows([window({ command: "my-wrapper" })], [CLAUDE], map);
+  assert.equal(found.agentPid, 210);
+  assert.equal(found.matchedBy, "descendant");
+});
+
+test("an agent left running as a background job of the shell is still the window's agent", () => {
+  // The shell is back at its prompt (it is the foreground group); claude
+  // runs in a job the shell started.
+  const map = grouped([
+    [100, 1, "zsh", 100, 100],
+    [200, 100, "claude", 200, 100],
+  ]);
+  const [found] = resolveAgentWindows([window({ command: "zsh" })], [CLAUDE], map);
+  assert.equal(found.agentPid, 200);
+});

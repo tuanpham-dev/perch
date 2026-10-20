@@ -4,8 +4,10 @@ import { parsePsOutput } from "./processes.js";
 
 describe("process and port listings on macOS and Windows", () => {
   it("reads ps output into a process map", () => {
-    const map = parsePsOutput("    1     0 /sbin/launchd\n  812     1 /Applications/iTerm.app/Contents/MacOS/iTerm2\n  900   812 -zsh\n");
-    expect(map.get(900)).toEqual({ ppid: 812, comm: "zsh" });
+    const map = parsePsOutput(
+      "    1     0     1     0 /sbin/launchd\n  812     1   812     0 /Applications/iTerm.app/Contents/MacOS/iTerm2\n  900   812   900   950 -zsh\n",
+    );
+    expect(map.get(900)).toEqual({ ppid: 812, pgid: 900, tpgid: 950, comm: "zsh" });
     expect(map.get(812)?.comm).toBe("iTerm2");
   });
 

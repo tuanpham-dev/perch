@@ -8,6 +8,11 @@ import { parseProcessCsv } from "perch-mux/windows";
 export interface ProcInfo {
   ppid: number;
   comm: string;
+  // The process group, and the foreground process group of its controlling
+  // terminal (0 or -1 when it has none). Linux and macOS only; absent where
+  // the host doesn't say (Windows).
+  pgid?: number;
+  tpgid?: number;
 }
 
 function run(cmd: string, args: string[]): Promise<string> {
@@ -18,12 +23,18 @@ function run(cmd: string, args: string[]): Promise<string> {
   });
 }
 
-/** `ps -axo pid=,ppid=,comm=` output (macOS), as a process map. */
+/** `ps -axo pid=,ppid=,pgid=,tpgid=,comm=` output (macOS), as a process map. */
 export function parsePsOutput(stdout: string): Map<number, ProcInfo> {
   const map = new Map<number, ProcInfo>();
   for (const line of stdout.split("\n")) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
-    if (m) map.set(Number(m[1]), { ppid: Number(m[2]), comm: m[3]!.trim().split("/").pop()!.replace(/^-/, "") });
+    const m = /^\s*(\d+)\s+(\d+)\s+(-?\d+)\s+(-?\d+)\s+(.+)$/.exec(line);
+    if (!m) continue;
+    map.set(Number(m[1]), {
+      ppid: Number(m[2]),
+      pgid: Number(m[3]),
+      tpgid: Number(m[4]),
+      comm: m[5]!.trim().split("/").pop()!.replace(/^-/, ""),
+    });
   }
   return map;
 }
@@ -32,7 +43,7 @@ export function parsePsOutput(stdout: string): Map<number, ProcInfo> {
 // the CIM process list on Windows. Callers treat an empty map as "unknown"
 // (and fall back to the keystroke-injection path, for the editor).
 export async function buildProcessMap(): Promise<Map<number, ProcInfo>> {
-  if (process.platform === "darwin") return parsePsOutput(await run("ps", ["-axo", "pid=,ppid=,comm="]));
+  if (process.platform === "darwin") return parsePsOutput(await run("ps", ["-axo", "pid=,ppid=,pgid=,tpgid=,comm="]));
   if (process.platform === "win32") {
     const csv = await run("powershell.exe", [
       "-NoProfile", "-NonInteractive", "-Command",
@@ -53,11 +64,12 @@ export async function buildProcessMap(): Promise<Map<number, ProcInfo>> {
       .map(async (name) => {
         try {
           const raw = await readFile(`/proc/${name}/stat`, "utf8");
-          // Format: "pid (comm) state ppid ...". comm is parenthesized and
-          // may itself contain spaces/parens, so match up to the last ")".
-          const m = raw.match(/^\d+\s+\((.*)\)\s+\S+\s+(\d+)/);
+          // Format: "pid (comm) state ppid pgrp session tty_nr tpgid ...".
+          // comm is parenthesized and may itself contain spaces/parens, so
+          // match up to the last ")".
+          const m = raw.match(/^\d+\s+\((.*)\)\s+\S+\s+(\d+)\s+(-?\d+)\s+-?\d+\s+-?\d+\s+(-?\d+)/);
           if (!m) return;
-          map.set(Number(name), { comm: m[1], ppid: Number(m[2]) });
+          map.set(Number(name), { comm: m[1], ppid: Number(m[2]), pgid: Number(m[3]), tpgid: Number(m[4]) });
         } catch {
           // Process exited between readdir and read; ignore.
         }
