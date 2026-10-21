@@ -5505,6 +5505,25 @@ body.scrollbar-dragging {
   font-size: 13px;
 }
 
+/* A settings save the server refused (useSettingsSync's syncError). */
+.sync-error-banner {
+  border-color: var(--error);
+}
+
+.update-banner-action {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.update-banner-action:hover {
+  background: var(--hover);
+}
+
 .update-banner a {
   color: var(--accent);
   white-space: nowrap;

@@ -15,6 +15,7 @@ process.env.PERCH_CONFIG_DIR = path.join(configHome, "perch");
 
 const {
   clearExtensionSecrets,
+  mergeSettingsDoc,
   listExtensionSecretNames,
   readExtensionSecret,
   readSettingsDoc,
@@ -101,5 +102,31 @@ describe("server-owned keys are unreachable from a document write", () => {
     await writeAiSecret("anthropic", "sk-real");
     await writeSettingsDoc({ aiSecrets: { anthropic: "sk-smuggled", openai: "sk-new" } });
     expect((await readSettingsDoc()).aiSecrets).toEqual({ anthropic: "sk-real" });
+  });
+});
+
+describe("concurrent writes", () => {
+  it("keeps every change when many patches and secret writes land together", async () => {
+    await writeSettingsDoc({ settings: { base: true } });
+    await Promise.all([
+      ...Array.from({ length: 20 }, (_, i) => mergeSettingsDoc({ settings: { [`k${i}`]: i } })),
+      writeExtensionSecret("jira", "apiToken", "tok"),
+      writeAiSecret("anthropic", "sk-1"),
+    ]);
+    const doc = await readSettingsDoc();
+    const settings = doc.settings as Record<string, unknown>;
+    expect(settings.base).toBe(true);
+    for (let i = 0; i < 20; i++) expect(settings[`k${i}`]).toBe(i);
+    expect(await readExtensionSecret("jira", "apiToken")).toBe("tok");
+  });
+
+  it("accepts a document of several hundred KB", async () => {
+    const big = { settings: { snippets: Array.from({ length: 3000 }, (_, i) => ({ id: `s${i}`, text: "x".repeat(100) })) } };
+    await writeSettingsDoc(big);
+    expect(((await readSettingsDoc()).settings as { snippets: unknown[] }).snippets).toHaveLength(3000);
+  });
+
+  it("refuses a document over the cap", async () => {
+    await expect(writeSettingsDoc({ settings: { blob: "x".repeat(1100 * 1024) } })).rejects.toThrow(/too large/);
   });
 });

@@ -25,12 +25,27 @@ import { configDir } from "./configDir.js";
 //                    host.secrets (see extensions.ts). Core serves no route
 //                    for these: an extension that wants a browser-facing
 //                    field defines its own route on its own router.
-const MAX_BYTES = 64 * 1024;
+// Snippets, projects, keybindings and every extension's settings share this
+// document; 64 KB was outgrown in practice, and a save over the cap was lost.
+export const SETTINGS_MAX_BYTES = 1024 * 1024;
+const MAX_BYTES = SETTINGS_MAX_BYTES;
 const AI_SECRETS_KEY = "aiSecrets";
 const EXTENSION_SECRETS_KEY = "extensionSecrets";
 const SERVER_OWNED_KEYS = [AI_SECRETS_KEY, EXTENSION_SECRETS_KEY] as const;
 
 const settingsPath = path.join(configDir, "settings.json");
+
+// Every read-modify-write of the document runs one at a time: two browsers
+// saving together, or an extension storing a secret during a client save,
+// would otherwise both read the old document and the second write would
+// drop the first one's change (or collide on the temp file).
+let queue: Promise<unknown> = Promise.resolve();
+function serialized<T>(work: () => Promise<T>): Promise<T> {
+  const run = queue.then(work, work);
+  queue = run.catch(() => {});
+  return run;
+}
+let tmpSeq = 0;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -69,12 +84,16 @@ async function persist(doc: Record<string, unknown>): Promise<void> {
   // keys, so it must not be world-readable. A pre-existing 0644 file is
   // replaced (not edited) by the rename, so the first write tightens it —
   // and it cannot hold a secret before a write.
-  const tmp = `${settingsPath}.${process.pid}.tmp`;
+  const tmp = `${settingsPath}.${process.pid}.${++tmpSeq}.tmp`;
   await writeFile(tmp, json, { mode: 0o600 });
   await rename(tmp, settingsPath);
 }
 
-export async function writeSettingsDoc(doc: unknown): Promise<void> {
+export function writeSettingsDoc(doc: unknown): Promise<void> {
+  return serialized(() => replaceDoc(doc));
+}
+
+async function replaceDoc(doc: unknown): Promise<void> {
   if (!isPlainObject(doc)) throw new Error("settings must be a JSON object");
   // Every server-owned key is restored from disk rather than taken from the
   // caller, so an incoming document can neither drop the stored values nor
@@ -104,14 +123,16 @@ export async function readAiSecrets(): Promise<Record<string, string>> {
 // Sets or (with a null/empty key) clears one provider's key. The one writer
 // that may change aiSecrets, so it persists directly instead of going through
 // writeSettingsDoc, which would restore the old value over it.
-export async function writeAiSecret(provider: string, key: string | null): Promise<void> {
-  const doc = await readSettingsDoc();
-  const stored = doc[AI_SECRETS_KEY];
-  const secrets: Record<string, unknown> = isPlainObject(stored) ? { ...stored } : {};
-  if (key && key.trim()) secrets[provider] = key.trim();
-  else delete secrets[provider];
-  doc[AI_SECRETS_KEY] = secrets;
-  await persist(doc);
+export function writeAiSecret(provider: string, key: string | null): Promise<void> {
+  return serialized(async () => {
+    const doc = await readSettingsDoc();
+    const stored = doc[AI_SECRETS_KEY];
+    const secrets: Record<string, unknown> = isPlainObject(stored) ? { ...stored } : {};
+    if (key && key.trim()) secrets[provider] = key.trim();
+    else delete secrets[provider];
+    doc[AI_SECRETS_KEY] = secrets;
+    await persist(doc);
+  });
 }
 
 // ---- Per-extension secrets ----
@@ -158,32 +179,40 @@ export async function listExtensionSecretNames(extId: string): Promise<string[]>
 // Sets or (with a null/blank value) clears one name. Clearing the last name
 // drops the extension's namespace object too, so an uninstall-less extension
 // that never stores anything doesn't leave `{}` behind forever.
-export async function writeExtensionSecret(extId: string, name: string, value: string | null): Promise<void> {
-  assertSecretName(name);
-  const doc = await readSettingsDoc();
-  const all = doc[EXTENSION_SECRETS_KEY];
-  const next: Record<string, unknown> = isPlainObject(all) ? { ...all } : {};
-  const own = { ...extensionSecretsFor(doc, extId) };
-  if (value && value.trim()) own[name] = value.trim();
-  else delete own[name];
-  if (Object.keys(own).length > 0) next[extId] = own;
-  else delete next[extId];
-  if (Object.keys(next).length > 0) doc[EXTENSION_SECRETS_KEY] = next;
-  else delete doc[EXTENSION_SECRETS_KEY];
-  await persist(doc);
+export function writeExtensionSecret(extId: string, name: string, value: string | null): Promise<void> {
+  try {
+    assertSecretName(name);
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  return serialized(async () => {
+    const doc = await readSettingsDoc();
+    const all = doc[EXTENSION_SECRETS_KEY];
+    const next: Record<string, unknown> = isPlainObject(all) ? { ...all } : {};
+    const own = { ...extensionSecretsFor(doc, extId) };
+    if (value && value.trim()) own[name] = value.trim();
+    else delete own[name];
+    if (Object.keys(own).length > 0) next[extId] = own;
+    else delete next[extId];
+    if (Object.keys(next).length > 0) doc[EXTENSION_SECRETS_KEY] = next;
+    else delete doc[EXTENSION_SECRETS_KEY];
+    await persist(doc);
+  });
 }
 
 // Drops one extension's whole namespace — called on uninstall, never on
 // disable (a disable/enable cycle must not cost the user their credentials).
-export async function clearExtensionSecrets(extId: string): Promise<void> {
-  const doc = await readSettingsDoc();
-  const all = doc[EXTENSION_SECRETS_KEY];
-  if (!isPlainObject(all) || !(extId in all)) return;
-  const next = { ...all };
-  delete next[extId];
-  if (Object.keys(next).length > 0) doc[EXTENSION_SECRETS_KEY] = next;
-  else delete doc[EXTENSION_SECRETS_KEY];
-  await persist(doc);
+export function clearExtensionSecrets(extId: string): Promise<void> {
+  return serialized(async () => {
+    const doc = await readSettingsDoc();
+    const all = doc[EXTENSION_SECRETS_KEY];
+    if (!isPlainObject(all) || !(extId in all)) return;
+    const next = { ...all };
+    delete next[extId];
+    if (Object.keys(next).length > 0) doc[EXTENSION_SECRETS_KEY] = next;
+    else delete doc[EXTENSION_SECRETS_KEY];
+    await persist(doc);
+  });
 }
 
 // Recurses into plain-object values on both sides so a patch only has to
@@ -209,8 +238,7 @@ function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>
 // (an extension settings panel, a future integration, or the client's own
 // write-back) send just the keys it's changing without first having to
 // fetch-merge-PUT the whole document itself.
-export async function mergeSettingsDoc(patch: unknown): Promise<void> {
-  if (!isPlainObject(patch)) throw new Error("settings must be a JSON object");
-  const current = await readSettingsDoc();
-  await writeSettingsDoc(deepMerge(current, patch));
+export function mergeSettingsDoc(patch: unknown): Promise<void> {
+  if (!isPlainObject(patch)) return Promise.reject(new Error("settings must be a JSON object"));
+  return serialized(async () => replaceDoc(deepMerge(await readSettingsDoc(), patch)));
 }

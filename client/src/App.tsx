@@ -686,6 +686,9 @@ export default function App() {
     setStatusBarLayout: setSyncedStatusBarLayout,
     sidebarPanels: syncedSidebarPanels,
     setSidebarPanels: setSyncedSidebarPanels,
+    syncError: settingsSyncError,
+    retrySync: retrySettingsSync,
+    dismissSyncError: dismissSettingsSyncError,
   } = useSettingsSync(extCommands);
 
   // Both sidebars' tabs, their per-side order, and which tab each section
@@ -3552,6 +3555,17 @@ export default function App() {
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>
           {error}
+        </div>
+      )}
+      {settingsSyncError && (
+        <div className="update-banner sync-error-banner" role="alert">
+          <span>Settings didn't sync: {settingsSyncError}</span>
+          <button className="update-banner-action" onClick={retrySettingsSync}>
+            Retry
+          </button>
+          <button className="open-url-banner-dismiss" aria-label="Dismiss" onClick={dismissSettingsSyncError}>
+            <Icon name="close" />
+          </button>
         </div>
       )}
       {updateBanner && (

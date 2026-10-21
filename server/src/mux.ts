@@ -122,14 +122,20 @@ async function listSessions(): Promise<MuxSession[]> {
             currentIndex: s.currentIndex,
             windows: windows.map(toWindow),
           };
-        } catch {
-          return null;
+        } catch (err) {
+          // Gone between the two requests: left out. Anything else (the
+          // daemon dropping the connection) fails the whole listing.
+          if ((err as { code?: string }).code === "NO_SESSION") return null;
+          throw err;
         }
       }),
     );
     return listed.filter((s): s is MuxSession => s !== null);
-  } catch {
-    return [];
+  } catch (err) {
+    // As above: a listing that failed partway is an error, never an empty
+    // list (which would close every terminal tab, and read to extensions as
+    // every agent having gone).
+    throw new Error(`The terminal daemon didn't list its sessions: ${(err as Error).message}`);
   } finally {
     conn.close();
   }

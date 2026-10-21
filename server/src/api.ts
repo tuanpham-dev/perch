@@ -1,7 +1,7 @@
 import { listEngines } from "./multiplexer.js";
 import { clearLog, listChannels, readLog } from "./logChannels.js";
-import { createWriteStream } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -116,6 +116,7 @@ import {
 } from "./terminals.js";
 import { writeThemePaint } from "./themePaint.js";
 import { writeZip } from "./zip.js";
+import { writeStreamAtomically } from "./atomicWrite.js";
 
 export const api = Router();
 
@@ -1558,20 +1559,15 @@ api.post("/upload", async (req, res) => {
     return;
   }
 
-  const out = createWriteStream(target);
-  req.pipe(out);
-  out.on("finish", () => {
+  // Through a temp file: an overwrite that fails partway (a save over a
+  // dropped connection) leaves the original file as it was.
+  const length = Number(req.headers["content-length"]);
+  try {
+    await writeStreamAtomically(target, req, Number.isFinite(length) && length >= 0 ? length : undefined);
     res.status(201).json({ path: target });
-  });
-  out.on("error", (err) => {
-    unlink(target).catch(() => {});
-    res.status(500).json({ error: errMessage(err) });
-  });
-  req.on("error", (err) => {
-    out.destroy();
-    unlink(target).catch(() => {});
+  } catch (err) {
     if (!res.headersSent) res.status(500).json({ error: errMessage(err) });
-  });
+  }
 });
 
 // Web-push notifications (plans/codeman-mobile-features.md Phase 4). Bells

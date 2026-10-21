@@ -100,7 +100,7 @@ function truncateLine(lineText, submatches) {
   const sliced = prefix + lineText.slice(start, end) + suffix;
   const shift = start - prefix.length;
   const newSubmatches = submatches
-    .map((sm) => ({ start: sm.start - shift, end: sm.end - shift }))
+    .map((sm) => ({ ...sm, start: sm.start - shift, end: sm.end - shift }))
     .filter((sm) => sm.start >= 0 && sm.end <= sliced.length);
   return { lineText: sliced, submatches: newSubmatches };
 }
@@ -119,9 +119,31 @@ function trimLeadingWhitespace(lineText, submatches) {
     // literal space) has nothing left to highlight post-trim — drop it
     // rather than show a negative-offset highlight.
     submatches: submatches
-      .map((sm) => ({ start: sm.start - trimLen, end: sm.end - trimLen }))
+      .map((sm) => ({ ...sm, start: sm.start - trimLen, end: sm.end - trimLen }))
       .filter((sm) => sm.start >= 0),
   };
+}
+
+// rg's JSON gives text as `text` when it is valid UTF-8 and as base64
+// `bytes` when it isn't (a Latin-1 file). The bytes are shown as Latin-1, one
+// character per byte, which keeps rg's byte offsets usable as-is.
+function rgText(field) {
+  if (!field) return { text: "", utf8: true };
+  if (typeof field.text === "string") return { text: field.text, utf8: true };
+  if (typeof field.bytes === "string") return { text: Buffer.from(field.bytes, "base64").toString("latin1"), utf8: false };
+  return { text: "", utf8: true };
+}
+
+// rg's submatch offsets count UTF-8 bytes; the page and replace count
+// characters (UTF-16 code units, as JS strings do).
+function byteToCharOffset(lineBuf, byteOffset) {
+  return lineBuf.subarray(0, byteOffset).toString("utf8").length;
+}
+
+// Every submatch keeps `raw`: its start in the untrimmed, untruncated line,
+// which is what replace matches against. `start`/`end` are for display.
+function withRaw(submatches) {
+  return submatches.map((sm) => ({ ...sm, raw: sm.start }));
 }
 
 function toResultArray(byFile) {
@@ -133,7 +155,7 @@ function toResultArray(byFile) {
 // ---- ripgrep search ----
 
 function searchWithRg(cwd, opts) {
-  const { query, isRegex, caseSensitive, wholeWord, include, exclude, maxResults, respectGitignore } = opts;
+  const { query, isRegex, caseSensitive, wholeWord, include, exclude, maxResults, respectGitignore, signal } = opts;
   const args = ["--json"];
   if (!respectGitignore) args.push("--no-ignore");
   args.push(caseSensitive ? "-s" : "-i");
@@ -145,6 +167,8 @@ function searchWithRg(cwd, opts) {
 
   return new Promise((resolve, reject) => {
     const child = spawn("rg", args, { cwd });
+    // A search the page gave up on (a newer keystroke, a closed panel) stops.
+    signal?.addEventListener("abort", () => child.kill(), { once: true });
     const rl = createInterface({ input: child.stdout });
     const byFile = new Map();
     let total = 0;
@@ -165,17 +189,29 @@ function searchWithRg(cwd, opts) {
         return;
       }
       if (evt.type !== "match") return;
-      const file = evt.data.path.text.replace(/^\.\//, "");
-      const rawLineText = evt.data.lines.text.replace(/\n$/, "");
-      const submatchesRaw = evt.data.submatches
-        .slice(0, MAX_SUBMATCHES_PER_LINE)
-        .map((sm) => ({ start: sm.start, end: sm.end }));
+      try {
+        const file = rgText(evt.data.path).text.replace(/^\.\//, "");
+        const lineField = rgText(evt.data.lines);
+        const rawLineText = lineField.text.replace(/\r?\n$/, "");
+        const lineBuf = lineField.utf8 ? Buffer.from(lineField.text, "utf8") : null;
+        const toChar = (b) => (lineBuf ? byteToCharOffset(lineBuf, b) : b);
+        const submatchesRaw = withRaw(
+          evt.data.submatches
+            .slice(0, MAX_SUBMATCHES_PER_LINE)
+            .map((sm) => ({ start: toChar(sm.start), end: toChar(sm.end) })),
+        );
+        addMatch(file, evt.data.line_number, rawLineText, submatchesRaw);
+      } catch {
+        // One odd line never takes the search (or the server) down.
+      }
+    });
+    const addMatch = (file, lineNumber, rawLineText, submatchesRaw) => {
       const trimmed = trimLeadingWhitespace(rawLineText, submatchesRaw);
       const { lineText, submatches } = truncateLine(trimmed.lineText, trimmed.submatches);
       if (submatches.length === 0) return;
       if (!byFile.has(file)) byFile.set(file, []);
       byFile.get(file).push({
-        line: evt.data.line_number,
+        line: lineNumber,
         column: (submatches[0]?.start ?? 0) + 1,
         lineText,
         submatches,
@@ -185,7 +221,7 @@ function searchWithRg(cwd, opts) {
         limitHit = true;
         child.kill();
       }
-    });
+    };
     child.stderr.on("data", (d) => {
       stderr += d.toString();
     });
@@ -214,7 +250,7 @@ function searchWithRg(cwd, opts) {
 // unambiguous since line numbers are always digits.
 
 export function searchWithGrep(cwd, opts) {
-  const { query, isRegex, caseSensitive, wholeWord, include, exclude, maxResults } = opts;
+  const { query, isRegex, caseSensitive, wholeWord, include, exclude, maxResults, signal } = opts;
   const args = ["-r", "-n", "-I", "--null"];
   if (!caseSensitive) args.push("-i");
   if (wholeWord) args.push("-w");
@@ -242,6 +278,7 @@ export function searchWithGrep(cwd, opts) {
 
   return new Promise((resolve, reject) => {
     const child = spawn("grep", args, { cwd });
+    signal?.addEventListener("abort", () => child.kill(), { once: true });
     const rl = createInterface({ input: child.stdout });
     const byFile = new Map();
     let total = 0;
@@ -272,7 +309,7 @@ export function searchWithGrep(cwd, opts) {
         if (match[0].length === 0) jsRegex.lastIndex++;
       }
       if (submatchesRaw.length === 0) return;
-      const trimmed = trimLeadingWhitespace(rawLineText, submatchesRaw);
+      const trimmed = trimLeadingWhitespace(rawLineText, withRaw(submatchesRaw));
       const { lineText, submatches } = truncateLine(trimmed.lineText, trimmed.submatches);
       if (submatches.length === 0) return;
       if (!byFile.has(file)) byFile.set(file, []);
@@ -365,7 +402,7 @@ async function builtinFileList(cwd, respectGitignore) {
 }
 
 export async function searchWithBuiltin(cwd, opts) {
-  const { query, isRegex, caseSensitive, wholeWord, include, exclude, maxResults, respectGitignore } = opts;
+  const { query, isRegex, caseSensitive, wholeWord, include, exclude, maxResults, respectGitignore, signal } = opts;
   let jsRegex;
   try {
     jsRegex = buildJsRegex(query, isRegex, caseSensitive, wholeWord, true);
@@ -383,6 +420,7 @@ export async function searchWithBuiltin(cwd, opts) {
     if (includes.length > 0 && !includes.some((re) => re.test(file))) continue;
     if (excludes.some((re) => re.test(file))) continue;
     if (Date.now() > deadline) throw new Error("Search timed out.");
+    if (signal?.aborted) return { results: toResultArray(byFile), limitHit: false };
     let buf;
     try {
       const info = await fs.stat(path.join(cwd, file));
@@ -403,7 +441,7 @@ export async function searchWithBuiltin(cwd, opts) {
         if (match[0].length === 0) jsRegex.lastIndex++;
       }
       if (submatchesRaw.length === 0) continue;
-      const trimmed = trimLeadingWhitespace(rawLineText, submatchesRaw);
+      const trimmed = trimLeadingWhitespace(rawLineText, withRaw(submatchesRaw));
       const { lineText, submatches } = truncateLine(trimmed.lineText, trimmed.submatches);
       if (submatches.length === 0) continue;
       if (!byFile.has(file)) byFile.set(file, []);
@@ -433,7 +471,49 @@ function looksBinary(buf) {
   return false;
 }
 
-async function replaceInFile(cwd, target, matchRegexGlobal, matchRegexSingle, isRegex, replacement) {
+// What a replacement string expands to for one match, the way
+// String.prototype.replace expands it: $$, $&, $`, $', $1..$99, $<name>.
+export function expandReplacement(replacement, match, groups, named, offset, whole) {
+  return replacement.replace(/\$(\$|&|`|'|<([^>]*)>|(\d{1,2}))/g, (token, kind, name, digits) => {
+    if (kind === "$") return "$";
+    if (kind === "&") return match;
+    if (kind === "`") return whole.slice(0, offset);
+    if (kind === "'") return whole.slice(offset + match.length);
+    if (name !== undefined) return named ? (named[name] ?? "") : token;
+    let n = Number(digits);
+    if (n >= 1 && n <= groups.length) return groups[n - 1] ?? "";
+    // "$12" with only one group means "$1" then "2", as JS does.
+    if (digits.length === 2) {
+      n = Number(digits[0]);
+      if (n >= 1 && n <= groups.length) return (groups[n - 1] ?? "") + digits[1];
+    }
+    return token;
+  });
+}
+
+// Replaces the matches of `regex` in `line` that `want(start)` accepts,
+// each expanded in the context of the whole line (so lookbehind and
+// lookahead see what's around it). Returns the new line and how many
+// matches were replaced.
+export function replaceInLine(line, regex, isRegex, replacement, want) {
+  let replaced = 0;
+  regex.lastIndex = 0;
+  const next = line.replace(regex, (...args) => {
+    const match = args[0];
+    const hasNamed = typeof args[args.length - 1] === "object" && args[args.length - 1] !== null;
+    const named = hasNamed ? args[args.length - 1] : undefined;
+    const offset = args[args.length - (hasNamed ? 3 : 2)];
+    const groups = args.slice(1, args.length - (hasNamed ? 3 : 2));
+    if (!want(offset)) return match;
+    replaced++;
+    return isRegex ? expandReplacement(replacement, match, groups, named, offset, line) : replacement;
+  });
+  return { line: next, replaced };
+}
+
+const utf8Strict = new TextDecoder("utf-8", { fatal: true });
+
+async function replaceInFile(cwd, target, matchRegexGlobal, isRegex, replacement) {
   const relPath = safeRelPath(target?.file);
   if (!relPath) return { file: String(target?.file ?? "?"), replaced: 0, skipped: 0, error: "invalid path" };
 
@@ -445,16 +525,31 @@ async function replaceInFile(cwd, target, matchRegexGlobal, matchRegexSingle, is
     return { file: relPath, replaced: 0, skipped: 0, error: err.message };
   }
   if (looksBinary(buf)) return { file: relPath, replaced: 0, skipped: 0, error: "binary file" };
+  let text;
+  try {
+    text = utf8Strict.decode(buf);
+  } catch {
+    // Rewriting it as UTF-8 would mangle every other non-ASCII byte in it.
+    return { file: relPath, replaced: 0, skipped: 0, error: "not UTF-8 text, so it was left unchanged" };
+  }
 
-  const lines = buf.toString("utf8").split("\n");
+  const lines = text.split("\n");
   const wantedLines = Array.isArray(target.lines) ? new Set(target.lines) : null;
-  // Precise per-occurrence targeting (used by "replace this match" /
-  // "replace this file"'s remaining matches) — keyed by "line:startOffset"
-  // against the CURRENT file content, so a stale offset simply won't be
-  // found and is counted as skipped rather than corrupting the file.
-  const wantedStarts = Array.isArray(target.matches)
-    ? new Set(target.matches.map((m) => `${m.line}:${m.start}`))
-    : null;
+  // Lines the user dismissed from the results: left alone by a whole-file
+  // or Replace All.
+  const excludedLines = Array.isArray(target.excludeLines) ? new Set(target.excludeLines) : null;
+  // Precise per-occurrence targeting ("replace this match"): keyed by
+  // "line:start", start counted in characters of the untrimmed line, against
+  // the CURRENT file content, so a stale offset simply isn't found and is
+  // counted as skipped rather than corrupting the file.
+  const wantedStarts = Array.isArray(target.matches) ? new Set(target.matches.map((m) => `${m.line}:${m.start}`)) : null;
+  const wantedPerLine = new Map();
+  if (wantedStarts) {
+    for (const key of wantedStarts) {
+      const line = Number(key.slice(0, key.indexOf(":")));
+      wantedPerLine.set(line, (wantedPerLine.get(line) ?? 0) + 1);
+    }
+  }
 
   let replaced = 0;
   let skipped = 0;
@@ -463,45 +558,20 @@ async function replaceInFile(cwd, target, matchRegexGlobal, matchRegexSingle, is
   for (let i = 0; i < lines.length; i++) {
     const lineNumber = i + 1;
     if (wantedLines && !wantedLines.has(lineNumber)) continue;
-    if (wantedStarts && ![...wantedStarts].some((k) => k.startsWith(`${lineNumber}:`))) continue;
-
-    const line = lines[i];
-    matchRegexGlobal.lastIndex = 0;
-    const submatches = [];
-    let m;
-    while ((m = matchRegexGlobal.exec(line))) {
-      submatches.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
-      if (m[0].length === 0) matchRegexGlobal.lastIndex++;
+    if (excludedLines?.has(lineNumber)) continue;
+    if (wantedStarts && !wantedPerLine.has(lineNumber)) continue;
+    const want = wantedStarts ? (start) => wantedStarts.has(`${lineNumber}:${start}`) : () => true;
+    let result;
+    try {
+      result = replaceInLine(lines[i], matchRegexGlobal, isRegex, replacement, want);
+    } catch {
+      skipped += wantedPerLine.get(lineNumber) ?? 1;
+      continue;
     }
-    if (submatches.length === 0) continue;
-
-    let toApply = submatches;
-    if (wantedStarts) {
-      const wantedForLine = [...wantedStarts].filter((k) => k.startsWith(`${lineNumber}:`)).length;
-      toApply = submatches.filter((sm) => wantedStarts.has(`${lineNumber}:${sm.start}`));
-      skipped += wantedForLine - toApply.length;
-    }
-    if (toApply.length === 0) continue;
-
-    // Rightmost-first so earlier offsets in the same line stay valid even
-    // when the replacement text is a different length than the match.
-    let newLine = line;
-    for (let j = toApply.length - 1; j >= 0; j--) {
-      const sm = toApply[j];
-      let replText = replacement;
-      if (isRegex) {
-        try {
-          replText = sm.text.replace(matchRegexSingle, replacement);
-        } catch {
-          skipped++;
-          continue;
-        }
-      }
-      newLine = newLine.slice(0, sm.start) + replText + newLine.slice(sm.end);
-      replaced++;
-    }
-    if (newLine !== line) {
-      lines[i] = newLine;
+    if (wantedStarts) skipped += (wantedPerLine.get(lineNumber) ?? 0) - result.replaced;
+    replaced += result.replaced;
+    if (result.line !== lines[i]) {
+      lines[i] = result.line;
       dirty = true;
     }
   }
@@ -554,9 +624,15 @@ export function activate({ router, log, getSettings }) {
     const exclude = [...new Set([...defaultExcludes, ...parseGlobs(req.body?.exclude)])];
     const maxResults = Math.min(Math.max(Number(settings["search.maxResults"]) || 2000, 1), 20000);
 
+    // The page dropping the request (a newer search) stops this one's work.
+    const controller = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) controller.abort();
+    });
     try {
       const searchFn = caps.engine === "ripgrep" ? searchWithRg : caps.engine === "grep" ? searchWithGrep : searchWithBuiltin;
       const { results, limitHit } = await searchFn(cwd, {
+        signal: controller.signal,
         query,
         isRegex,
         caseSensitive,
@@ -566,9 +642,9 @@ export function activate({ router, log, getSettings }) {
         exclude,
         maxResults,
       });
-      res.json({ results, limitHit, engine: caps.engine });
+      if (!controller.signal.aborted) res.json({ results, limitHit, engine: caps.engine });
     } catch (err) {
-      res.status(400).json({ error: err.message, engine: caps.engine });
+      if (!controller.signal.aborted) res.status(400).json({ error: err.message, engine: caps.engine });
     }
   });
 
@@ -594,10 +670,8 @@ export function activate({ router, log, getSettings }) {
     const replacement = typeof req.body?.replacement === "string" ? req.body.replacement : "";
 
     let matchRegexGlobal;
-    let matchRegexSingle;
     try {
       matchRegexGlobal = buildJsRegex(query, isRegex, caseSensitive, wholeWord, true);
-      matchRegexSingle = buildJsRegex(query, isRegex, caseSensitive, wholeWord, false);
     } catch (err) {
       res.status(400).json({ error: `Invalid pattern: ${err.message}` });
       return;
@@ -605,7 +679,7 @@ export function activate({ router, log, getSettings }) {
 
     const results = [];
     for (const target of targets) {
-      results.push(await replaceInFile(cwd, target, matchRegexGlobal, matchRegexSingle, isRegex, replacement));
+      results.push(await replaceInFile(cwd, target, matchRegexGlobal, isRegex, replacement));
     }
 
     res.json({

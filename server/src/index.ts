@@ -27,7 +27,7 @@ import { startDaemonLink, terminalEnv } from "./mux.js";
 import { ensureOpenShim } from "./openUrl.js";
 import { ensureClipboardShims } from "./clipboardShims.js";
 import { notifyBell, notifyCommandDone } from "./push.js";
-import { readSettingsDoc, readSettingSync } from "./settingsStore.js";
+import { readSettingsDoc, readSettingSync, SETTINGS_MAX_BYTES } from "./settingsStore.js";
 import { ensureShellIntegration } from "./shellIntegration.js";
 import { spawnEnv } from "./spawnEnv.js";
 import { getTunnelablePorts } from "./ports.js";
@@ -243,6 +243,9 @@ app.use(
 // routes (HTTP Client's history keeps response bodies up to 1 MB). The
 // app-wide default below is 100 KB.
 app.use("/api/ext", express.json({ limit: "17mb" }));
+// The settings document is allowed up to SETTINGS_MAX_BYTES (settingsStore.ts),
+// more than the app-wide parser's 100 KB.
+app.use("/api/settings", express.json({ limit: SETTINGS_MAX_BYTES + 64 * 1024 }));
 app.use(express.json());
 app.use(clientPathsMiddleware);
 app.use("/api/web-preview", webProxy.api);

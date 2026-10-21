@@ -197,9 +197,30 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
       void pollCommand().catch(() => {});
       commandPoll = setInterval(() => void pollCommand().catch(() => {}), COMMAND_POLL_MS);
     })
-    .catch(() => {
-      send({ type: "exit" });
+    .catch(async (err: unknown) => {
+      // Only a terminal that really isn't there any more closes the tab.
+      // Anything else (the daemon slow to start after an upgrade, a listing
+      // that failed for a moment) just closes the connection, and the page
+      // reconnects with its usual backoff.
+      if (await targetIsGone(err, target, windowId)) send({ type: "exit" });
       end();
       if (ws.readyState === WebSocket.OPEN) ws.close();
     });
+}
+
+// Whether an attach failed because its window or session no longer exists.
+// The bundled daemon says so with an error code; another terminal engine may
+// not, so without one, a fresh listing decides. A listing that fails too
+// leaves it undecided: not gone.
+async function targetIsGone(err: unknown, target: string, windowId: string | null): Promise<boolean> {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === "NO_SESSION" || code === "NO_WINDOW") return true;
+  try {
+    const sessions = await listSessions();
+    if (windowId) return !sessions.some((s) => s.windows.some((w) => w.id === windowId));
+    const name = target.includes(":") ? target.slice(0, target.indexOf(":")) : target;
+    return !sessions.some((s) => s.name === name);
+  } catch {
+    return false;
+  }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import type { RegisteredCommand } from "../extensions";
 import { migrateKeybindingOverrides, resolveBindings, type Command, type KeybindingOverrides } from "../keybindings";
@@ -216,6 +216,12 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
   // something is actually absent, so an up-to-date document costs no extra
   // request per load.
   const [adoptionGeneration, setAdoptionGeneration] = useState(0);
+  // Why the last save to the server failed, when the server refused it (the
+  // document too large, a write error). A network failure isn't shown: the
+  // next change, or Retry, tries again.
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncRetry, setSyncRetry] = useState(0);
+  const retrySync = useCallback(() => setSyncRetry((n) => n + 1), []);
   useEffect(() => {
     let cancelled = false;
     api
@@ -390,7 +396,12 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
           ...arrangement(),
         }))
         .then((doc) => api.putSettingsDoc(doc))
-        .catch(() => {});
+        .then(
+          () => setSyncError(null),
+          (err: unknown) => {
+            if (err instanceof api.ApiError) setSyncError(err.message);
+          },
+        );
     }, 400);
     return () => window.clearTimeout(timer);
   }, [
@@ -404,9 +415,13 @@ export function useSettingsSync(extCommands: RegisteredCommand[]) {
     statusBarLayout,
     sidebarPanels,
     adoptionGeneration,
+    syncRetry,
   ]);
 
   return {
+    syncError,
+    retrySync,
+    dismissSyncError: () => setSyncError(null),
     settings,
     setSettings,
     settingsRef,

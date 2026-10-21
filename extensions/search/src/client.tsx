@@ -46,6 +46,8 @@ function readExcludeHint(): string {
 interface Submatch {
   start: number;
   end: number;
+  // Where it starts in the untrimmed, untruncated line: what replace uses.
+  raw?: number;
 }
 interface MatchEntry {
   line: number;
@@ -77,6 +79,21 @@ interface ReplaceResponse {
   results: ReplaceFileResult[];
   totalReplaced: number;
   totalSkipped: number;
+}
+
+// What a replace did, in one line: how many changed, and what didn't.
+function describeReplace(outcome: ReplaceResponse): string {
+  const files = outcome.results.filter((r) => r.replaced > 0).length;
+  const parts = [
+    outcome.totalReplaced === 0
+      ? "Nothing was replaced"
+      : `Replaced ${outcome.totalReplaced} ${outcome.totalReplaced === 1 ? "match" : "matches"} in ${files} ${files === 1 ? "file" : "files"}`,
+  ];
+  if (outcome.totalSkipped > 0) parts.push(`${outcome.totalSkipped} skipped (the file changed since the search)`);
+  const failed = outcome.results.filter((r) => r.error);
+  for (const f of failed.slice(0, 3)) parts.push(`${f.file}: ${f.error}`);
+  if (failed.length > 3) parts.push(`${failed.length - 3} more files failed`);
+  return parts.join(" · ");
 }
 
 // ---- Shared fetch helpers ----
@@ -181,6 +198,11 @@ function makeDefaultSessionState(): SessionSearchState {
 // cache. Same pattern as git-scm's module-level sessionCredentials.
 const sessionSearchCache = new Map<string, SessionSearchState>();
 
+// Lines dismissed from each session's results, per file: Replace File and
+// Replace All leave them alone. Module-level for the same reason as
+// sessionSearchCache; cleared by each new search in that session.
+const dismissedBySession = new Map<string, Map<string, Set<number>>>();
+
 // Set by a mounted SearchPanel instance (module-level, not a ref, for the
 // same "unmounts on tab switch" reason as sessionSearchCache) so the
 // "Search: Clear Search Results" command (activate() below) can clear live
@@ -283,6 +305,7 @@ function SearchPanel({ actionsTarget, showMenu }: PanelProps) {
     abortRef.current = controller;
     setLoading(true);
     setError(null);
+    dismissedBySession.delete(sessionKey);
     apiPostJson<SearchResponse>(
       "/search",
       {
@@ -310,7 +333,7 @@ function SearchPanel({ actionsTarget, showMenu }: PanelProps) {
       .finally(() => {
         if (abortRef.current === controller) setLoading(false);
       });
-  }, [activeCwd, query, isRegex, caseSensitive, wholeWord, includeGlob, excludeGlob, useExcludeSettings]);
+  }, [activeCwd, query, isRegex, caseSensitive, wholeWord, includeGlob, excludeGlob, useExcludeSettings, sessionKey]);
 
   // Hybrid trigger: 3+ characters search as-you-type (debounced); 1-2
   // characters require Enter (see handleQueryKeyDown) since a 1-2 char
@@ -478,11 +501,24 @@ function SearchPanel({ actionsTarget, showMenu }: PanelProps) {
     });
   };
 
+  const dismissedLines = () => {
+    let map = dismissedBySession.get(sessionKey);
+    if (!map) {
+      map = new Map();
+      dismissedBySession.set(sessionKey, map);
+    }
+    return map;
+  };
+  const [replaceSummary, setReplaceSummary] = useState<string | null>(null);
+
   const dismissFile = (file: string) => {
     setResults((prev) => (prev ? prev.filter((r) => r.file !== file) : prev));
   };
 
   const dismissMatch = (file: string, match: MatchEntry) => {
+    const lines = dismissedLines().get(file) ?? new Set<number>();
+    lines.add(match.line);
+    dismissedLines().set(file, lines);
     setResults((prev) =>
       prev
         ? prev
@@ -497,12 +533,13 @@ function SearchPanel({ actionsTarget, showMenu }: PanelProps) {
   };
 
   const runReplace = useCallback(
-    async (targets: { file: string; matches?: { line: number; start: number }[] }[]) => {
+    async (targets: { file: string; matches?: { line: number; start: number }[]; excludeLines?: number[] }[]) => {
       if (!activeCwd) return;
       setLoading(true);
       setError(null);
+      setReplaceSummary(null);
       try {
-        await apiPostJson<ReplaceResponse>("/replace", {
+        const outcome = await apiPostJson<ReplaceResponse>("/replace", {
           cwd: activeCwd,
           query,
           isRegex,
@@ -511,6 +548,7 @@ function SearchPanel({ actionsTarget, showMenu }: PanelProps) {
           replacement: replaceQuery,
           targets,
         });
+        setReplaceSummary(describeReplace(outcome));
         refreshFiles?.();
         runSearch();
       } catch (err) {
@@ -521,14 +559,21 @@ function SearchPanel({ actionsTarget, showMenu }: PanelProps) {
     [activeCwd, query, isRegex, caseSensitive, wholeWord, replaceQuery, runSearch],
   );
 
-  const replaceOneMatch = (file: string, match: MatchEntry) =>
-    runReplace([{ file, matches: [{ line: match.line, start: match.submatches[0]?.start ?? match.column - 1 }] }]);
+  const replaceOneMatch = (file: string, match: MatchEntry) => {
+    const first = match.submatches[0];
+    runReplace([{ file, matches: [{ line: match.line, start: first?.raw ?? first?.start ?? match.column - 1 }] }]);
+  };
 
-  const replaceFile = (file: string) => runReplace([{ file }]);
+  const fileTarget = (file: string) => {
+    const excluded = dismissedLines().get(file);
+    return excluded?.size ? { file, excludeLines: [...excluded] } : { file };
+  };
+
+  const replaceFile = (file: string) => runReplace([fileTarget(file)]);
 
   const replaceAll = () => {
     if (!results) return;
-    runReplace(results.map((r) => ({ file: r.file })));
+    runReplace(results.map((r) => fileTarget(r.file)));
     setConfirmReplaceAll(false);
   };
 
@@ -799,6 +844,11 @@ function SearchPanel({ actionsTarget, showMenu }: PanelProps) {
         </div>
       )}
 
+      {replaceSummary && (
+        <div className="search-replace-summary" role="status" onClick={() => setReplaceSummary(null)}>
+          {replaceSummary}
+        </div>
+      )}
       {error && (
         <div className="search-error" onClick={() => setError(null)}>
           {error}

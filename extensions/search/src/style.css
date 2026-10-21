@@ -21,6 +21,16 @@
   cursor: pointer;
 }
 
+.search-replace-summary {
+  margin: 6px 8px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .search-input-row {
   flex-shrink: 0;
   display: flex;
