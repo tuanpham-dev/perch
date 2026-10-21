@@ -118,7 +118,7 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
     setError(null);
     lastMtimes.current = {};
     setActivePick(null);
-    fetch(`${hookBase}/token?dir=${encodeURIComponent(dir)}`)
+    fetch(`${hookBase}/token?dir=${encodeURIComponent(dir)}&file=${encodeURIComponent(basename)}`)
       .then((res) => res.json())
       .then((data: { token?: string; error?: string }) => {
         if (cancelled) return;
@@ -131,7 +131,7 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
     return () => {
       cancelled = true;
     };
-  }, [dir]);
+  }, [dir, basename]);
 
   // Reload-on-change poll over the files the preview actually loaded (the
   // HTML and whatever it requested, subfolders included), only while this

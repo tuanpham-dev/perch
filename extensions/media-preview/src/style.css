@@ -22,3 +22,15 @@
   width: min(600px, 90%);
 }
 
+
+.media-status {
+  margin: auto;
+  padding: 24px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+  text-align: center;
+}
+
+.media-error {
+  color: var(--error);
+}

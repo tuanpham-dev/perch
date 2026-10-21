@@ -12,6 +12,7 @@ import { DEFAULT_TOUCH_KEYS, type TouchKey } from "./touchKeys";
 import FloatingTouchKeys from "./FloatingTouchKeys";
 import TouchKeyBar from "./TouchKeyBar";
 import TouchKeysEditor from "./TouchKeysEditor";
+import { setTouchKeyErrorHandler } from "./notify";
 
 // ---- Module-level host bridge ----
 
@@ -149,12 +150,14 @@ interface ExtensionContext {
   assetUrl(relPath: string): string;
   app: {
     snippets(): { id: string; name: string }[];
+    showError(message: string): void;
   };
 }
 
 export function activate(ctx: ExtensionContext): void {
   extSettings = ctx.settings;
   readSnippets = () => ctx.app.snippets();
+  setTouchKeyErrorHandler((message) => ctx.app.showError(message));
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   removeSettingsListener = ctx.settings.onDidChange(() => {
     for (const cb of settingsListeners) cb();
@@ -171,5 +174,6 @@ export function deactivate(): void {
   removeStylesheet = null;
   extSettings = null;
   readSnippets = null;
+  setTouchKeyErrorHandler(null);
   settingsListeners.clear();
 }

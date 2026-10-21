@@ -73,6 +73,9 @@ function windowKey(win: { sessionName: string; windowIndex: number }): string {
 
 const seenWindows = new Map<string, { win: WindowRef; at: number }>();
 let counts: Record<string, number> = {};
+// Subagents that finished in the last half hour, per window: a dimmed badge
+// keeps them one click away after the run.
+let recent: Record<string, number> = {};
 let pollTimer: number | null = null;
 let refreshDecorations: (() => void) | null = null;
 
@@ -84,8 +87,9 @@ async function pollCounts(): Promise<void> {
   }
   const windows = [...seenWindows].map(([key, { win }]) => ({ key, ...win }));
   if (windows.length === 0) {
-    if (Object.keys(counts).length > 0) {
+    if (Object.keys(counts).length > 0 || Object.keys(recent).length > 0) {
       counts = {};
+      recent = {};
       refreshDecorations?.();
     }
     return;
@@ -96,11 +100,13 @@ async function pollCounts(): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ windows }),
     });
-    const next = (await readJson<{ counts: Record<string, number> }>(res)).counts;
-    const changed =
-      Object.keys(next).length !== Object.keys(counts).length ||
-      Object.entries(next).some(([k, v]) => counts[k] !== v);
-    counts = next;
+    const body = await readJson<{ counts: Record<string, number>; recent?: Record<string, number> }>(res);
+    const same = (a: Record<string, number>, b: Record<string, number>) =>
+      Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => b[k] === v);
+    const nextRecent = body.recent ?? {};
+    const changed = !same(body.counts, counts) || !same(nextRecent, recent);
+    counts = body.counts;
+    recent = nextRecent;
     if (changed) refreshDecorations?.();
   } catch {
     // Best-effort — a failed poll keeps the last counts; the next tick
@@ -273,10 +279,18 @@ export function activate(ctx: ExtensionContext): void {
         at: Date.now(),
       });
       const count = counts[key];
-      if (!count) return undefined;
+      const finished = recent[key] ?? 0;
+      if (count) {
+        return {
+          badge: String(count),
+          tooltip: `${count} subagent${count === 1 ? "" : "s"} running${finished ? `, ${finished} finished recently` : ""}`,
+        };
+      }
+      if (!finished) return undefined;
       return {
-        badge: String(count),
-        tooltip: `${count} subagent${count === 1 ? "" : "s"} running`,
+        badge: `✓${finished}`,
+        tooltip: `${finished} subagent${finished === 1 ? "" : "s"} finished in the last half hour: click to see what they did`,
+        className: "subagent-badge-finished",
       };
     },
     onClick(anchorRect, win) {
@@ -298,6 +312,7 @@ export function deactivate(): void {
   refreshDecorations = null;
   seenWindows.clear();
   counts = {};
+  recent = {};
   removeStylesheet?.();
   removeStylesheet = null;
   serverFetch = null;

@@ -16,3 +16,18 @@
   background: var(--panel-bg);
 }
 
+.pdf-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 24px;
+  color: var(--fg-inactive);
+  font-size: 13px;
+  text-align: center;
+}
+
+.pdf-error {
+  color: var(--error);
+}

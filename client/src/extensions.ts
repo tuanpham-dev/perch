@@ -707,6 +707,10 @@ export interface ExtensionContext {
     promptDialog(message: string, defaultValue?: string): Promise<string | null>;
     pickItem(opts: { title: string; items: PickItem[]; current?: string; placeholder?: string }): Promise<string | null>;
     pickIcon(opts?: { title?: string; current?: string }): Promise<string | null>;
+    // Shows a short error in the app's error banner (it fades after a few
+    // seconds): for an action the user just took that failed, so a click
+    // never does nothing silently.
+    showError(message: string): void;
     // Opens a path in whichever editor the `editor` setting selects (nvim by
     // default) — the same dispatch a FILES-tree click ends in, minus the
     // viewer matching. `line` jumps there when the editor supports it.
@@ -1778,6 +1782,12 @@ export function setDialogHandlers(handlers: DialogHandlers | null): void {
   dialogHandlers = handlers;
 }
 
+// Wired once from App.tsx to its showError (ctx.app.showError).
+let errorHandler: ((message: string) => void) | null = null;
+export function setErrorHandler(handler: ((message: string) => void) | null): void {
+  errorHandler = handler;
+}
+
 // Wired once from App.tsx to useSessionActions' killSessionNow — the
 // *unconfirmed* kill, since the extension caller owns the prompt (see
 // ExtensionContext.app.killSession).
@@ -2579,6 +2589,7 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       killSession(sessionName) {
         killSessionHandler?.(sessionName);
       },
+      showError: (message) => errorHandler?.(String(message)),
       confirmDialog: (message, confirmLabel) =>
         dialogHandlers ? dialogHandlers.confirm(message, confirmLabel) : Promise.resolve(false),
       promptDialog: (message, defaultValue) =>

@@ -1,16 +1,61 @@
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import "./style.css";
-import { inlineUrl } from "../../_shared/fileApi";
+import { fileLoadProblem, inlineUrl } from "../../_shared/fileApi";
+import Icon from "../../_shared/Icon";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 
 const basename = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 
 // inlineUrl (not downloadUrl) — an iframe *navigates* to its src, which
 // honors Content-Disposition: attachment and would download the PDF instead
-// of rendering it (unlike an <img>/<video> subresource load).
-function PdfView({ filePath, active }: { filePath: string; active: boolean }) {
+// of rendering it (unlike an <img>/<video> subresource load). An iframe
+// can't report a failed load, so the file is checked first: a missing one
+// shows the reason instead of the server's raw error in the frame.
+function PdfView({
+  filePath,
+  active,
+  toolbarTarget,
+  reloadKey,
+}: {
+  filePath: string;
+  active: boolean;
+  toolbarTarget?: HTMLDivElement | null;
+  reloadKey?: number;
+}) {
+  const [version, setVersion] = useState(0);
+  const [problem, setProblem] = useState<string | null | undefined>(undefined);
+  const src = `${inlineUrl(filePath)}&v=${version}`;
+  useEffect(() => {
+    setVersion((v) => v + 1);
+  }, [filePath, reloadKey]);
+  useEffect(() => {
+    let cancelled = false;
+    setProblem(undefined);
+    void fileLoadProblem(src).then((why) => {
+      if (!cancelled) setProblem(why);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+  const controls = (
+    <button className="icon-button" title="Refresh" onClick={() => setVersion((v) => v + 1)}>
+      <Icon name="refresh" />
+    </button>
+  );
   return (
     <div className={`pdf-host${active ? "" : " hidden"}`}>
-      <iframe className="pdf-frame" src={inlineUrl(filePath)} title={basename(filePath)} />
+      {problem ? (
+        <div className="pdf-status pdf-error">
+          Couldn't open {basename(filePath)}: {problem}
+        </div>
+      ) : problem === null ? (
+        <iframe key={version} className="pdf-frame" src={src} title={basename(filePath)} />
+      ) : (
+        <div className="pdf-status">Loading…</div>
+      )}
+      {active && toolbarTarget && createPortal(controls, toolbarTarget)}
     </div>
   );
 }

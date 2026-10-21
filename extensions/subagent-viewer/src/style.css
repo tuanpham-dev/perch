@@ -91,3 +91,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A window whose subagents have all finished (in the last half hour). */
+.subagent-badge-finished {
+  opacity: 0.6;
+}

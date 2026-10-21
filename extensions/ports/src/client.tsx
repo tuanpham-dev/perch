@@ -1,17 +1,12 @@
-// ports: the PORTS accordion section, extracted from core (formerly
-// client/src/components/PortsPanel.tsx). Registers as a "run"-located
-// sidebar panel so it renders as an accordion section in the Run tab,
-// alongside TASKS (it lived in the Explorer accordion before that tab
-// existed; the panel id is unchanged, so stored order/collapse/size for it
-// carries over). Host hooks
-// (serverFetch for this extension's own /list & /kill routes) arrive via
-// module-level bridge variables set once in activate() — same pattern as
-// the search and git-scm extensions.
+// ports: the listening ports inside your terminals, shown three ways — a
+// status-bar readout with a popover listing them, the PORTS view of the
+// bottom panel (a table), and the built-in browser tab (browser.tsx) that
+// opens them (and any site). Host hooks (serverFetch for this extension's own
+// /list & /kill routes, and ctx.app's tunnel, proxy and web-preview state)
+// arrive via module-level bridge variables set once in activate() — same
+// pattern as the search and git-scm extensions.
 import {
-  useCallback,
   useEffect,
-  useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
   type MouseEvent as ReactMouseEvent,
@@ -23,8 +18,6 @@ import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
 import type { MenuItem } from "../../_shared/types";
-import { useListNavigation } from "../../_shared/useListNavigation";
-import { useLongPressMenu } from "../../_shared/useLongPressMenu";
 import { BrowserView, browserTabPath, configureBrowser, parseAddress } from "./browser";
 import { setViewportPrompt } from "../../_shared/viewports";
 
@@ -78,16 +71,22 @@ function openPortInApp(port: number): void {
   openViewerTab?.("portProxy", `port:${port}`, { title: `Port ${port}` });
 }
 
-// Click and middle-click handlers for an open action whose plain click
-// opens the browser. The middle button's own autoscroll is kept from
-// starting.
+// Click and middle-click handlers for a port's open action: a plain click
+// opens it where ports.clickAction says (an app tab by default, or the
+// browser), a secondary click (Ctrl/Cmd, the middle button) the other way.
+// The middle button's own autoscroll is kept from starting.
 function openActionProps(openInBrowser: () => void, port: number) {
+  const open = (secondary: boolean) => {
+    const inApp = readClickAction() === "app";
+    if (secondary !== inApp) openPortInApp(port);
+    else openInBrowser();
+  };
   return {
-    onClick: (e: ReactMouseEvent) => (isSecondaryClick(e) ? openPortInApp(port) : openInBrowser()),
+    onClick: (e: ReactMouseEvent) => open(isSecondaryClick(e)),
     onAuxClick: (e: ReactMouseEvent) => {
       if (e.button !== 1) return;
       e.preventDefault();
-      openPortInApp(port);
+      open(true);
     },
     onMouseDown: (e: ReactMouseEvent) => {
       if (e.button === 1) e.preventDefault();
@@ -170,10 +169,6 @@ const POLL_MS = 5_000;
 const NO_AUTH: TunnelAuth = { cookie: null, authorization: null };
 const NO_PROXY_CONFIG: ProxyConfig = { domain: null };
 const MASK = "••••";
-
-function isLoopback(address: string): boolean {
-  return address === "127.0.0.1" || address === "::1" || address.startsWith("127.");
-}
 
 // Which terminal a port belongs to. A process that outlived its terminal
 // still says which one it was started in, and reads as faded rather than as
@@ -349,292 +344,6 @@ function subscribeFeed(onChange: () => void): () => void {
 function usePortsFeed(): PortsFeed & { reload: () => void } {
   const state = useSyncExternalStore(subscribeFeed, () => feed);
   return { ...state, reload: loadFeed };
-}
-
-interface PanelProps {
-  actionsTarget?: HTMLDivElement | null;
-  showMenu?: (x: number, y: number, items: MenuItem[]) => void;
-  confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean>;
-}
-
-function PortsPanel({ actionsTarget, showMenu, confirmDialog }: PanelProps) {
-  // Touch/pen long-press → the same menu right-click opens.
-  const bindMenu = useLongPressMenu();
-  const [ports, setPorts] = useState<ListeningPort[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [copiedPort, setCopiedPort] = useState<number | null>(null);
-  const [auth, setAuth] = useState<TunnelAuth>(NO_AUTH);
-  const [proxyConfig, setProxyConfig] = useState<ProxyConfig>(NO_PROXY_CONFIG);
-  const [killing, setKilling] = useState<Set<number>>(new Set());
-  const [clickAction, setClickAction] = useState(readClickAction);
-
-  useEffect(() => extSettings?.onDidChange(() => setClickAction(readClickAction())), []);
-  // The header Refresh button (portaled into actionsTarget) bumps this to
-  // force a reload — the role Sidebar's own per-panel refresh key played
-  // before extraction.
-  const [refreshKey, setRefreshKey] = useState(0);
-  // Guards state updates from a fetch started before unmount but resolving
-  // after — mirrors the effect's own `cancelled` flag, needed here too since
-  // loadPorts is also invoked directly (not just from the effect) after kill.
-  // Reset true on every mount (not just the initial ref value) — StrictMode's
-  // dev double-invoke (mount, cleanup, mount) would otherwise leave this
-  // stuck false after the cleanup from the first mount.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const loadPorts = useCallback(() => {
-    fetchPorts()
-      .then((next) => {
-        if (!mountedRef.current) return;
-        setPorts(next);
-        setError(null);
-
-      })
-      .catch((err) => {
-        if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
-      });
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = () => {
-      loadPorts();
-      // A failed auth fetch shouldn't break the ports list — fall back to no
-      // headers, same as an unauthenticated deployment.
-      fetchTunnelAuth()
-        .then((next) => {
-          if (cancelled) return;
-          setAuth((prev) => {
-            if (prev.cookie === next.cookie && prev.authorization === next.authorization) return prev;
-            return next;
-          });
-        })
-        .catch(() => {
-          if (!cancelled) setAuth(NO_AUTH);
-        });
-      // Likewise for proxy config — no configured domain is a valid state,
-      // not an error, so falling back is correct here too.
-      fetchProxyConfig()
-        .then((next) => {
-          if (cancelled) return;
-          setProxyConfig((prev) => (prev.domain === next.domain ? prev : next));
-        })
-        .catch(() => {
-          if (!cancelled) setProxyConfig(NO_PROXY_CONFIG);
-        });
-    };
-
-    load();
-    // The initial load above and any refreshKey-triggered reload (a user
-    // action, so the tab is visible) always run; only the background ticks
-    // skip while hidden — resuming immediately on regaining visibility
-    // instead of waiting out the rest of the interval. Ticks refresh just
-    // the ports list: auth/proxy config are effectively static, so they
-    // re-fetch only on the full loads above (initial, Refresh, visibility)
-    // rather than every few seconds.
-    const timer = window.setInterval(() => {
-      if (!document.hidden) loadPorts();
-    }, POLL_MS);
-    const onVisibility = () => {
-      if (!document.hidden) load();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [refreshKey, loadPorts]);
-
-  const origin = window.location.origin;
-
-  const onCopy = () => {
-    const realCommand = buildCommand(origin, auth, false);
-    copyText(realCommand)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => {});
-  };
-
-  const openInBrowser = (port: number) => {
-    window.open(proxyUrl(port, proxyConfig), "_blank", "noopener");
-  };
-
-  const openInApp = openPortInApp;
-
-  // The row's single quick-action button follows the clickAction setting,
-  // and a secondary click does the other one; the context menu below always
-  // offers both explicitly regardless of it.
-  const onOpenPort = (port: number, e?: ReactMouseEvent) => {
-    const browser = readClickAction() === "browser";
-    if (browser !== (!!e && isSecondaryClick(e))) openInBrowser(port);
-    else openInApp(port);
-  };
-
-  const onCopyPortUrl = (port: number) => {
-    copyText(proxyUrl(port, proxyConfig))
-      .then(() => {
-        setCopiedPort(port);
-        window.setTimeout(() => setCopiedPort((prev) => (prev === port ? null : prev)), 1500);
-      })
-      .catch(() => {});
-  };
-
-  const onKillPort = (p: ListeningPort) => {
-    const confirm =
-      confirmDialog ?? ((message: string) => Promise.resolve(window.confirm(message)));
-    confirm(`Kill ${p.process ?? "process"} (pid ${p.pid}) listening on port ${p.port}?`, "Kill")
-      .then((ok) => {
-        if (!ok) return;
-        setKilling((prev) => new Set(prev).add(p.port));
-        return killPort(p.port)
-          .then(() => loadPorts())
-          .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-          .finally(() => {
-            setKilling((prev) => {
-              const next = new Set(prev);
-              next.delete(p.port);
-              return next;
-            });
-          });
-      })
-      .catch(() => {});
-  };
-
-  const portRowId = (port: number) => `port:${port}`;
-  const portsById = useMemo(() => new Map(ports.map((p) => [portRowId(p.port), p])), [ports]);
-  const rowIds = useMemo(() => ports.map((p) => portRowId(p.port)), [ports]);
-
-  const portMenuItems = (p: ListeningPort): MenuItem[] => {
-    const items: MenuItem[] = [
-      { label: "Open in App", onClick: () => openInApp(p.port) },
-      { label: "Open in Browser", onClick: () => openInBrowser(p.port) },
-      { label: "Copy URL", onClick: () => onCopyPortUrl(p.port) },
-    ];
-    // Other extensions' items for this port (ctx.registerPortMenuItem), e.g.
-    // the HTTP Client's "Open in HTTP Client".
-    for (const extra of extraPortMenuItems?.({ port: p.port, address: p.address, pid: p.pid, process: p.process }) ?? []) {
-      items.push({ label: extra.label, onClick: extra.onClick });
-    }
-    if (p.pid !== undefined) {
-      items.push({ label: "Kill Process", danger: true, onClick: () => onKillPort(p) });
-    }
-    return items;
-  };
-
-  const nav = useListNavigation({
-    rowIds,
-    onActivate: (id) => {
-      const p = portsById.get(id);
-      if (p) onOpenPort(p.port);
-    },
-    onContextMenuKey: (id, rect) => {
-      const p = portsById.get(id);
-      if (p) showMenu?.(rect.left + 8, rect.bottom, portMenuItems(p));
-    },
-  });
-
-  return (
-    <div className="ports-panel">
-      {actionsTarget &&
-        createPortal(
-          <>
-            <button
-              className="icon-button"
-              title={copied ? "Copied" : "Copy the command that forwards every port"}
-              onClick={onCopy}
-            >
-              <Icon name={copied ? "check" : "copy"} />
-            </button>
-            <button
-              className="icon-button"
-              title="Refresh"
-              onClick={() => setRefreshKey((k) => k + 1)}
-            >
-              <Icon name="refresh" />
-            </button>
-          </>,
-          actionsTarget,
-        )}
-      {error && <div className="ports-error">{error}</div>}
-      <ul className="port-list" onKeyDown={nav.onKeyDown}>
-        {ports.map((p) => {
-          const rowProps = nav.getRowProps(portRowId(p.port));
-          return (
-            <li key={p.port} className="port-row">
-              <button
-                className="port-item"
-                title={p.pid ? `pid ${p.pid}` : undefined}
-                onClick={(e) => onOpenPort(p.port, e)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  nav.focusRow(portRowId(p.port));
-                  showMenu?.(e.clientX, e.clientY, portMenuItems(p));
-                }}
-                {...bindMenu((x, y) => {
-                  nav.focusRow(portRowId(p.port));
-                  showMenu?.(x, y, portMenuItems(p));
-                })}
-                tabIndex={rowProps.tabIndex}
-                ref={rowProps.ref}
-                onFocus={rowProps.onFocus}
-              >
-                <span className="port-number">{p.port}</span>
-                {p.process && <span className="port-process">{p.process}</span>}
-                <SessionBadge port={p} />
-                {!isLoopback(p.address) && <span className="port-address">{p.address}</span>}
-              </button>
-              <div className="port-actions">
-                <button
-                  className="icon-button port-action-button"
-                  title={
-                    clickAction === "browser"
-                      ? "Open in browser (Ctrl+click: in Perch)"
-                      : "Open in app (Ctrl+click: in the browser)"
-                  }
-                  tabIndex={-1}
-                  onClick={(e) => onOpenPort(p.port, e)}
-                >
-                  <Icon name={clickAction === "browser" ? "link-external" : "open-preview"} />
-                </button>
-                <button
-                  className="icon-button port-action-button"
-                  title={copiedPort === p.port ? "Copied" : "Copy URL"}
-                  tabIndex={-1}
-                  onClick={() => onCopyPortUrl(p.port)}
-                >
-                  <Icon name={copiedPort === p.port ? "check" : "copy"} />
-                </button>
-                {p.pid !== undefined && (
-                  <button
-                    className="icon-button port-action-button"
-                    title="Kill process"
-                    disabled={killing.has(p.port)}
-                    tabIndex={-1}
-                    onClick={() => onKillPort(p)}
-                  >
-                    <Icon name="trash" />
-                  </button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-        {ports.length === 0 && !error && (
-          <li className="session-empty">No listening ports in your terminals</li>
-        )}
-      </ul>
-    </div>
-  );
 }
 
 // ---- The PORTS bottom-panel view ----
@@ -939,18 +648,6 @@ function PortsTableView({ context }: PanelViewProps) {
 // ---- Activation ----
 
 interface ExtensionContext {
-  registerSidebarPanel(panel: {
-    id: string;
-    title: string;
-    icon?: string;
-    location?: "tab" | "explorer" | "run";
-    defaultCollapsed?: boolean;
-    // Default placement weight among this location's sections — lower
-    // renders higher; see core RegisteredSidebarPanel.order.
-    order?: number;
-    focusBinding?: string;
-    component: (props: PanelProps) => ReturnType<typeof PortsPanel>;
-  }): void;
   registerFileViewer(viewer: {
     id: string;
     extensions: string[];
@@ -1019,7 +716,7 @@ interface StatusItemProps {
 // what makes Kill usable here, since the killed row has to leave the list
 // while the user is still looking at it.
 function PortsStatusPopover({ context }: StatusItemProps) {
-  const { ports, tunnel, reload } = usePortsFeed();
+  const { ports, tunnel, error: feedError, reload } = usePortsFeed();
   const [auth, setAuth] = useState<TunnelAuth>(NO_AUTH);
   const [proxyConfig, setProxyConfig] = useState<ProxyConfig>(NO_PROXY_CONFIG);
   const [copiedPort, setCopiedPort] = useState<number | null>(null);
@@ -1158,7 +855,16 @@ function PortsStatusPopover({ context }: StatusItemProps) {
             </div>
           </li>
         ))}
-        {ports.length === 0 && <li className="session-empty">No listening ports in your terminals</li>}
+        {/* A list that failed to load isn't an empty one: say so, with Retry. */}
+        {ports.length === 0 && feedError && (
+          <li className="session-empty ports-feed-error">
+            Couldn't list the ports: {feedError}{" "}
+            <button className="ports-btn-ghost" onClick={reload}>
+              Retry
+            </button>
+          </li>
+        )}
+        {ports.length === 0 && !feedError && <li className="session-empty">No listening ports in your terminals</li>}
       </ul>
       <div className="ports-status-popover-footer">
         <span className="ports-status-hint">

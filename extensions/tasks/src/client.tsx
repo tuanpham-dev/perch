@@ -125,6 +125,23 @@ function runScriptRequest(session: string, dir: string, script: string): Promise
   }).then((res) => readJson<void>(res));
 }
 
+function stopScriptRequest(session: string, dir: string, script: string, restart: boolean): Promise<void> {
+  if (!serverFetch) return Promise.reject(new Error("extension not activated"));
+  return serverFetch("/stop", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session, dir, script, restart }),
+  }).then((res) => readJson<void>(res));
+}
+
+// The command as it runs from the workspace root: into the package's folder
+// first when it isn't the root.
+function commandFromRoot(pm: string, pkg: { relDir: string }, script: string): string {
+  const quote = (v: string) => (/^[A-Za-z0-9_.:/@+-]+$/.test(v) ? v : `'${v.replace(/'/g, `'\\''`)}'`);
+  const run = `${pm} run ${quote(script)}`;
+  return pkg.relDir === "." ? run : `cd ${quote(pkg.relDir)} && ${run}`;
+}
+
 // ---- Panel ----
 
 const POLL_MS = 5_000;
@@ -264,15 +281,31 @@ function TasksPanel({ showMenu }: PanelProps) {
   const rowIds = useMemo(() => visibleRows.map((row) => row.key), [visibleRows]);
   const rowsByKey = useMemo(() => new Map(visibleRows.map((row) => [row.key, row])), [visibleRows]);
 
+  const stopScript = (pkg: TaskPackage, script: TaskScript, restart: boolean) => {
+    if (!sessionName) return;
+    stopScriptRequest(sessionName, pkg.dir, script.name, restart)
+      .then(() => {
+        setError(null);
+        loadScripts();
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  };
+
   const scriptMenuItems = (pkg: TaskPackage, script: TaskScript): MenuItem[] => [
     {
       label: script.running ? "Show Running Task" : "Run",
       onClick: () => runScript(pkg, script),
     },
+    ...(script.running
+      ? [
+          { label: "Stop", onClick: () => stopScript(pkg, script, false) },
+          { label: "Restart", onClick: () => stopScript(pkg, script, true) },
+        ]
+      : []),
     {
       label: "Copy Command",
       onClick: () => {
-        copyText(`${pm} run ${script.name}`).catch(() => {});
+        copyText(commandFromRoot(pm, pkg, script.name)).catch(() => {});
       },
     },
   ];

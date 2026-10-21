@@ -74,12 +74,31 @@ const SIMPLE_TOKENS: Record<string, string> = {
   pgup: "\x1b[5~",
   pgdn: "\x1b[6~",
   space: " ",
+  // Shift+Tab: Claude Code's mode switch, and "back" in most TUIs.
+  "s-tab": "\x1b[Z",
+  bs: "\x7f",
+  backspace: "\x7f",
+  del: "\x1b[3~",
+  ins: "\x1b[2~",
+  f1: "\x1bOP",
+  f2: "\x1bOQ",
+  f3: "\x1bOR",
+  f4: "\x1bOS",
+  f5: "\x1b[15~",
+  f6: "\x1b[17~",
+  f7: "\x1b[18~",
+  f8: "\x1b[19~",
+  f9: "\x1b[20~",
+  f10: "\x1b[21~",
+  f11: "\x1b[23~",
+  f12: "\x1b[24~",
 };
 
 export type ParsedSend = { data: string } | { error: string };
 
 // Literal text passes through as-is; "{name}" tokens (from SIMPLE_TOKENS)
-// and "{^x}" (Ctrl-x, e.g. "{^c}" -> "\x03") expand to their escape codes;
+// and "{^x}" (Ctrl-x, e.g. "{^c}" -> "\x03"; also "{^[}" Esc, "{^\\}",
+// "{^]}", "{^^}", "{^_}", "{^@}" NUL and "{^?}" DEL) expand to their codes;
 // "{{" escapes a literal "{". Tokens and literals concatenate freely, e.g.
 // "{esc}:wq{enter}". Anything else inside braces is a parse error rather
 // than sent verbatim, so a typo'd token name can't silently inject garbage.
@@ -106,7 +125,9 @@ export function parseSend(send: string): ParsedSend {
     const lower = token.toLowerCase();
     if (lower in SIMPLE_TOKENS) {
       data += SIMPLE_TOKENS[lower];
-    } else if (/^\^[a-zA-Z]$/.test(token)) {
+    } else if (token === "^?") {
+      data += "\x7f";
+    } else if (/^\^[a-zA-Z@[\\\]^_]$/.test(token)) {
       data += String.fromCharCode(token[1].toUpperCase().charCodeAt(0) - 64);
     } else {
       return { error: `unknown token "{${token}}"` };

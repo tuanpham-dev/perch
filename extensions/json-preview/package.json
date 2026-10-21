@@ -30,6 +30,7 @@
     "client": "./dist/client.js"
   },
   "dependencies": {
+    "jsonc-parser": "^3.3.1",
     "react-json-view-lite": "^2.5.0",
     "yaml": "^2.9.0"
   }

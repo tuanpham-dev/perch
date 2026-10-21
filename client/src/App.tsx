@@ -46,6 +46,7 @@ import {
   setGetCommandsHandler,
   setKillSessionHandler,
   setDialogHandlers,
+  setErrorHandler,
   setOpenManagedGridHandler,
   setOpenSessionWindowHandler,
   reloadPendingIds,
@@ -894,8 +895,12 @@ export default function App() {
   // Lets extensions use the same dialogs (ctx.app.confirmDialog & co.).
   useEffect(() => {
     setDialogHandlers({ confirm: confirmDialog, prompt: promptDialog, pick: pickDialog });
-    return () => setDialogHandlers(null);
-  }, [confirmDialog, promptDialog, pickDialog]);
+    setErrorHandler(showError);
+    return () => {
+      setDialogHandlers(null);
+      setErrorHandler(null);
+    };
+  }, [confirmDialog, promptDialog, pickDialog, showError]);
 
   // Any editor-side activation — a tab opened from the sidebar/palette, a tab
   // bar click, a group-focus chord — hands keyboard focus back to the editor,

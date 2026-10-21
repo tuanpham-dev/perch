@@ -71,6 +71,22 @@ function resolveWithinRoot(root, relPath) {
 // previewed in the process's lifetime.
 const dirTokens = new Map();
 const tokenDirs = new Map();
+// A preview of an HTML file sitting directly in the home folder or a
+// filesystem root reaches only that file: a token for the whole folder
+// would let an untrusted page fetch anything under ~. token -> the one
+// root-relative path it may serve.
+const tokenOnlyFile = new Map();
+
+// The home folder, or the top of a filesystem ("/", "C:\\").
+function isBroadFolder(dir) {
+  const resolved = path.resolve(dir);
+  return resolved === path.resolve(homedir()) || path.dirname(resolved) === resolved;
+}
+
+// Hidden files and folders (.ssh, .env, .git, …) are never served.
+function hasHiddenSegment(relPath) {
+  return relPath.split(/[\\/]/).some((segment) => segment.startsWith(".") && segment !== "." && segment !== "..");
+}
 
 // token -> the root-relative paths the preview has requested through
 // /public/serve: the HTML, and every stylesheet, script, image or fetch it
@@ -114,6 +130,25 @@ export function activate({ router, host }) {
       res.status(400).json({ error: "dir does not exist" });
       return;
     }
+    const file = typeof req.query.file === "string" ? path.basename(req.query.file) : "";
+    if (isBroadFolder(dir)) {
+      // Scoped to the one file, so a fresh token per file rather than the
+      // folder's shared one.
+      if (!file) {
+        res.status(400).json({ error: "file is required for a file in this folder" });
+        return;
+      }
+      const key = `${dir}\0${file}`;
+      let token = dirTokens.get(key);
+      if (!token) {
+        token = randomBytes(24).toString("base64url");
+        dirTokens.set(key, token);
+        tokenDirs.set(token, dir);
+        tokenOnlyFile.set(token, file);
+      }
+      res.json({ token });
+      return;
+    }
     let token = dirTokens.get(dir);
     if (!token) {
       token = randomBytes(24).toString("base64url");
@@ -138,6 +173,11 @@ export function activate({ router, host }) {
     const target = resolveWithinRoot(root, relPath);
     if (!target) {
       res.status(400).json({ error: "path escapes preview root" });
+      return;
+    }
+    const onlyFile = tokenOnlyFile.get(req.params.token);
+    if (hasHiddenSegment(path.relative(root, target)) || (onlyFile && path.relative(root, target) !== onlyFile)) {
+      res.status(404).json({ error: "file not found" });
       return;
     }
     noteServed(req.params.token, path.relative(root, target));

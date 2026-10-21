@@ -14,6 +14,24 @@ export function inlineUrl(targetPath: string): string {
   return `/api/download?inline=1&path=${encodeURIComponent(targetPath)}`;
 }
 
+// Why a file a viewer showed couldn't load: the server's own message (not
+// found, not readable), or null when it loads fine (the browser then can't
+// show its contents: an unsupported codec, a broken image). The body of a
+// file that does load is never read.
+export async function fileLoadProblem(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (res.ok) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    return body?.error ?? `${res.status} ${res.statusText}`;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 export async function fetchFileText(targetPath: string): Promise<string> {
   const res = await fetch(downloadUrl(targetPath));
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);

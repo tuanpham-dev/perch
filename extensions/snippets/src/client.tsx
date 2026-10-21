@@ -9,7 +9,7 @@
 // every snippet present at activation (registerCommand has no per-command
 // disposal, so snippets added this session join the palette after reload),
 // and a quick-switcher provider that matches snippet names live.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import "./style.css";
@@ -49,6 +49,7 @@ let removeStylesheet: (() => void) | null = null;
 let removeContextListener: (() => void) | null = null;
 let removeSettingsListener: (() => void) | null = null;
 let removeRunListener: (() => void) | null = null;
+let showError: ((message: string) => void) | null = null;
 
 const NO_CONTEXT: ActiveContext = { sessionName: null, windowIndex: null, cwd: null };
 let activeContext: ActiveContext = NO_CONTEXT;
@@ -145,17 +146,31 @@ function DialogShell({
   onCancel: () => void;
   children: React.ReactNode;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // Focus moves into the dialog (its autofocus field, else its first
+  // control) and Escape closes it wherever focus is.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.contains(document.activeElement)) {
+      dialog.querySelector<HTMLElement>("[autofocus], input, textarea, button")?.focus();
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onCancel]);
   return (
     <div
       className="snippets-backdrop"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-      }}
     >
-      <div className="snippets-dialog" role="dialog" aria-label={title}>
+      <div className="snippets-dialog" role="dialog" aria-label={title} ref={dialogRef}>
         <div className="snippets-dialog-title">{title}</div>
         {children}
       </div>
@@ -256,6 +271,8 @@ function EditForm({
   );
 }
 
+// The snippet chooser: a filter box over the list, like the app's other
+// pickers - type to narrow, arrows to move, Enter to run, Escape to close.
 function PickerForm({
   snippets,
   resolve,
@@ -263,18 +280,56 @@ function PickerForm({
   snippets: Snippet[];
   resolve: (value: Snippet | null) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLUListElement>(null);
+  const term = query.trim().toLowerCase();
+  const shown = term
+    ? snippets.filter((s) => s.name.toLowerCase().includes(term) || s.command.toLowerCase().includes(term))
+    : snippets;
+  const cancel = useCallback(() => resolve(null), [resolve]);
+  useEffect(() => setActive(0), [term]);
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
   return (
-    <DialogShell title="Run Snippet" onCancel={() => resolve(null)}>
-      <ul className="snippets-picker">
-        {snippets.map((s) => (
-          <li key={s.id}>
-            <button type="button" className="snippets-picker-row" onClick={() => resolve(s)}>
+    <DialogShell title="Run Snippet" onCancel={cancel}>
+      <input
+        className="snippets-input"
+        autoFocus
+        placeholder="Type to filter snippets"
+        aria-label="Filter snippets"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActive((i) => Math.min(shown.length - 1, i + 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActive((i) => Math.max(0, i - 1));
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            if (shown[active]) resolve(shown[active]);
+          }
+        }}
+      />
+      <ul className="snippets-picker" role="listbox" ref={listRef}>
+        {shown.map((s, i) => (
+          <li key={s.id} data-index={i} role="option" aria-selected={i === active}>
+            <button
+              type="button"
+              className={`snippets-picker-row${i === active ? " active" : ""}`}
+              onMouseMove={() => setActive(i)}
+              onClick={() => resolve(s)}
+            >
               <span className="snippets-name">{s.name}</span>
               <span className="snippets-preview">{s.command}</span>
             </button>
           </li>
         ))}
         {snippets.length === 0 && <li className="snippets-empty">No snippets yet - add one in the Commands sidebar tab.</li>}
+        {snippets.length > 0 && shown.length === 0 && <li className="snippets-empty">No snippet matches.</li>}
       </ul>
     </DialogShell>
   );
@@ -282,14 +337,25 @@ function PickerForm({
 
 // ---- Actions ----
 
+// Types into the terminal the user is looking at (its window, not just its
+// session), and says so when that fails rather than doing nothing.
 function typeIntoActivePane(text: string, submit: boolean): void {
   const session = activeContext.sessionName;
-  if (!session || !serverFetch) return;
+  if (!session || !serverFetch) {
+    showError?.("Open a terminal first to run a snippet.");
+    return;
+  }
   void serverFetch("/type", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ session, text, submit }),
-  }).catch(() => {});
+    body: JSON.stringify({ session, windowIndex: activeContext.windowIndex, text, submit }),
+  })
+    .then(async (res) => {
+      if (res.ok) return;
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      showError?.(`Couldn't send the snippet: ${body?.error ?? `${res.status} ${res.statusText}`}`);
+    })
+    .catch((err: unknown) => showError?.(`Couldn't send the snippet: ${err instanceof Error ? err.message : String(err)}`));
 }
 
 // The full run flow: prompt for params if any, substitute, type. forceInsert
@@ -478,6 +544,7 @@ interface ExtensionContext {
   app: {
     getActiveContext(): ActiveContext;
     onDidChangeContext(cb: (ctx: ActiveContext) => void): () => void;
+    showError(message: string): void;
   };
   serverFetch(path: string, init?: RequestInit): Promise<Response>;
   assetUrl(relPath: string): string;
@@ -544,6 +611,7 @@ export function activate(ctx: ExtensionContext): void {
   refreshSwitcher = handle.refresh;
 
   activeContext = ctx.app.getActiveContext();
+  showError = ctx.app.showError;
   removeContextListener = ctx.app.onDidChangeContext((next) => {
     activeContext = next;
   });
@@ -557,6 +625,8 @@ export function activate(ctx: ExtensionContext): void {
   const onRunSnippet = (e: Event) => {
     const detail = (e as CustomEvent<{ id?: string; send?: (text: string, submit: boolean) => void }>).detail;
     if (!detail?.id) return;
+    // Taken: the touch key knows someone answered.
+    e.preventDefault();
     const snippet = readSnippets().find((s) => s.id === detail.id);
     if (!snippet) {
       showMissingSnippet();

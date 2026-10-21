@@ -12,7 +12,15 @@ import type { PaneLine, ScreenCell } from "../../_shared/terminalEngineTypes";
 // (IBuffer.getLine's own index space), and the returned startLine is in
 // that same space — callers holding a screen-relative row must offset by
 // buffer.baseY themselves (see the engine's readStitchedLine).
-export function stitchXtermLine(term: XtermTerminal, y: number): { text: string; startLine: number } | null {
+//
+// `cells[i]` is the cell (row offset × cols + column, from startLine) that
+// text index i sits in. They differ wherever a character is wider than one
+// cell (CJK, emoji like ✅): one string index, two cells. Link ranges are
+// mapped through it, so an underline sits exactly over its text.
+export function stitchXtermLine(
+  term: XtermTerminal,
+  y: number,
+): { text: string; startLine: number; cells: number[] } | null {
   const buffer = term.buffer.active;
   if (y < 0 || y >= buffer.length) return null;
   let startLine = y;
@@ -20,18 +28,28 @@ export function stitchXtermLine(term: XtermTerminal, y: number): { text: string;
     startLine--;
   }
   const cols = term.cols;
-  const parts: string[] = [];
+  let text = "";
+  const cells: number[] = [];
+  const reuse = buffer.getNullCell();
   let endLine = startLine;
   for (let i = 0; i < MAX_STITCH_LINES; i++) {
     const line = buffer.getLine(endLine);
     if (!line) break;
-    parts.push(line.translateToString(false, 0, cols));
+    const rowOffset = (endLine - startLine) * cols;
+    for (let x = 0; x < cols; x++) {
+      const cell = line.getCell(x, reuse);
+      // The right half of a wide character: its text is in the left half.
+      if (cell && cell.getWidth() === 0) continue;
+      const chars = cell?.getChars() || " ";
+      text += chars;
+      for (let k = 0; k < chars.length; k++) cells.push(rowOffset + x);
+    }
     const next = buffer.getLine(endLine + 1);
     if (!next?.isWrapped) break;
     endLine++;
   }
-  if (!parts.length) return null;
-  return { text: parts.join(""), startLine };
+  if (endLine === startLine && !buffer.getLine(startLine)) return null;
+  return { text, startLine, cells };
 }
 
 // 0-based buffer-index -> xterm's IBufferCellPosition, which (unlike
@@ -43,8 +61,10 @@ function indexToXtermPosition(
   startLine: number,
   cols: number,
   idx: number,
+  cells?: number[],
 ): { x: number; y: number } {
-  return { y: startLine + Math.floor(idx / cols) + 1, x: (idx % cols) + 1 };
+  const cell = cells?.[idx] ?? idx;
+  return { y: startLine + Math.floor(cell / cols) + 1, x: (cell % cols) + 1 };
 }
 
 // A provided link plus what it actually points at — the engine forwards
@@ -146,7 +166,7 @@ export function buildXtermLinkProvider(
         callback(undefined);
         return;
       }
-      const { text, startLine } = stitched;
+      const { text, startLine, cells } = stitched;
       const cols = term.cols;
       // Screen rows are measured from baseY (the top of the live screen,
       // which is what tmux's pane layout describes), captured now so a
@@ -158,17 +178,18 @@ export function buildXtermLinkProvider(
       };
 
       const found: Found[] = findCandidates(text).map((c) => {
-        const row = liveRow(startLine + Math.floor(c.startIdx / cols));
+        const startCell = cells[c.startIdx] ?? c.startIdx;
+        const row = liveRow(startLine + Math.floor(startCell / cols));
         return {
           kind: c.kind,
           text: c.text,
           target: c.target,
           line: c.line,
           range: {
-            start: indexToXtermPosition(startLine, cols, c.startIdx),
-            end: indexToXtermPosition(startLine, cols, c.endIdx - 1),
+            start: indexToXtermPosition(startLine, cols, c.startIdx, cells),
+            end: indexToXtermPosition(startLine, cols, c.endIdx - 1, cells),
           },
-          cell: row === null ? null : { row, col: c.startIdx % cols },
+          cell: row === null ? null : { row, col: startCell % cols },
         };
       });
 

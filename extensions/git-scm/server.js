@@ -39,6 +39,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASKPASS_PATH = path.join(__dirname, "askpass.cjs");
 
 const DEFAULT_TIMEOUT = 15000;
+// Commands that run the user's hooks or walk the whole tree (a pre-commit
+// that lints and type-checks, a long rebase, staging a big checkout): cut
+// off at 15s they could leave a stash or a half-done rebase behind.
+const LONG_TIMEOUT = 10 * 60_000;
+const LONG_COMMANDS = new Set(["commit", "merge", "rebase", "cherry-pick", "revert", "switch", "checkout", "stash", "add", "restore", "reset", "clean", "rm"]);
 
 // ---- AI commit messages ----
 // The provider, binary, model and any API key all live in core (Settings →
@@ -74,8 +79,10 @@ function git(args, cwd, opts = {}) {
       {
         cwd,
         encoding: "utf8",
-        timeout: opts.timeout ?? DEFAULT_TIMEOUT,
-        maxBuffer: 8 * 1024 * 1024,
+        timeout: opts.timeout ?? (LONG_COMMANDS.has(args[0]) ? LONG_TIMEOUT : DEFAULT_TIMEOUT),
+        // A status of a big untracked folder (a venv, node_modules not yet
+        // ignored) can run to tens of megabytes.
+        maxBuffer: 64 * 1024 * 1024,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       },
       (err, stdout, stderr) => {
@@ -556,7 +563,8 @@ async function quickDiffOids(root, rels) {
   return { head, index, mode };
 }
 
-// git with `input` on stdin, for hash-object.
+// git with `input` on stdin: hash-object, and pathspec lists too long for a
+// command line.
 function gitWithInput(args, cwd, input) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
@@ -857,8 +865,16 @@ export function activate({ router, log, host, getSettings, ai }) {
   router.get("/status", async (req, res) => {
     const cwd = requireCwd(req, res);
     if (!cwd) return;
+    let root;
     try {
-      const root = (await git(["rev-parse", "--show-toplevel"], cwd)).trim();
+      root = (await git(["rev-parse", "--show-toplevel"], cwd)).trim();
+    } catch {
+      // Not a git repository — a plain empty-state response, not an error
+      // (confirmed: no "Initialize Repository" affordance for v1).
+      res.json({ root: null });
+      return;
+    }
+    try {
       // -uall recurses into untracked directories so each file inside gets
       // its own row — default (--untracked-files=normal) collapses a whole
       // new directory into one "? dir/" entry instead, same trap the core
@@ -895,10 +911,10 @@ export function activate({ router, log, host, getSettings, ai }) {
         // No stashes yet.
       }
       res.json({ root, operation, mergeMsg, lastCommitMessage, head, stashCount, stashHead, ...parseStatus(raw) });
-    } catch {
-      // Not a git repository — a plain empty-state response, not an error
-      // (confirmed: no "Initialize Repository" affordance for v1).
-      res.json({ root: null });
+    } catch (err) {
+      // A repository whose status failed (a timeout, a corrupt index): say
+      // so, rather than calling it "not a git repository".
+      res.status(500).json({ error: `git status failed: ${err.message}` });
     }
   });
 
@@ -924,7 +940,9 @@ export function activate({ router, log, host, getSettings, ai }) {
     try {
       const root = await requireRoot(cwd, res);
       if (!root) return;
-      await git(["add", "-A", "--", ...paths], root);
+      // Paths go through stdin, NUL-separated: thousands of them would
+      // overflow the command line (on Windows at a few hundred).
+      await gitWithInput(["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"], root, paths.join("\0"));
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -940,11 +958,11 @@ export function activate({ router, log, host, getSettings, ai }) {
       const root = await requireRoot(cwd, res);
       if (!root) return;
       try {
-        await git(["reset", "-q", "HEAD", "--", ...paths], root);
+        await gitWithInput(["reset", "-q", "HEAD", "--pathspec-from-file=-", "--pathspec-file-nul"], root, paths.join("\0"));
       } catch {
         // Defensive fallback for git versions where HEAD doesn't resolve on
         // an unborn branch — the repo-with-no-commits-yet case.
-        await git(["rm", "--cached", "-r", "--", ...paths], root);
+        await gitWithInput(["rm", "--cached", "-r", "--pathspec-from-file=-", "--pathspec-file-nul"], root, paths.join("\0"));
       }
       res.json({ ok: true });
     } catch (err) {
@@ -969,8 +987,14 @@ export function activate({ router, log, host, getSettings, ai }) {
         ? req.body.untracked.filter((p) => typeof p === "string")
         : [];
       const tracked = paths.filter((p) => !untracked.includes(p));
-      if (tracked.length > 0) await git(["restore", "--worktree", "--", ...tracked], root);
-      if (untracked.length > 0) await git(["clean", "-f", "--", ...untracked], root);
+      if (tracked.length > 0) {
+        await gitWithInput(["restore", "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"], root, tracked.join("\0"));
+      }
+      // git clean takes no pathspec file: in batches, so no single command
+      // line gets too long.
+      for (let i = 0; i < untracked.length; i += 200) {
+        await git(["clean", "-f", "--", ...untracked.slice(i, i + 200)], root);
+      }
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1713,7 +1737,7 @@ export function activate({ router, log, host, getSettings, ai }) {
     const cwd = requireCwd(req, res);
     if (!cwd) return;
     const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(200, Math.floor(rawLimit)) : 20;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(10_000, Math.floor(rawLimit)) : 20;
     // The COMMITS search box, already split into its three parts by the
     // client (searchQuery.mjs). Each is passed as a single `--opt=value`
     // argument so a value starting with "-" can't become an option, and

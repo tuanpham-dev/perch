@@ -33,6 +33,7 @@ let extSettings: SettingsApi | null = null;
 // the normal FILES-tree dispatch (openFileTab).
 let openFileTab: ((path: string, line?: number) => void) | null = null;
 let openViewerTab: ((viewerId: string, path: string, opts?: { title?: string }) => void) | null = null;
+let revealInFiles: ((path: string) => boolean) | null = null;
 
 // lowlight's default "common" set (~35 languages) excludes several
 // devops/config languages that show up in READMEs — nginx, dockerfile,
@@ -76,6 +77,13 @@ function isExternalHref(href: string): boolean {
 // directory and collapses ""/"."/".." segments — shared by image srcs and
 // relative link targets.
 function resolveRelativePath(markdownFilePath: string, relPath: string): string {
+  // Markdown writes spaces and other characters percent-encoded
+  // ("my%20notes.md"); the file on disk has the real name.
+  try {
+    relPath = decodeURI(relPath);
+  } catch {
+    // a stray "%" that isn't an escape: use the path as written
+  }
   const dir = markdownFilePath.slice(0, markdownFilePath.lastIndexOf("/"));
   const full = relPath.startsWith("/") || /^[A-Za-z]:\//.test(relPath) ? relPath : `${dir}/${relPath}`;
   // A Windows drive ("C:") is the root to keep; everything else joins under "/".
@@ -374,6 +382,16 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
       const pathPart = hash === -1 ? href : href.slice(0, hash);
       const anchor = hash === -1 ? null : href.slice(hash + 1);
       const target = resolveRelativePath(filePath, pathPart);
+      // A folder is shown in FILES. Asked through the folder listing: the
+      // download route would start zipping the whole folder.
+      try {
+        if ((await fetch(`/api/fs?path=${encodeURIComponent(target)}`)).ok) {
+          if (!revealInFiles?.(target)) showLinkNotice(`${pathPart} is a folder outside this project's FILES`);
+          return;
+        }
+      } catch {
+        // not reachable: treat it as a file below
+      }
       let ok = false;
       try {
         ok = (await fetch(downloadUrl(target), { method: "HEAD" })).ok;
@@ -491,6 +509,7 @@ export function activate(ctx: {
   app: {
     openFileTab: (path: string, line?: number) => void;
     openViewerTab: (viewerId: string, path: string, opts?: { title?: string }) => void;
+    revealInFiles?: (path: string) => boolean;
   };
   assetUrl: (relPath: string) => string;
   settings: SettingsApi;
@@ -498,6 +517,7 @@ export function activate(ctx: {
   extSettings = ctx.settings;
   openFileTab = ctx.app.openFileTab;
   openViewerTab = ctx.app.openViewerTab;
+  revealInFiles = ctx.app.revealInFiles ?? null;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   setMermaidAssetUrl(ctx.assetUrl);
   ctx.registerFileViewer({
@@ -517,6 +537,7 @@ export function deactivate() {
   removeStylesheet = null;
   openFileTab = null;
   openViewerTab = null;
+  revealInFiles = null;
   setMermaidAssetUrl(null);
   pendingAnchors.clear();
 }

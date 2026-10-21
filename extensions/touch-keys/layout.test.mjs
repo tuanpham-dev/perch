@@ -52,3 +52,14 @@ describe("parseLayout", () => {
     assert.match(lines[5], /and \d+ more/);
   });
 });
+
+it("Shift+Tab, Backspace, F-keys and Ctrl with punctuation", async () => {
+  const { parseSend } = await import("./src/touchKeys.ts");
+  assert.deepEqual(parseSend("{s-tab}"), { data: "\x1b[Z" });
+  assert.deepEqual(parseSend("{bs}"), { data: "\x7f" });
+  assert.deepEqual(parseSend("{f1}{f12}"), { data: "\x1bOP\x1b[24~" });
+  assert.deepEqual(parseSend("{^[}"), { data: "\x1b" });
+  assert.deepEqual(parseSend("{^?}"), { data: "\x7f" });
+  assert.deepEqual(parseSend("{^]}"), { data: "\x1d" });
+  assert.ok("error" in parseSend("{^1}"));
+});

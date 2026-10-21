@@ -41,9 +41,12 @@ function shellQuote(value) {
 }
 
 // Must match byte-for-byte between /scripts (running detection) and /run
-// (window lookup) — the name IS the handle on a task's window.
-function taskWindowName(script, dir) {
-  return `${script} [${path.basename(dir)}]`;
+// (window lookup) — the name IS the handle on a task's window. Named by the
+// package's path within its workspace (apps/web, packages/web), so two
+// packages with the same folder name don't share, or type into, one window.
+export function taskWindowName(script, dir, root) {
+  const rel = root && root !== dir ? path.relative(root, dir).split(path.sep).join("/") : "";
+  return `${script} [${rel || path.basename(dir)}]`;
 }
 
 // null for a missing or malformed package.json — a directory whose manifest
@@ -72,7 +75,37 @@ function findNearestPackageJson(startDir) {
   }
 }
 
-function workspacePatterns(pkg) {
+// pnpm declares its workspace in pnpm-workspace.yaml, not package.json:
+//   packages:
+//     - "apps/*"
+//     - '!**/test/**'
+// Only that list is read, so a small reader does.
+export function pnpmWorkspacePatterns(dir) {
+  let text;
+  try {
+    text = fs.readFileSync(path.join(dir, "pnpm-workspace.yaml"), "utf8");
+  } catch {
+    return null;
+  }
+  const patterns = [];
+  let inPackages = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\s+#.*$/, "");
+    if (/^packages\s*:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (!inPackages) continue;
+    const item = /^\s*-\s*(.+?)\s*$/.exec(line);
+    if (item) patterns.push(item[1].replace(/^(['"])(.*)\1$/, "$2"));
+    else if (/^\S/.test(line)) inPackages = false;
+  }
+  return patterns;
+}
+
+function workspacePatterns(pkg, dir) {
+  const pnpm = dir ? pnpmWorkspacePatterns(dir) : null;
+  if (pnpm) return pnpm;
   const field = pkg?.workspaces;
   if (Array.isArray(field)) return field.filter((p) => typeof p === "string");
   if (field && typeof field === "object" && Array.isArray(field.packages)) {
@@ -88,7 +121,7 @@ function findWorkspaceRoot(fromDir) {
   let dir = path.resolve(fromDir);
   for (;;) {
     const pkg = readPackage(dir);
-    if (pkg && workspacePatterns(pkg)) return dir;
+    if (pkg && workspacePatterns(pkg, dir)) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -144,7 +177,7 @@ function describePackage(dir, root, activeDir, runningNames) {
     .map(([name, command]) => ({
       name,
       command,
-      running: runningNames.has(taskWindowName(name, dir)),
+      running: runningNames.has(taskWindowName(name, dir, root)),
     }));
   return {
     dir,
@@ -201,7 +234,7 @@ export function activate({ router, log, host }) {
 
       const dirs = [];
       if (workspaceRoot) {
-        const members = await expandWorkspaces(root, workspacePatterns(readPackage(root)) ?? []);
+        const members = await expandWorkspaces(root, workspacePatterns(readPackage(root), root) ?? []);
         // The active package is kept even when no workspace glob covers it —
         // it is the one package the user is certainly looking at.
         const unique = new Set([...members, nearestDir]);
@@ -241,9 +274,10 @@ export function activate({ router, log, host }) {
       return;
     }
 
-    const pm = detectPackageManager(findWorkspaceRoot(dir) ?? dir);
+    const root = findWorkspaceRoot(dir) ?? dir;
+    const pm = detectPackageManager(root);
     const command = `${pm} run ${BARE_SCRIPT.test(script) ? script : shellQuote(script)}`;
-    const name = taskWindowName(script, dir);
+    const name = taskWindowName(script, dir, root);
 
     try {
       const existing = (await listWindows(sessions, session)).find((win) => win.windowName === name);
@@ -263,6 +297,52 @@ export function activate({ router, log, host }) {
       const index = await sessions.createWindow(session, dir, name);
       await sessions.sendText(session, command, true, index);
       res.json({ reused: false });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Stops a running task (Ctrl+C in its window, as a person would) and, with
+  // restart, runs it again once its shell is back at a prompt.
+  router.post("/stop", async (req, res) => {
+    const { session, script, restart } = req.body ?? {};
+    const dir = typeof req.body?.dir === "string" ? expandHome(req.body.dir) : req.body?.dir;
+    if (typeof session !== "string" || !session || typeof dir !== "string" || !path.isAbsolute(dir) || typeof script !== "string" || !script) {
+      res.status(400).json({ error: "session, dir (absolute path), and script are required" });
+      return;
+    }
+    const pkg = readPackage(dir);
+    if (!pkg || typeof pkg.scripts?.[script] !== "string") {
+      res.status(404).json({ error: `no script "${script}" in ${dir}/package.json` });
+      return;
+    }
+    const root = findWorkspaceRoot(dir) ?? dir;
+    const name = taskWindowName(script, dir, root);
+    try {
+      const find = async () => (await listWindows(sessions, session)).find((win) => win.windowName === name);
+      const win = await find();
+      if (!win || !isRunning(win)) {
+        res.status(409).json({ error: `${script} isn't running` });
+        return;
+      }
+      await sessions.sendTextToWindow(win.windowId, "\u0003", false);
+      if (restart !== true) {
+        res.json({ stopped: true });
+        return;
+      }
+      // Up to 10s for the script to exit; a stubborn one gets a second Ctrl+C.
+      for (let waited = 0; waited < 10_000; waited += 250) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const now = await find();
+        if (now && !isRunning(now)) {
+          const pm = detectPackageManager(root);
+          await sessions.sendTextToWindow(now.windowId, `${pm} run ${BARE_SCRIPT.test(script) ? script : shellQuote(script)}`, true);
+          res.json({ restarted: true });
+          return;
+        }
+        if (waited === 5_000 && now) await sessions.sendTextToWindow(now.windowId, "\u0003", false);
+      }
+      res.status(504).json({ error: `${script} didn't stop within 10 seconds` });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

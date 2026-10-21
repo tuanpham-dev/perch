@@ -3,6 +3,7 @@ import { sendWithInkSafeEnters, whenMatches } from "@perch/engine-support";
 import Icon from "../../_shared/Icon";
 import { keyLabelIcon, parseSend, snippetIdOf, type TouchKey } from "./touchKeys";
 import { isVoiceInputSupported, VoiceInput } from "./voiceInput";
+import { showTouchKeyError } from "./notify";
 
 interface Props {
   visible: boolean;
@@ -260,8 +261,12 @@ export function TouchKeyButton({
       // touchKeys.ts). The send callback keeps the text targeted at THIS
       // terminal — the snippets extension's own fallback types into the
       // active session's pane, which isn't necessarily the tapped one.
-      window.dispatchEvent(
+      // The snippets extension takes the event with preventDefault(); one
+      // nobody took means Snippets is off, which the key says rather than
+      // doing nothing.
+      const taken = !window.dispatchEvent(
         new CustomEvent("perch:run-snippet", {
+          cancelable: true,
           detail: {
             id: snippetId,
             send: (text: string, submit: boolean) =>
@@ -269,6 +274,7 @@ export function TouchKeyButton({
           },
         }),
       );
+      if (!taken) showTouchKeyError("This key runs a snippet, and the Snippets extension isn't enabled.");
     } else {
       sendWithInkSafeEnters(data, onSendInput);
     }

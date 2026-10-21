@@ -15,6 +15,7 @@ import { fetchFileText, saveFileText } from "../../_shared/fileApi";
 import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import { createDraftClient, hashText, type DraftClient, type DraftsApi } from "../../_shared/drafts";
+import { checkDiskConflict } from "../../_shared/diskConflict";
 import type { MenuItem } from "../../_shared/types";
 import Icon from "../../_shared/Icon";
 import { calcColWidths, EditableCell, EditableHeaderCell, escapeRegex, getBounds, inBounds } from "./Grid";
@@ -39,6 +40,15 @@ function readClickAction(): "edit" | "preview" {
 // dirty and restored the next time the file opens — after a reload, a crash,
 // an extension update, or on another device. Null on a host without drafts.
 let drafts: DraftClient | null = null;
+// The app's own dialogs (ctx.app): yes/no questions and the "changed on disk"
+// choice on save.
+type PickItemFn = (opts: { title: string; items: { id: string; label: string; detail?: string; icon?: string }[] }) => Promise<string | null>;
+let pickItem: PickItemFn | null = null;
+let confirmDialog: ((message: string, confirmLabel?: string) => Promise<boolean>) | null = null;
+
+function askConfirm(message: string, confirmLabel: string): Promise<boolean> {
+  return confirmDialog ? confirmDialog(message, confirmLabel) : Promise.resolve(window.confirm(message));
+}
 // Set by deactivate(), which the host calls before it unmounts the viewers:
 // that unmount is an update or a disable, so it must keep the backup rather
 // than drop it the way a closed tab does.
@@ -283,8 +293,18 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
     }
   }
   async function handleReload() {
-    if (dirty && !window.confirm("Discard unsaved changes and reload from disk?")) return;
+    if (dirty && !(await askConfirm("Discard your unsaved changes and reload the file from disk?", "Reload"))) return;
     await reloadFromDisk();
+  }
+
+  // Header and delimiter re-read the file: with unsaved edits, ask first.
+  async function changeHasHeader(next: boolean) {
+    if (dirty && !(await askConfirm("Changing Header re-reads the file and discards your unsaved changes. Continue?", "Discard Changes"))) return;
+    setHasHeader(next);
+  }
+  async function changeDelimiter(next: string) {
+    if (dirty && !(await askConfirm("Changing the delimiter re-reads the file and discards your unsaved changes. Continue?", "Discard Changes"))) return;
+    setDelimiter(next);
   }
 
   // The host bumps reloadKey when an explicit open/preview action lands on
@@ -332,6 +352,17 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
     setSaving(true);
     setSaveError(null);
     try {
+      const choice = await checkDiskConflict({
+        name: basename,
+        loaded: diskTextRef.current ?? "",
+        readDisk: () => fetchFileText(filePath),
+        pick: pickItem ?? undefined,
+      });
+      if (choice === "cancel") return;
+      if (choice === "reload") {
+        await reloadFromDisk();
+        return;
+      }
       const { text: csvText } = serializeGrid();
       await saveFileText(filePath, csvText);
       diskTextRef.current = csvText;
@@ -443,28 +474,38 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
   function openFindReplace() { setShowFind(true); setShowReplace(true); setTimeout(() => findInputRef.current?.focus(), 0); }
   function closeFind() { setShowFind(false); setShowReplace(false); setFindQuery(""); setFindIdx(0); scrollRef.current?.focus(); }
 
+  // The same query find matched with (trimmed), and a replacement that is
+  // literal in plain mode ("$1" inserts "$1"), as a pattern in regex mode.
+  function replacePattern(): { re: RegExp; with: string | (() => string) } {
+    const q = findQuery.trim();
+    return {
+      re: useRegexFind ? new RegExp(q, "gi") : new RegExp(escapeRegex(q), "gi"),
+      with: useRegexFind ? replaceQuery : () => replaceQuery,
+    };
+  }
+
   function replaceCurrent() {
     if (!findMatches.length || regexError) return;
     const m = findMatches[safeIdx];
     const oi = sortedWithIdx[m.row]?.originalIdx;
     if (oi === undefined) return;
     const cell = sortedWithIdx[m.row]?.row[m.col] ?? "";
-    const re = useRegexFind ? new RegExp(findQuery, "gi") : new RegExp(escapeRegex(findQuery), "gi");
-    const newVal = cell.replace(re, replaceQuery);
+    const pattern = replacePattern();
+    const newVal = cell.replace(pattern.re, pattern.with as string);
     pushHistory();
     setRows((prev) => prev.map((r, i) => { if (i !== oi) return r; const c = [...r]; c[m.col] = newVal; return c; }));
     setFindIdx((idx) => Math.min(idx, Math.max(0, findMatches.length - 2)));
   }
   function replaceAll() {
     if (!findMatches.length || regexError) return;
-    const re = useRegexFind ? new RegExp(findQuery, "gi") : new RegExp(escapeRegex(findQuery), "gi");
+    const pattern = replacePattern();
     pushHistory();
     setRows((prev) => {
       const next = prev.map((r) => [...r]);
       findMatches.forEach(({ row, col }) => {
         const oi = sortedWithIdx[row]?.originalIdx;
         if (oi === undefined) return;
-        next[oi][col] = next[oi][col].replace(re, replaceQuery);
+        next[oi][col] = next[oi][col].replace(pattern.re, pattern.with as string);
       });
       return next;
     });
@@ -481,18 +522,51 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
 
   // ── Scroll ─────────────────────────────────────────────────────────────
 
+  // Wrapped rows have their own heights: each one rendered is measured
+  // (rowHeightsRef, filled after every render below), the rest count as
+  // ROW_HEIGHT until they're seen. rowTops[i] is row i's top; the last
+  // entry is the total height.
+  const rowHeightsRef = useRef(new Map<number, number>());
+  const [heightsVersion, setHeightsVersion] = useState(0);
+  useEffect(() => {
+    rowHeightsRef.current = new Map();
+    setHeightsVersion((v) => v + 1);
+  }, [wordWrap, sortedWithIdx]);
+  const rowTops = useMemo(() => {
+    const tops = new Float64Array(totalRows + 1);
+    const heights = rowHeightsRef.current;
+    for (let i = 0; i < totalRows; i++) tops[i + 1] = tops[i] + (wordWrap ? (heights.get(i) ?? ROW_HEIGHT) : ROW_HEIGHT);
+    return tops;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalRows, wordWrap, heightsVersion]);
+  // The first row whose bottom is below `y`.
+  const rowAt = useCallback(
+    (y: number) => {
+      let lo = 0;
+      let hi = Math.max(0, totalRows - 1);
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (rowTops[mid + 1] <= y) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    },
+    [rowTops, totalRows],
+  );
+
   const scrollToCell = useCallback((row: number, col: number) => {
     const el = scrollRef.current;
     if (!el) return;
     if (wordWrap) {
-      // Rows have variable height while wrapped (and virtualization is off,
-      // see visStart/visEnd below), so every row is already in the DOM —
-      // measure its actual position instead of assuming ROW_HEIGHT.
+      // Rows have their own heights while wrapped: scroll by the measured
+      // (or estimated) tops, then by the row itself once it's on screen.
       const rowEl = el.querySelector<HTMLElement>(`tr[data-row-idx="${row}"]`);
       if (rowEl) {
         const cr = el.getBoundingClientRect(), rr = rowEl.getBoundingClientRect();
-        if (rr.top < cr.top) el.scrollTop += rr.top - cr.top;
+        if (rr.top < cr.top + ROW_HEIGHT) el.scrollTop += rr.top - cr.top - ROW_HEIGHT;
         else if (rr.bottom > cr.bottom) el.scrollTop += rr.bottom - cr.bottom;
+      } else {
+        el.scrollTop = Math.max(0, rowTops[row] - el.clientHeight / 3);
       }
     } else {
       const rowTop = row * ROW_HEIGHT;
@@ -507,16 +581,32 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
       if (tr.left - cr.left < rowNumColWRef.current) el.scrollLeft += tr.left - cr.left - rowNumColWRef.current;
       else if (tr.right - cr.left > el.clientWidth) el.scrollLeft += tr.right - cr.left - el.clientWidth;
     }
-  }, [wordWrap]);
+  }, [wordWrap, rowTops]);
 
   const handleScroll = useCallback(() => { if (scrollRef.current) setScrollTop(scrollRef.current.scrollTop); }, []);
 
-  // Virtualization assumes a fixed ROW_HEIGHT, which wrapped rows don't
-  // have — render every row (no windowing) while word wrap is on.
-  const visStart = wordWrap ? 0 : Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - VIRT_BUFFER);
-  const visEnd = wordWrap ? maxRow : Math.min(maxRow, Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + VIRT_BUFFER);
-  const topSpace = wordWrap ? 0 : visStart * ROW_HEIGHT;
-  const botSpace = wordWrap ? 0 : Math.max(0, (totalRows - visEnd - 1) * ROW_HEIGHT);
+  // Only the rows near the view are rendered, wrapped or not; wrapped rows
+  // are placed by their measured heights (rowTops above).
+  const visStart = totalRows === 0 ? 0 : Math.max(0, rowAt(scrollTop) - VIRT_BUFFER);
+  const visEnd = totalRows === 0 ? -1 : Math.min(maxRow, rowAt(scrollTop + viewportH) + VIRT_BUFFER);
+  const topSpace = rowTops[visStart] ?? 0;
+  const botSpace = Math.max(0, (rowTops[totalRows] ?? 0) - (rowTops[visEnd + 1] ?? 0));
+
+  // After each render while wrapped, record the heights of the rows on
+  // screen; a change re-places the rest.
+  useLayoutEffect(() => {
+    if (!wordWrap || !scrollRef.current) return;
+    let changed = false;
+    for (const tr of scrollRef.current.querySelectorAll<HTMLElement>("tr[data-row-idx]")) {
+      const idx = Number(tr.dataset.rowIdx);
+      const h = tr.offsetHeight;
+      if (!Number.isNaN(idx) && h > 0 && rowHeightsRef.current.get(idx) !== h) {
+        rowHeightsRef.current.set(idx, h);
+        changed = true;
+      }
+    }
+    if (changed) setHeightsVersion((v) => v + 1);
+  });
 
   // ── Selection ──────────────────────────────────────────────────────────
 
@@ -678,8 +768,8 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
     const el = scrollRef.current;
     if (!el) return null;
     if (wordWrap) {
-      // Rows aren't a fixed height while wrapped — every row is in the DOM
-      // (virtualization is off), so find the one actually under the cursor.
+      // Rows aren't a fixed height while wrapped — find the one actually
+      // under the cursor (it's on screen, so it's rendered).
       const rowEl = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("tr[data-row-idx]");
       const idx = rowEl ? Number(rowEl.dataset.rowIdx) : NaN;
       return Number.isNaN(idx) ? null : Math.max(0, Math.min(idx, maxRow));
@@ -1111,9 +1201,9 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
             onAddRow={addRow}
             onAddColumn={addColumn}
             hasHeader={hasHeader}
-            setHasHeader={setHasHeader}
+            setHasHeader={(v) => void changeHasHeader(v)}
             delimiter={delimiter}
-            setDelimiter={setDelimiter}
+            setDelimiter={(v) => void changeDelimiter(v)}
             wordWrap={wordWrap}
             setWordWrap={setWordWrap}
             copied={copied}
@@ -1356,8 +1446,11 @@ export function activate(ctx: {
   assetUrl: (relPath: string) => string;
   settings: SettingsApi;
   drafts?: DraftsApi;
+  app?: { pickItem?: PickItemFn; confirmDialog?: (message: string, confirmLabel?: string) => Promise<boolean> };
 }) {
   extSettings = ctx.settings;
+  pickItem = ctx.app?.pickItem ?? null;
+  confirmDialog = ctx.app?.confirmDialog ?? null;
   drafts = ctx.drafts ? createDraftClient(ctx.drafts) : null;
   deactivating = false;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
@@ -1378,4 +1471,6 @@ export function deactivate() {
   removeStylesheet?.();
   removeStylesheet = null;
   extSettings = null;
+  pickItem = null;
+  confirmDialog = null;
 }

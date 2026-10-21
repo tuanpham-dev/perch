@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import "./style.css";
-import { downloadUrl } from "../../_shared/fileApi";
+import { downloadUrl, fileLoadProblem } from "../../_shared/fileApi";
+import Icon from "../../_shared/Icon";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"]);
@@ -10,20 +13,57 @@ function extOf(filePath: string): string {
   return dot === -1 ? "" : filePath.slice(dot + 1).toLowerCase();
 }
 
-// No portaled tab-bar controls — the native <video>/<audio> controls already
-// cover play/pause/seek/volume, matching how a browser tab handles the same
-// file. Media elements ignore Content-Disposition: attachment (only an
-// <iframe> navigation honors it, see pdf-preview), so the plain download URL
-// works here with no server changes.
-function MediaView({ filePath, active }: { filePath: string; active: boolean }) {
-  const src = downloadUrl(filePath);
+// The native <video>/<audio> controls cover play/pause/seek/volume; the tab
+// bar adds Refresh. Media elements ignore Content-Disposition: attachment
+// (only an <iframe> navigation honors it, see pdf-preview), so the plain
+// download URL works here with no server changes.
+function MediaView({
+  filePath,
+  active,
+  toolbarTarget,
+  reloadKey,
+}: {
+  filePath: string;
+  active: boolean;
+  toolbarTarget?: HTMLDivElement | null;
+  reloadKey?: number;
+}) {
+  // Bumped by Refresh, a re-open (reloadKey) or a new file: the element is
+  // replaced and the URL changes, so the new file is fetched, not the cache.
+  const [version, setVersion] = useState(0);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    setVersion((v) => v + 1);
+    setProblem(null);
+  }, [filePath, reloadKey]);
+  const src = `${downloadUrl(filePath)}&v=${version}`;
+  const onError = () => {
+    void fileLoadProblem(src).then((why) => setProblem(why ?? "This browser can't play this file's format."));
+  };
+  const controls = (
+    <button
+      className="icon-button"
+      title="Refresh"
+      onClick={() => {
+        setProblem(null);
+        setVersion((v) => v + 1);
+      }}
+    >
+      <Icon name="refresh" />
+    </button>
+  );
   return (
     <div className={`media-host${active ? "" : " hidden"}`}>
-      {AUDIO_EXTENSIONS.has(extOf(filePath)) ? (
-        <audio className="media-audio" src={src} controls />
+      {problem ? (
+        <div className="media-status media-error">
+          Couldn't play {filePath.slice(filePath.lastIndexOf("/") + 1)}: {problem}
+        </div>
+      ) : AUDIO_EXTENSIONS.has(extOf(filePath)) ? (
+        <audio key={version} className="media-audio" src={src} controls onError={onError} />
       ) : (
-        <video className="media-video" src={src} controls />
+        <video key={version} className="media-video" src={src} controls onError={onError} />
       )}
+      {active && toolbarTarget && createPortal(controls, toolbarTarget)}
     </div>
   );
 }

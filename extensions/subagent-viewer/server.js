@@ -4,7 +4,7 @@
 // see plans/subagent-activity-viewer.md). Format verified against ~300 real
 // sidecar files:
 //
-//   ~/.claude/projects/<cwd, / and . replaced with «-»>/<sessionId>.jsonl
+//   ~/.claude/projects/<cwd, punctuation replaced with «-»>/<sessionId>.jsonl
 //   ~/.claude/projects/<same>/<sessionId>/subagents/agent-<agentId>.meta.json
 //   ~/.claude/projects/<same>/<sessionId>/subagents/agent-<agentId>.jsonl
 //
@@ -34,11 +34,36 @@ function expandHome(p) {
   return p;
 }
 
-function cwdToProjectDirName(cwd) {
-  // Claude Code's own convention, confirmed against real directories: every
-  // "/" and "." in the absolute path becomes "-" (nothing else does). On
-  // Windows the drive colon and backslashes do too: C:\\Users\\me -> C--Users-me.
-  return cwd.replace(/[\\/:.]/g, "-");
+// Claude Code names a project's folder after its path with every character
+// that isn't a letter or digit turned into "-" (core's session reader,
+// server/src/agentSessionFormats/claudeJsonl.ts, uses the same rule). An
+// older, narrower rule replaced only "/", "\\", ":" and "."; a folder made
+// that way is still found. The first candidate that exists wins.
+function projectDirCandidates(cwd) {
+  return [...new Set([cwd.replace(/[^a-zA-Z0-9]/g, "-"), cwd.replace(/[\\/:.]/g, "-")])].map((name) =>
+    path.join(CLAUDE_PROJECTS_DIR, name),
+  );
+}
+
+const projectDirCache = new Map(); // cwd -> { at, dir }
+const PROJECT_DIR_TTL_MS = 15_000;
+
+async function projectDirFor(cwd) {
+  const cached = projectDirCache.get(cwd);
+  if (cached && Date.now() - cached.at < PROJECT_DIR_TTL_MS) return cached.dir;
+  const candidates = projectDirCandidates(cwd);
+  let dir = candidates[0];
+  for (const candidate of candidates) {
+    try {
+      await stat(candidate);
+      dir = candidate;
+      break;
+    } catch {
+      // not this one
+    }
+  }
+  projectDirCache.set(cwd, { at: Date.now(), dir });
+  return dir;
 }
 
 // The most recently active session directory for a project — the flat
@@ -142,62 +167,70 @@ async function resolveWindowSession(win, panes, sessions) {
     const session = sessions.get(windowId);
     if (session) {
       const cwd = session.cwd ?? expandHome(win.cwd);
-      return { projectDir: path.join(CLAUDE_PROJECTS_DIR, cwdToProjectDirName(cwd)), sessionId: session.sessionId };
+      return { projectDir: await projectDirFor(cwd), sessionId: session.sessionId };
     }
   }
-  const projectDir = path.join(CLAUDE_PROJECTS_DIR, cwdToProjectDirName(expandHome(win.cwd)));
+  const projectDir = await projectDirFor(expandHome(win.cwd));
   const sessionId = await mostRecentSessionIdCached(projectDir);
   return sessionId ? { projectDir, sessionId } : null;
 }
 
+// Subagents that finished this recently still get a (dimmed) badge, so
+// their results stay one click away after the run.
+const RECENT_MS = 30 * 60_000;
+
 // Cheap per-session result for the counts poll: how many of the session's
-// subagents currently look active — no jsonl content is parsed, only the
-// subagent directory listing and jsonl mtimes.
-async function countRunningAgents(projectDir, sessionId) {
+// subagents look active, and how many finished recently — no jsonl content
+// is parsed, only the subagent directory listing and jsonl mtimes.
+async function countAgents(projectDir, sessionId) {
   const files = await listSubagentFiles(projectDir, sessionId);
-  if (files.length === 0) return 0;
+  const result = { running: 0, recent: 0 };
+  if (files.length === 0) return result;
   const now = Date.now();
-  let running = 0;
   await Promise.all(
     files.map(async (f) => {
       try {
-        const s = await stat(f.jsonlPath);
-        if (now - s.mtimeMs < ACTIVE_THRESHOLD_MS) running++;
+        const age = now - (await stat(f.jsonlPath)).mtimeMs;
+        if (age < ACTIVE_THRESHOLD_MS) result.running++;
+        else if (age < RECENT_MS) result.recent++;
       } catch {
         // A meta.json with no paired jsonl yet (agent just spawned) —
-        // not counted as running until it actually writes something.
+        // not counted until it actually writes something.
       }
     }),
   );
-  return running;
+  return result;
 }
 
 const COUNTS_CACHE_TTL_MS = 2_000;
 const countsCache = new Map(); // sessionId -> { at, value }
 
 // Batched for the client's 3s poll — one entry per claude window, keyed by
-// the client's own "session:index" so it maps straight back to its rows.
-// Windows with zero running agents are omitted.
-async function getCounts(windows) {
+// the client's own "session:index" so it maps straight back to its rows:
+// `counts` the running subagents, `recent` the recently finished ones.
+// Windows with neither are omitted.
+export async function getCounts(windows) {
   const [panes, sessions] = await Promise.all([panesByWindow(), claudeSessionsByWindow()]);
-  const result = {};
+  const counts = {};
+  const recent = {};
   const now = Date.now();
   await Promise.all(
     windows.map(async (win) => {
       const resolved = await resolveWindowSession(win, panes, sessions);
       if (!resolved) return;
       const cached = countsCache.get(resolved.sessionId);
-      let count;
+      let value;
       if (cached && now - cached.at < COUNTS_CACHE_TTL_MS) {
-        count = cached.value;
+        value = cached.value;
       } else {
-        count = await countRunningAgents(resolved.projectDir, resolved.sessionId);
-        countsCache.set(resolved.sessionId, { at: now, value: count });
+        value = await countAgents(resolved.projectDir, resolved.sessionId);
+        countsCache.set(resolved.sessionId, { at: now, value });
       }
-      if (count > 0) result[win.key] = count;
+      if (value.running > 0) counts[win.key] = value.running;
+      if (value.recent > 0) recent[win.key] = value.recent;
     }),
   );
-  return result;
+  return { counts, recent };
 }
 
 function parseJsonlLines(text) {
@@ -214,7 +247,32 @@ function parseJsonlLines(text) {
   return lines;
 }
 
+// Parsed summaries by transcript, reused while the file is unchanged: the
+// popover re-asks every few seconds, and a finished agent's transcript never
+// changes again.
+const summaryCache = new Map(); // jsonlPath -> { mtimeMs, summary }
+const MAX_CACHED_SUMMARIES = 500;
+
 async function summarizeAgent(file) {
+  let currentMtime = -1;
+  try {
+    currentMtime = (await stat(file.jsonlPath)).mtimeMs;
+  } catch {
+    // no transcript yet
+  }
+  const cached = summaryCache.get(file.jsonlPath);
+  if (cached && cached.mtimeMs === currentMtime) {
+    return { ...cached.summary, status: Date.now() - currentMtime < ACTIVE_THRESHOLD_MS ? "running" : "completed" };
+  }
+  const summary = await readAgentSummary(file);
+  if (summary) {
+    if (summaryCache.size >= MAX_CACHED_SUMMARIES) summaryCache.delete(summaryCache.keys().next().value);
+    summaryCache.set(file.jsonlPath, { mtimeMs: currentMtime, summary });
+  }
+  return summary;
+}
+
+async function readAgentSummary(file) {
   const meta = await readMeta(file.metaPath);
   if (!meta) return null;
 
@@ -262,13 +320,17 @@ async function summarizeAgent(file) {
 // Full detail for the on-demand popover — parses each agent's whole
 // transcript, unlike the cheap getCounts above. Only called while the
 // popover is open, not on every counts poll.
-async function getSubagentDetails(win) {
+export async function getSubagentDetails(win) {
   const [panes, sessions] = await Promise.all([panesByWindow(), claudeSessionsByWindow()]);
   const resolved = await resolveWindowSession(win, panes, sessions);
   if (!resolved) return [];
   const files = await listSubagentFiles(resolved.projectDir, resolved.sessionId);
-  const summaries = await Promise.all(files.map(summarizeAgent));
-  return summaries.filter((s) => s !== null);
+  const summaries = (await Promise.all(files.map(summarizeAgent))).filter((s) => s !== null);
+  // Running ones first, then the most recently active.
+  return summaries.sort((a, b) => {
+    if ((a.status === "running") !== (b.status === "running")) return a.status === "running" ? -1 : 1;
+    return String(b.lastActivityAt ?? "").localeCompare(String(a.lastActivityAt ?? ""));
+  });
 }
 
 // A { key, sessionName, windowIndex, cwd } window from the client, or null.
@@ -286,7 +348,7 @@ export function activate({ router, host }) {
   router.post("/counts", async (req, res) => {
     const windows = Array.isArray(req.body?.windows) ? req.body.windows.map(readWindow).filter(Boolean) : [];
     try {
-      res.json({ counts: await getCounts(windows) });
+      res.json(await getCounts(windows));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

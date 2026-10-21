@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import "./style.css";
-import { downloadUrl } from "../../_shared/fileApi";
+import { downloadUrl, fileLoadProblem } from "../../_shared/fileApi";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
 
@@ -15,6 +15,8 @@ interface Props {
   // before it's mounted. Controls are only portaled in while this tab is
   // active, so switching tabs swaps which viewer's toolbar is showing.
   toolbarTarget?: HTMLDivElement | null;
+  // Bumped when an open action re-targets this tab: shows the file anew.
+  reloadKey?: number;
 }
 
 const ZOOM_MIN = 0.05;
@@ -24,22 +26,33 @@ const ZOOM_BUTTON_STEP = 1.25;
 // per-notch steps, so trackpad and wheel both feel proportionate to however
 // much the user actually scrolled.
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
-// "Fit" caps to the tab's width minus this much breathing room — it never
-// scales an image up past 100% (a small icon opening at 300%+ reads as
-// broken, not helpful), only down when the image is wider than the tab.
-const FIT_WIDTH_MARGIN_PX = 32;
+// "Fit" shows the whole image with this much breathing room on each axis —
+// it never scales an image up past 100% (a small icon opening at 300%+ reads
+// as broken, not helpful), only down when it's wider or taller than the tab.
+const FIT_MARGIN_PX = 32;
 
 function clampScale(scale: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale));
 }
 
-function ImageView({ filePath, active, toolbarTarget }: Props) {
+function ImageView({ filePath, active, toolbarTarget, reloadKey }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const basename = filePath.slice(filePath.lastIndexOf("/") + 1);
 
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
-  const [error, setError] = useState(false);
+  // Why the image didn't load, once known; null while it's fine.
+  const [error, setError] = useState<string | null>(null);
+  // Bumped by Refresh, a re-open (reloadKey) or a new file: the URL changes,
+  // so the image is fetched again rather than served from the cache.
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    setVersion((v) => v + 1);
+    setError(null);
+    setNatural(null);
+    setMode("fit");
+  }, [filePath, reloadKey]);
+  const src = `${downloadUrl(filePath)}&v=${version}`;
   // "fit" is recomputed continuously from container/natural size (effect
   // below); "custom" is a user-picked scale/offset that sticks until they
   // zoom/pan again or explicitly hit Fit.
@@ -72,7 +85,11 @@ function ImageView({ filePath, active, toolbarTarget }: Props) {
   useEffect(() => {
     if (mode !== "fit" || !natural || containerSize.width === 0 || containerSize.height === 0) return;
     const fitScale = clampScale(
-      Math.min(1, (containerSize.width - FIT_WIDTH_MARGIN_PX) / natural.width),
+      Math.min(
+        1,
+        (containerSize.width - FIT_MARGIN_PX) / natural.width,
+        (containerSize.height - FIT_MARGIN_PX) / natural.height,
+      ),
     );
     setScale(fitScale);
     setOffset({
@@ -99,11 +116,20 @@ function ImageView({ filePath, active, toolbarTarget }: Props) {
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
+    // The wheel (and a trackpad's two-finger scroll) pans; with Ctrl or
+    // Cmd held, or as a trackpad pinch (which arrives as a Ctrl wheel), it
+    // zooms at the pointer.
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
-      zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor);
+      if (e.ctrlKey || e.metaKey) {
+        const rect = el.getBoundingClientRect();
+        const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
+        zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor);
+        return;
+      }
+      const lines = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+      setMode("custom");
+      setOffset((prev) => ({ x: prev.x - e.deltaX * lines, y: prev.y - e.deltaY * lines }));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -162,6 +188,13 @@ function ImageView({ filePath, active, toolbarTarget }: Props) {
 
   const controls = (
     <>
+      <button className="icon-button" title="Refresh" onClick={() => {
+        setError(null);
+        setNatural(null);
+        setVersion((v) => v + 1);
+      }}>
+        <Icon name="refresh" />
+      </button>
       {natural && (
         <span className="image-toolbar-readout">
           {natural.width}×{natural.height} · {Math.round(scale * 100)}%
@@ -173,7 +206,7 @@ function ImageView({ filePath, active, toolbarTarget }: Props) {
       <button className="icon-button" title="Zoom in" disabled={!natural} onClick={zoomIn}>
         <Icon name="zoom-in" />
       </button>
-      <button className="icon-button" title="Fit to window" disabled={!natural} onClick={goFit}>
+      <button className="icon-button" title="Fit to window (scroll pans; Ctrl+scroll or pinch zooms)" disabled={!natural} onClick={goFit}>
         <Icon name="screen-full" />
       </button>
       <button className="icon-button" title="Actual size (100%)" disabled={!natural} onClick={goActualSize}>
@@ -195,15 +228,18 @@ function ImageView({ filePath, active, toolbarTarget }: Props) {
       >
         {!error && (
           <img
-            src={downloadUrl(filePath)}
+            key={version}
+            src={src}
             alt={basename}
             draggable={false}
             onLoad={(e) => {
               const img = e.currentTarget;
               setNatural({ width: img.naturalWidth, height: img.naturalHeight });
-              setError(false);
+              setError(null);
             }}
-            onError={() => setError(true)}
+            onError={() => {
+              void fileLoadProblem(src).then((why) => setError(why ?? "it isn't an image this browser can show"));
+            }}
             style={{
               position: "absolute",
               left: 0,
@@ -216,7 +252,11 @@ function ImageView({ filePath, active, toolbarTarget }: Props) {
           />
         )}
         {!natural && !error && <div className="image-status">Loading…</div>}
-        {error && <div className="image-status image-error">Couldn't load {basename}</div>}
+        {error && (
+          <div className="image-status image-error">
+            Couldn't load {basename}: {error}
+          </div>
+        )}
       </div>
       {active && toolbarTarget && createPortal(controls, toolbarTarget)}
     </div>

@@ -45,6 +45,7 @@ interface ActiveContext {
 let serverFetch: ((path: string, init?: RequestInit) => Promise<Response>) | null = null;
 // ctx.app.commandEvents: the session's command history from core.
 let commandEvents: ((session: string) => Promise<{ panes: unknown[] }>) | null = null;
+let showError: ((message: string) => void) | null = null;
 let setSidebarPanelVisible: ((panelId: string, visible: boolean) => void) | null = null;
 let refreshSwitcher: (() => void) | null = null;
 let removeStylesheet: (() => void) | null = null;
@@ -112,14 +113,26 @@ function applyContext(next: ActiveContext): void {
 
 // ---- Actions ----
 
+// Types into the terminal the user is looking at (its window, not just its
+// session: a session can have several tabs open), and says so when that
+// fails rather than doing nothing.
 function typeIntoActivePane(text: string, submit: boolean): void {
   const session = activeContext.sessionName;
-  if (!session || !serverFetch) return;
+  if (!session || !serverFetch) {
+    showError?.("Open a terminal first to run a command from history.");
+    return;
+  }
   void serverFetch("/type", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ session, text, submit }),
-  }).catch(() => {});
+    body: JSON.stringify({ session, windowIndex: activeContext.windowIndex, text, submit }),
+  })
+    .then(async (res) => {
+      if (res.ok) return;
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      showError?.(`Couldn't send the command: ${body?.error ?? `${res.status} ${res.statusText}`}`);
+    })
+    .catch((err: unknown) => showError?.(`Couldn't send the command: ${err instanceof Error ? err.message : String(err)}`));
 }
 
 // ---- Formatting ----
@@ -299,6 +312,7 @@ interface ExtensionContext {
     onDidChangeContext(cb: (ctx: ActiveContext) => void): () => void;
     setSidebarPanelVisible(panelId: string, visible: boolean): void;
     commandEvents(session: string): Promise<{ panes: unknown[] }>;
+    showError(message: string): void;
   };
   serverFetch(path: string, init?: RequestInit): Promise<Response>;
   assetUrl(relPath: string): string;
@@ -310,6 +324,7 @@ export function activate(ctx: ExtensionContext): void {
   serverFetch = ctx.serverFetch;
   setSidebarPanelVisible = ctx.app.setSidebarPanelVisible;
   commandEvents = ctx.app.commandEvents;
+  showError = ctx.app.showError;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
 
   ctx.registerSidebarPanel({
@@ -333,7 +348,9 @@ export function activate(ctx: ExtensionContext): void {
       if (!pane) return [];
       const seen = new Set<string>();
       const items: QuickSwitcherItem[] = [];
-      for (let i = pane.history.length - 1; i >= 0 && items.length < SWITCHER_LIMIT; i--) {
+      // History arrives newest first (core /api/command-events), so the
+      // first copy of a command seen is its latest run.
+      for (let i = 0; i < pane.history.length && items.length < SWITCHER_LIMIT; i++) {
         const entry = pane.history[i];
         if (seen.has(entry.command)) continue;
         if (term && !entry.command.toLowerCase().includes(term)) continue;
@@ -377,6 +394,7 @@ export function deactivate(): void {
   serverFetch = null;
   setSidebarPanelVisible = null;
   commandEvents = null;
+  showError = null;
   refreshSwitcher = null;
   cachedPanes = [];
   activeContext = NO_CONTEXT;

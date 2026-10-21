@@ -207,6 +207,7 @@
   overflow: hidden;
 }
 
+.snippets-picker-row.active,
 .snippets-picker-row:hover {
   background: var(--list-hover-bg);
 }
