@@ -9,6 +9,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 import { mountScreenshotRoutes } from "../_shared/screenshotRoutes.mjs";
+import { mountAgentStateRoutes } from "../_shared/agentStateRoutes.mjs";
 
 // Paths from the page may arrive "~"-shortened, the way core shows them
 // (server files.ts's shortenHome) - expand before touching the filesystem
@@ -93,8 +94,9 @@ function noteServed(token, relPath) {
   if (paths.size < MAX_WATCHED) paths.add(relPath);
 }
 
-export function activate({ router }) {
+export function activate({ router, host }) {
   mountScreenshotRoutes(router);
+  mountAgentStateRoutes(router, host);
   // Origin-checked normally (not under /public/) — see
   // server/src/security.ts's isOriginExemptPath for why that matters: this
   // is the only way a token can come into existence, so an attacker's page

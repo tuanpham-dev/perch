@@ -45,6 +45,38 @@
 
 /* A quiet label in the app's small-caps header idiom, not competing with the
    comment it introduces. */
+.pc-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: -4px;
+}
+
+.pc-popover-head .pc-selector {
+  flex: 1;
+  min-width: 0;
+}
+
+.pc-popover-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg-inactive);
+  cursor: pointer;
+}
+
+.pc-popover-close:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
 .pc-selector {
   color: var(--fg-inactive);
   font-size: 11px;
@@ -402,6 +434,28 @@
   font-size: 14px;
 }
 
+.pc-shot-toggle {
+  padding: 2px 4px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pc-shot-toggle:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.pc-shot-toggle.on {
+  color: var(--fg);
+}
+
+.pc-shot-toggle:not(.on) .pc-hint-text {
+  text-decoration: line-through;
+}
+
 .pc-hint-text {
   min-width: 0;
   overflow: hidden;
@@ -465,6 +519,47 @@
 
 .pc-spacer {
   flex: 1;
+}
+
+/* What the agent the comments went to is doing, after a send. */
+.pc-agent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-left: 6px;
+  color: var(--fg-inactive);
+  font-size: 12px;
+}
+
+.pc-agent-status .codicon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.pc-agent-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-agent-status.working,
+.pc-agent-status.starting {
+  color: var(--fg);
+}
+
+.pc-agent-status.input,
+.pc-agent-status.typed {
+  color: var(--warning, #e5c07b);
+}
+
+.pc-agent-status.done {
+  color: var(--status-active-bg, #98c379);
+}
+
+/* Check Fixes, once the agent says it's done. */
+.pc-btn.pc-ready {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-active-bg, #98c379) 60%, transparent);
 }
 
 .pc-link {

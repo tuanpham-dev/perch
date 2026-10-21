@@ -4,7 +4,11 @@
 // with an opaque origin. It keeps what scripts build at runtime inside the
 // proxy, stands in for the storage an opaque origin doesn't have, and talks to
 // the Perch tab that owns the frame:
-//   to the tab:   { __webPreview: { type: "location" | "open", url } }
+//   to the tab:   { __webPreview: { type: "location", url, title, kind } }
+//                 (kind: how the address changed - "navigate", "reload" or
+//                 "back_forward" for a load, "push", "replace", "pop"),
+//                 { __webPreview: { type: "title", title } },
+//                 { __webPreview: { type: "open" | "download", url } }
 //   from the tab: { __webPreviewCmd: "back" | "forward" | "reload" }
 // Picking, screenshots and the error log go through the page agent the tab
 // installs (extensions/_shared/pageAgent.js, via the bootstrap at the end).
@@ -367,10 +371,43 @@
     };
   }
 
+  // A new window opens as a Perch tab. The page gets a stand-in for the
+  // window, so code that opens a blank one and then sets its location (a
+  // sign-in popup) works instead of throwing on null.
   window.open = function (url) {
-    var u = realUrl(url == null || url === "" ? "about:blank" : url);
-    if (u) post({ __webPreview: { type: "open", url: u.href } });
-    return null;
+    var opened = false;
+    function openUrl(value) {
+      var u = realUrl(value);
+      if (!u || opened) return;
+      opened = true;
+      post({ __webPreview: { type: "open", url: u.href } });
+    }
+    if (url != null && url !== "") openUrl(url);
+    var loc = {
+      assign: openUrl,
+      replace: openUrl,
+      toString: function () {
+        return "about:blank";
+      },
+    };
+    Object.defineProperty(loc, "href", { get: loc.toString, set: openUrl });
+    var stub = {
+      closed: false,
+      opener: window,
+      close: function () {
+        stub.closed = true;
+      },
+      focus: function () {},
+      blur: function () {},
+      postMessage: function () {},
+    };
+    Object.defineProperty(stub, "location", {
+      get: function () {
+        return loc;
+      },
+      set: openUrl,
+    });
+    return stub;
   };
 
   // ---- Elements ----
@@ -508,9 +545,15 @@
   window.addEventListener("click", function (e) {
     if (e.defaultPrevented || e.button !== 0) return;
     var el = e.target && e.target.closest ? e.target.closest("a[href], area[href]") : null;
-    if (!el || el.hasAttribute("download")) return;
+    if (!el) return;
     var u = realUrl(el.getAttribute("href"));
     if (!u) return;
+    if (el.hasAttribute("download")) {
+      // A sandboxed frame can't download; the tab hands it to the browser.
+      e.preventDefault();
+      post({ __webPreview: { type: "download", url: u.href } });
+      return;
+    }
     var targetAttr = (el.getAttribute("target") || "").toLowerCase();
     if (targetAttr === "_blank" || e.ctrlKey || e.metaKey || e.shiftKey) {
       e.preventDefault();
@@ -564,20 +607,49 @@
         else location.assign(next);
         return;
       }
-      reportLocation();
+      reportLocation(native === nativeReplaceState ? "replace" : "push");
     };
   }
   history.pushState = historyCall(nativePushState);
   history.replaceState = historyCall(nativeReplaceState);
 
-  function reportLocation() {
-    post({ __webPreview: { type: "location", url: currentReal().href, title: document.title } });
+  // How this document was reached, for the tab's own Back/Forward record.
+  var loadKind = "navigate";
+  try {
+    var navEntry = performance.getEntriesByType("navigation")[0];
+    if (navEntry && navEntry.type) loadKind = navEntry.type;
+  } catch (e) {
+    // no navigation timing; a plain load
   }
-  window.addEventListener("popstate", reportLocation);
-  window.addEventListener("hashchange", reportLocation);
-  window.addEventListener("load", reportLocation);
-  if (document.readyState !== "loading") reportLocation();
-  else document.addEventListener("DOMContentLoaded", reportLocation);
+
+  function reportLocation(kind) {
+    post({ __webPreview: { type: "location", url: currentReal().href, title: document.title, kind: kind } });
+  }
+  window.addEventListener("popstate", function () {
+    reportLocation("pop");
+  });
+  window.addEventListener("hashchange", function () {
+    reportLocation("push");
+  });
+  window.addEventListener("load", function () {
+    reportLocation(loadKind);
+  });
+  if (document.readyState !== "loading") reportLocation(loadKind);
+  else
+    document.addEventListener("DOMContentLoaded", function () {
+      reportLocation(loadKind);
+    });
+
+  // A single-page app retitles itself after it moves; the tab's title follows.
+  var lastTitle = null;
+  function reportTitle() {
+    if (document.title === lastTitle) return;
+    lastTitle = document.title;
+    post({ __webPreview: { type: "title", title: lastTitle } });
+  }
+  if (window.MutationObserver) {
+    new MutationObserver(reportTitle).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  }
 
   window.addEventListener("message", function (e) {
     if (e.source !== window.parent || !isTabFrame) return;

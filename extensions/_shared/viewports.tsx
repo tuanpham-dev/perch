@@ -86,6 +86,49 @@ function saveViewportChoice(choice: ViewportChoice): void {
   }
 }
 
+// Where the side-by-side divider was dragged to, per pair of viewports
+// (pairKey), so it stays put across reloads and in every preview. A pair
+// with no entry splits by the two widths (autoSplit); double-clicking the
+// divider goes back to that.
+const SPLIT_KEY = "perch.preview.split";
+const splitListeners = new Set<(ratios: Record<string, number>) => void>();
+
+function loadSplitRatios(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SPLIT_KEY) ?? "{}") as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [pair, ratio] of Object.entries(parsed)) {
+      if (typeof ratio === "number" && ratio >= SPLIT_MIN && ratio <= SPLIT_MAX) out[pair] = ratio;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveSplitRatio(pair: string, ratio: number | null): void {
+  const ratios = loadSplitRatios();
+  if (ratio === null) delete ratios[pair];
+  else ratios[pair] = ratio;
+  try {
+    localStorage.setItem(SPLIT_KEY, JSON.stringify(ratios));
+  } catch {
+    // kept until the preview closes
+  }
+  for (const listener of splitListeners) listener(ratios);
+}
+
+function useSplitRatios(): Record<string, number> {
+  const [ratios, setRatios] = useState(loadSplitRatios);
+  useEffect(() => {
+    splitListeners.add(setRatios);
+    return () => {
+      splitListeners.delete(setRatios);
+    };
+  }, []);
+  return ratios;
+}
+
 export function presetFor(choice: ViewportChoice): ViewportPreset | null {
   if (choice.id === CUSTOM_VIEWPORT && validSize(choice.width) && validSize(choice.height)) {
     return { id: CUSTOM_VIEWPORT, label: "Custom", width: choice.width, height: choice.height, kind: kindForWidth(choice.width) };
@@ -388,8 +431,14 @@ export function CompareSplit({
   const rootRef = useRef<HTMLDivElement>(null);
   const comparePaneRef = useRef<HTMLDivElement>(null);
   const pair = other ? pairKey(choice, other) : "";
+  // While dragging, the live position; the saved one otherwise.
   const [manual, setManual] = useState<{ pair: string; ratio: number } | null>(null);
-  const ratio = other ? (manual && manual.pair === pair ? manual.ratio : autoSplit(choice, other)) : 1;
+  const saved = useSplitRatios();
+  const ratio = other
+    ? manual && manual.pair === pair
+      ? manual.ratio
+      : (saved[pair] ?? autoSplit(choice, other))
+    : 1;
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
@@ -405,12 +454,15 @@ export function CompareSplit({
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
     setDragging(true);
+    let last: number | null = null;
     const move = (ev: PointerEvent) => {
-      const next = (ev.clientX - rect.left) / rect.width;
-      setManual({ pair, ratio: Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, next)) });
+      last = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, (ev.clientX - rect.left) / rect.width));
+      setManual({ pair, ratio: last });
     };
     const up = () => {
       setDragging(false);
+      if (last !== null) saveSplitRatio(pair, last);
+      setManual(null);
       handle.removeEventListener("pointermove", move);
       handle.removeEventListener("pointerup", up);
       handle.removeEventListener("pointercancel", up);
@@ -435,7 +487,10 @@ export function CompareSplit({
             aria-orientation="vertical"
             title="Drag to resize; double-click to fit the two widths"
             onPointerDown={startDrag}
-            onDoubleClick={() => setManual(null)}
+            onDoubleClick={() => {
+              setManual(null);
+              saveSplitRatio(pair, null);
+            }}
           />
           <div ref={comparePaneRef} className="pc-split-pane" style={{ flexBasis: `${(1 - ratio) * 100}%` }}>
             <ViewportStage

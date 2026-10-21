@@ -229,6 +229,35 @@
   background: #fff;
 }
 
+/* A download the popup blocker stopped, with a button to start it. */
+.browser-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--focus-border, #007fd4) 15%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+  font-family: system-ui, Ubuntu, "Droid Sans", sans-serif;
+  font-size: 12px;
+}
+
+.browser-notice-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Above the comment badges of the page still in the frame behind it. */
+.browser-error {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+}
+
 /* The comment popover, badges and pending panel are the shared
    ElementComments UI (extensions/_shared). */
 

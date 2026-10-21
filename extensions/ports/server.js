@@ -4,6 +4,7 @@
 // gate, so this extension consumes the same data rather than re-scanning.
 import { spawnSync } from "node:child_process";
 import { mountScreenshotRoutes } from "../_shared/screenshotRoutes.mjs";
+import { mountAgentStateRoutes } from "../_shared/agentStateRoutes.mjs";
 
 const KILL_GRACE_MS = 5_000;
 
@@ -14,6 +15,7 @@ function endTree(pid, force) {
 
 export function activate({ router, host }) {
   mountScreenshotRoutes(router);
+  mountAgentStateRoutes(router, host);
   router.get("/list", async (_req, res) => {
     try {
       res.json(await host.ports.list());

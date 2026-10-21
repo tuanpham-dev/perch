@@ -5,7 +5,7 @@ import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
 import { ElementComments, PreviewStatus, type PickedElement } from "../../_shared/ElementComments";
 import type { MenuItem } from "../../_shared/types";
-import { makeScreenshotUploader, usePageAgent, usePagePicks } from "../../_shared/pageAgentHost";
+import { makeAgentStateReader, makeScreenshotUploader, usePageAgent, usePagePicks } from "../../_shared/pageAgentHost";
 import {
   CompareButton,
   CompareSplit,
@@ -76,7 +76,10 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
   const scrollRef = useRef<[number, number] | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const [inspecting, setInspecting] = useState(false);
+  // Picking in progress: an element (Inspect) or a text selection (quote).
+  const [picking, setPicking] = useState<"element" | "text" | null>(null);
+  const pickingRef = useRef(picking);
+  pickingRef.current = picking;
   // An element just picked, awaiting a typed comment (see ElementComments).
   const [activePick, setActivePick] = useState<PickedElement | null>(null);
   const [viewport, setViewport] = useViewportChoice();
@@ -92,6 +95,7 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
     pageAgentUrl,
   );
   const uploadScreenshot = useMemo(() => makeScreenshotUploader(hookBase), []);
+  const readAgentState = useMemo(() => makeAgentStateReader(hookBase), []);
 
   useEffect(
     () =>
@@ -178,29 +182,53 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
       iframeRef.current?.contentWindow?.postMessage({ __livePreviewRestore: scrollRef.current }, "*");
     }
     // A reload (auto-refresh, manual Reload) is a new document: install the
-    // page agent again. Picking starts over.
-    setInspecting(false);
+    // page agent again. A pick in progress carries on in it.
     void agent?.install();
+    if (pickingRef.current) agent?.pick(pickingRef.current);
   }, [agent]);
 
-  // Picking works in either frame of a side-by-side preview.
-  const toggleInspect = useCallback(() => {
-    setInspecting((prev) => {
-      const next = !prev;
-      for (const a of [agent, compareAgent]) {
-        if (next) a?.pick("element");
-        else a?.cancelPick();
-      }
-      return next;
-    });
+  const cancelPicking = useCallback(() => {
+    setPicking(null);
+    agent?.cancelPick();
+    compareAgent?.cancelPick();
   }, [agent, compareAgent]);
+
+  // Picking works in either frame of a side-by-side preview. The button
+  // again cancels it.
+  const togglePick = useCallback(
+    (kind: "element" | "text") => {
+      if (picking === kind) {
+        cancelPicking();
+        return;
+      }
+      setPicking(kind);
+      agent?.pick(kind);
+      compareAgent?.pick(kind);
+      // Keys (Esc, Enter for a multi-pick) then reach the page's agent.
+      iframeRef.current?.focus();
+    },
+    [picking, agent, compareAgent, cancelPicking],
+  );
+
+  // Esc cancels picking wherever focus is: the page's agent handles it
+  // inside the frame, this outside it (the toolbar button just clicked).
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      cancelPicking();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picking, cancelPicking]);
 
   // Picks from the page agent park as activePick, so the popover can collect
   // a comment — the same two-step "pick, then annotate" as DiffView.tsx's
   // line selection + comment box (git-scm).
   const onPick = useCallback(
     (pick: PickedElement) => {
-      setInspecting(false);
+      setPicking(null);
       compareAgent?.cancelPick();
       setActivePick({ ...pick, frameId: "main" });
     },
@@ -208,19 +236,14 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
   );
   const onComparePick = useCallback(
     (pick: PickedElement) => {
-      setInspecting(false);
+      setPicking(null);
       agent?.cancelPick();
       setActivePick({ ...pick, frameId: "compare" });
     },
     [agent],
   );
-  const onPickCancel = useCallback(() => {
-    setInspecting(false);
-    agent?.cancelPick();
-    compareAgent?.cancelPick();
-  }, [agent, compareAgent]);
-  usePagePicks(agent, onPick, onPickCancel);
-  usePagePicks(compareAgent, onComparePick, onPickCancel);
+  usePagePicks(agent, onPick, cancelPicking);
+  usePagePicks(compareAgent, onComparePick, cancelPicking);
 
   const clearPick = useCallback(() => setActivePick(null), []);
   const src = token ? `${hookBase}/public/serve/${token}/${encodeURIComponent(basename)}` : "";
@@ -237,23 +260,26 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
       </button>
       <CompareButton choice={viewport} onPick={setViewport} />
       <button
-        className={`icon-button${inspecting ? " active" : ""}`}
+        className={`icon-button${picking === "element" ? " active" : ""}`}
+        aria-pressed={picking === "element"}
         title={
-          inspecting
+          picking === "element"
             ? "Click an element to comment on it; Shift+click to pick several, drag for an area (click again or Esc to cancel)"
             : "Inspect element → add comment"
         }
-        onClick={toggleInspect}
+        onClick={() => togglePick("element")}
       >
         <Icon name="inspect" />
       </button>
       <button
-        className="icon-button"
-        title="Comment on the selected text (select some text on the page first, or after clicking)"
-        onClick={() => {
-          agent?.pick("text");
-          compareAgent?.pick("text");
-        }}
+        className={`icon-button${picking === "text" ? " active" : ""}`}
+        aria-pressed={picking === "text"}
+        title={
+          picking === "text"
+            ? "Select text on the page to comment on it (click again or Esc to cancel)"
+            : "Comment on the selected text (select some text on the page first, or after clicking)"
+        }
+        onClick={() => togglePick("text")}
       >
         <Icon name="quote" />
       </button>
@@ -311,6 +337,7 @@ function HtmlPreview({ filePath, active, toolbarTarget, openInEditor, showMenu }
         frame={frame}
         agent={agent}
         uploadScreenshot={uploadScreenshot}
+        readAgentState={readAgentState}
         reloadPage={refresh}
         compare={viewport.compare ? { agent: compareAgent, frame: compareFrame } : null}
       />

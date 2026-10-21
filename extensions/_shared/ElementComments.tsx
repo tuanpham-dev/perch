@@ -76,6 +76,8 @@ export interface PendingElementComment extends PickedElement {
   // the list's camera icon.
   shotError?: string;
   shotNote?: string;
+  // Added with the popover's screenshot toggle off: none was taken.
+  noShot?: boolean;
   // The page it was made on and how the message names it ("on https://…"),
   // for a preview that moves between pages and keeps its comments.
   page?: string;
@@ -346,6 +348,20 @@ function newId(): string {
   return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+// A popover's first line: what it's about, and a button that closes it.
+function PopoverHead({ label, title, onClose }: { label: string; title: string; onClose: () => void }) {
+  return (
+    <div className="pc-popover-head">
+      <div className="pc-selector" title={title}>
+        {label}
+      </div>
+      <button type="button" className="pc-popover-close" title="Close" aria-label="Close" onClick={onClose}>
+        <Icon name="close" />
+      </button>
+    </div>
+  );
+}
+
 // What a preview shows in place of its frame: loading, or why it couldn't
 // load. Children are actions (a Retry, an Open in Browser).
 export function PreviewStatus({
@@ -375,7 +391,50 @@ export function PreviewStatus({
 interface Stored {
   pending: PendingElementComment[];
   sent: SentComment[];
+  // The last send: the agent window it went to, and the number of the last
+  // agent event (agentStateRoutes.mjs) before it, so only what came after
+  // counts. `submitted`: Enter was pressed for the user.
+  agentRun?: AgentRun | null;
 }
+
+interface AgentRun {
+  windowId: string;
+  boot?: string;
+  seq: number;
+  submitted: boolean;
+  at: number;
+}
+
+// What the agent a preview's comments went to is doing (agentStateRoutes.mjs).
+export interface AgentStateReading {
+  boot?: string;
+  seq: number;
+  last: { seq: number; event: string } | null;
+  hooks: boolean;
+}
+
+type AgentStatus = "starting" | "typed" | "working" | "input" | "done";
+
+// How long a send waits for a first hook event from a window that has never
+// sent one, before deciding its agent doesn't report them and showing
+// nothing rather than "waiting" forever.
+const NO_HOOKS_AFTER_MS = 60_000;
+
+const AGENT_STATUS: Record<AgentStatus, { icon: string; text: string; title: string }> = {
+  typed: {
+    icon: "keyboard",
+    text: "Press Enter in the agent's pane",
+    title: "The comments are typed into the agent's prompt; it starts once you press Enter there",
+  },
+  starting: { icon: "watch", text: "Waiting for the agent…", title: "Sent; the agent hasn't started on it yet" },
+  working: { icon: "loading", text: "Agent working…", title: "The agent is working on the comments" },
+  input: {
+    icon: "bell",
+    text: "Agent needs your input",
+    title: "The agent asked for permission or a choice; answer it in its pane",
+  },
+  done: { icon: "pass", text: "Agent finished — check the fixes", title: "The agent's turn ended: Check Fixes to compare" },
+};
 
 const STORE_PREFIX = "perch.previewComments:";
 
@@ -401,13 +460,40 @@ function saveSubmitChoice(value: boolean): void {
   }
 }
 
+// Whether Add Comment takes a screenshot: the popover's toggle, remembered
+// across previews, on until it's first turned off.
+const SHOT_KEY = "perch.previewComments.screenshot";
+
+function loadShotChoice(): boolean {
+  try {
+    return localStorage.getItem(SHOT_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+// Told to every open preview (each extension bundles its own copy of this
+// module, so a window event rather than module state), so they all follow.
+const SHOT_EVENT = "perch-preview-screenshot";
+
+function saveShotChoice(value: boolean): void {
+  try {
+    localStorage.setItem(SHOT_KEY, String(value));
+  } catch {
+    // remembered for this page only
+  }
+  window.dispatchEvent(new CustomEvent(SHOT_EVENT, { detail: value }));
+}
+
 function loadStored(key: string | undefined): Stored {
   if (!key) return { pending: [], sent: [] };
   try {
     const parsed = JSON.parse(localStorage.getItem(STORE_PREFIX + key) ?? "null") as Partial<Stored> | null;
+    const run = parsed?.agentRun;
     return {
       pending: Array.isArray(parsed?.pending) ? parsed.pending : [],
       sent: Array.isArray(parsed?.sent) ? parsed.sent.map((s) => ({ ...s, check: s.check === "checking" ? undefined : s.check })) : [],
+      agentRun: run && typeof run.windowId === "string" && typeof run.seq === "number" ? run : null,
     };
   } catch {
     return { pending: [], sent: [] };
@@ -530,6 +616,13 @@ export interface ElementCommentsProps {
   uploadScreenshot?: (dataUrl: string) => Promise<Screenshot>;
   // Reloads the page, for checking fixes against a fresh copy.
   reloadPage?: () => void;
+  // Opens another address in the preview (a web preview tab, whose comments
+  // can be on several pages), so Check Fixes can visit each page that has
+  // sent comments.
+  openPage?: (url: string) => void;
+  // Reads what agents are doing (agentStateRoutes.mjs), for the panel's
+  // "Agent working… / finished" line after a send.
+  readAgentState?: (windowId?: string) => Promise<AgentStateReading>;
   // The second frame of a side-by-side preview: its page agent and where it
   // sits, in the container's coordinates like `frame`.
   compare?: { agent: PageAgentLink | null; frame: FrameGeometry | null } | null;
@@ -547,6 +640,8 @@ export function ElementComments({
   agent,
   uploadScreenshot,
   reloadPage,
+  openPage,
+  readAgentState,
   page,
   compare,
 }: ElementCommentsProps) {
@@ -567,6 +662,13 @@ export function ElementComments({
   const [copied, setCopied] = useState(false);
   const [includeErrors, setIncludeErrors] = useState(true);
   const [submit, setSubmit] = useState<boolean>(() => loadSubmitChoice() ?? readAutoSubmit());
+  const [withShot, setWithShot] = useState<boolean>(loadShotChoice);
+  const toggleShot = useCallback(() => saveShotChoice(!withShot), [withShot]);
+  useEffect(() => {
+    const onChange = (e: Event) => setWithShot((e as CustomEvent<boolean>).detail);
+    window.addEventListener(SHOT_EVENT, onChange);
+    return () => window.removeEventListener(SHOT_EVENT, onChange);
+  }, []);
   const [showErrors, setShowErrors] = useState(false);
   const [checking, setChecking] = useState(false);
   // Where each pending comment's subject is on the page right now, in the
@@ -713,17 +815,18 @@ export function ElementComments({
       frame: pickFrame,
       frames: both ? ["main", "compare"] : [pickedIn],
       frame2: both ? otherFrame : null,
-      shot: undefined,
-      shot2: both ? undefined : null,
+      shot: withShot ? undefined : null,
+      shot2: both && withShot ? undefined : null,
+      noShot: !withShot || undefined,
       page,
       where,
     };
     setPending((prev) => [...prev, comment]);
-    takeShot(comment);
+    if (withShot) takeShot(comment);
     setPickComment("");
     setView("pending");
     onPickDone();
-  }, [activePick, pickComment, pickViewport, pickedText, bothText, pickFrame, otherFrame, onPickDone, setPending, takeShot, page, where]);
+  }, [activePick, pickComment, pickViewport, pickedText, bothText, pickFrame, otherFrame, onPickDone, setPending, takeShot, withShot, page, where]);
 
   const removeComment = useCallback(
     (id: string) => {
@@ -756,6 +859,11 @@ export function ElementComments({
     setEditingId(null);
     setEditText("");
   }, []);
+
+  const closeExpanded = useCallback(() => {
+    cancelEdit();
+    setExpandedId(null);
+  }, [cancelEdit]);
 
   // A comment with its viewport choice changed: to or from "both" adds or
   // drops the other frame.
@@ -825,11 +933,20 @@ export function ElementComments({
         setSendError("No agent is running in this project - start one first.");
         return;
       }
-      await sendToAgent(targets[0].sessionName, text, submit, { windowIndex: targets[0].windowIndex });
+      const target = targets[0];
+      // The last agent event before this send: only what comes after it is
+      // the agent working on these comments.
+      const baseline =
+        readAgentState && target.windowId ? await readAgentState().then((r) => r, () => null) : null;
+      await sendToAgent(target.sessionName, text, submit, { windowIndex: target.windowIndex });
       const now = Date.now();
       setStored((prev) => ({
         pending: [],
         sent: [...prev.sent, ...prev.pending.map((pc) => ({ ...pc, sentAt: now }))],
+        agentRun:
+          target.windowId && baseline
+            ? { windowId: target.windowId, boot: baseline.boot, seq: baseline.seq, submitted: submit, at: now }
+            : null,
       }));
       setExpandedId(null);
       setEditingId(null);
@@ -839,7 +956,46 @@ export function ElementComments({
     } finally {
       setSendBusy(false);
     }
-  }, [pending.length, resolveCwd, buildMessage, submit]);
+  }, [pending.length, resolveCwd, buildMessage, submit, readAgentState]);
+
+  // ---- The agent's progress ----
+  // Polled while there are sent comments, so the panel can say when the
+  // agent is done and Check Fixes is worth pressing.
+  const agentRun = stored.agentRun ?? null;
+  const hasSent = sent.length > 0;
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  useEffect(() => {
+    if (!agentRun || !readAgentState || !hasSent) {
+      setAgentStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      if (document.hidden) return;
+      readAgentState(agentRun.windowId).then(
+        (r) => {
+          if (cancelled) return;
+          // A server restarted since the send numbers its events afresh.
+          const since = r.boot === agentRun.boot ? agentRun.seq : 0;
+          const event = r.last && r.last.seq > since ? r.last.event : null;
+          if (!r.hooks || (!r.last && Date.now() - agentRun.at > NO_HOOKS_AFTER_MS)) setAgentStatus(null);
+          else if (event === "prompt-submit") setAgentStatus("working");
+          else if (event === "permission") setAgentStatus("input");
+          else if (event === "stop") setAgentStatus("done");
+          else setAgentStatus(agentRun.submitted ? "starting" : "typed");
+        },
+        () => {
+          // the server didn't answer this time; the next poll tries again
+        },
+      );
+    };
+    poll();
+    const id = window.setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [agentRun, readAgentState, hasSent]);
 
   // With no project open there's no agent to send to; the comments are
   // copied instead, to paste wherever they're wanted.
@@ -857,19 +1013,47 @@ export function ElementComments({
 
   // ---- Checking fixes ----
   // Reloads the page and photographs each sent comment's subject again, so
-  // the before and after sit side by side.
+  // the before and after sit side by side. Comments sent from other pages
+  // are checked by visiting each in turn, then the preview returns to the
+  // page it was on.
   const checkFixes = useCallback(async () => {
     if (!agent || !uploadScreenshot || !reloadPage || sent.length === 0) return;
+    const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+    const startPage = page;
+    // The pages to visit, the one in view first. A comment from before pages
+    // were recorded belongs to whichever page is in view.
+    const groups = new Map<string | undefined, SentComment[]>();
+    for (const s of sent) {
+      const key = !s.page || !page || s.page === page || !openPage ? startPage : s.page;
+      groups.set(key, [...(groups.get(key) ?? []), s]);
+    }
+    const order = [...groups.keys()].sort((x, y) => (x === startPage ? -1 : y === startPage ? 1 : 0));
     setChecking(true);
     setSent((prev) => prev.map((s) => ({ ...s, check: "checking" as const, after: undefined })));
-    try {
-      reloadPage();
-      await new Promise((resolve) => window.setTimeout(resolve, 300));
+
+    // Loads a page (or reloads this one) and waits until its agent is
+    // ready: the old page's agent says "reset" when the new one replaces it.
+    const loadThen = async (go: () => void) => {
+      const replaced = new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          off();
+          reject(new Error("the page didn't load"));
+        }, 20000);
+        const off = agent.on("reset", () => {
+          window.clearTimeout(timer);
+          off();
+          resolve();
+        });
+      });
+      go();
+      await replaced;
       await agent.whenReady();
       // Let the page settle (fonts, late layout) before photographing it.
-      await new Promise((resolve) => window.setTimeout(resolve, 800));
-      const items = sent.filter((s) => onThisPage(s) && framesOf(s).includes("main")).map((s) => trackItem(s, false));
-      setSent((prev) => prev.map((s) => (onThisPage(s) ? s : { ...s, check: undefined })));
+      await sleep(800);
+    };
+
+    const checkGroup = async (list: SentComment[]) => {
+      const items = list.filter((s) => framesOf(s).includes("main")).map((s) => trackItem(s, false));
       const onPage = await new Promise<Record<string, ElementRect | null>>((resolve) => {
         const timer = window.setTimeout(() => {
           off();
@@ -894,14 +1078,36 @@ export function ElementComments({
           setSent((prev) => prev.map((s) => (s.id === item.id ? { ...s, check: "failed" as const } : s)));
         }
       }
-    } catch {
-      setSent((prev) => prev.map((s) => (s.check === "checking" ? { ...s, check: "failed" as const } : s)));
+    };
+
+    let moved = false;
+    try {
+      for (const key of order) {
+        const list = groups.get(key) ?? [];
+        try {
+          if (key === startPage || !key || !openPage) {
+            await loadThen(reloadPage);
+          } else {
+            moved = true;
+            await loadThen(() => openPage(key));
+          }
+          await checkGroup(list);
+        } catch {
+          const ids = new Set(list.map((s) => s.id));
+          setSent((prev) => prev.map((s) => (ids.has(s.id) && s.check === "checking" ? { ...s, check: "failed" as const } : s)));
+        }
+      }
     } finally {
       setChecking(false);
-      // Back to following the pending comments.
-      agent.track(itemsFor("main", storedRef.current.pending));
+      if (moved && startPage && openPage) {
+        // Back where the check started; its pending comments are followed
+        // again once that page's agent is ready.
+        openPage(startPage);
+      } else {
+        agent.track(itemsFor("main", storedRef.current.pending));
+      }
     }
-  }, [agent, uploadScreenshot, reloadPage, sent, setSent, onThisPage, itemsFor]);
+  }, [agent, uploadScreenshot, reloadPage, openPage, page, sent, setSent, itemsFor]);
 
   const markFixed = useCallback((id: string) => setSent((prev) => prev.filter((s) => s.id !== id)), [setSent]);
 
@@ -968,9 +1174,7 @@ export function ElementComments({
           className="pc-popover"
           style={{ left: pickPopover.pos.left, top: pickPopover.pos.top }}
         >
-          <div className="pc-selector" title={activePick.selector}>
-            {pickLabel(activePick)}
-          </div>
+          <PopoverHead label={pickLabel(activePick)} title={activePick.selector} onClose={cancelPick} />
           {activePick.kind === "text" && activePick.quote && <div className="pc-quote">“{activePick.quote}”</div>}
           <CommentTextarea
             placeholder={
@@ -994,10 +1198,20 @@ export function ElementComments({
               Cancel
             </button>
             {agent && uploadScreenshot && (
-              <span className="pc-hint" title="A screenshot of the page is attached to the comment">
-                <Icon name="device-camera" />
+              <button
+                type="button"
+                className={`pc-hint pc-shot-toggle${withShot ? " on" : ""}`}
+                aria-pressed={withShot}
+                title={
+                  withShot
+                    ? "A screenshot of the page is attached to the comment (click to leave it out)"
+                    : "No screenshot is attached (click to attach one)"
+                }
+                onClick={toggleShot}
+              >
+                <Icon name={withShot ? "device-camera" : "circle-slash"} />
                 <span className="pc-hint-text">Screenshot</span>
-              </span>
+              </button>
             )}
           </div>
         </div>
@@ -1025,9 +1239,7 @@ export function ElementComments({
           className="pc-popover"
           style={{ left: commentPopover.pos.left, top: commentPopover.pos.top }}
         >
-          <div className="pc-selector" title={expanded.selector}>
-            {pickLabel(expanded)}
-          </div>
+          <PopoverHead label={pickLabel(expanded)} title={expanded.selector} onClose={closeExpanded} />
           {editingId === expanded.id ? (
             <>
               <CommentTextarea value={editText} onChange={setEditText} onSubmit={saveEdit} onCancel={cancelEdit} />
@@ -1113,6 +1325,15 @@ export function ElementComments({
                 </button>
               )}
             </div>
+            {agentStatus && (
+              <span className={`pc-agent-status ${agentStatus}`} role="status" title={AGENT_STATUS[agentStatus].title}>
+                <Icon
+                  name={AGENT_STATUS[agentStatus].icon}
+                  className={agentStatus === "working" ? "codicon-modifier-spin" : undefined}
+                />
+                <span className="pc-agent-status-text">{AGENT_STATUS[agentStatus].text}</span>
+              </span>
+            )}
             <span className="pc-spacer" />
             {view === "pending" ? (
               <>
@@ -1152,7 +1373,7 @@ export function ElementComments({
                 {canCheck && (
                   <button
                     type="button"
-                    className="pc-btn pc-btn-primary"
+                    className={`pc-btn pc-btn-primary${agentStatus === "done" && !checking ? " pc-ready" : ""}`}
                     disabled={checking}
                     title="Reload the page and photograph each comment's subject again"
                     onClick={() => void checkFixes()}
@@ -1209,7 +1430,7 @@ export function ElementComments({
                   <span className="pc-panel-viewport" title={pc.viewport}>
                     {pc.viewport}
                   </span>
-                  {agent && uploadScreenshot && (() => {
+                  {agent && uploadScreenshot && !pc.noShot && (() => {
                     const both = framesOf(pc).length > 1;
                     const taking = pc.shot === undefined || (both && pc.shot2 === undefined);
                     const got = [pc.shot, both ? pc.shot2 : undefined].filter(Boolean).length;
@@ -1286,7 +1507,7 @@ export function ElementComments({
                           </a>
                         ) : (
                           <div className="pc-shot-empty">
-                            {!onThisPage(s)
+                            {!onThisPage(s) && !openPage
                               ? "Made on another page; open it to check"
                               : s.check === "checking"
                               ? "Checking…"

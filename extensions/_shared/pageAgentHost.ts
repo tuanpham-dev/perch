@@ -43,6 +43,9 @@ export class PageAgentLink {
   private ready = false;
   private reqSeq = 0;
   private errors: PageError[] = [];
+  // A pick asked for before the page's agent was ready (a page still
+  // loading): sent when it says it is.
+  private queuedPick: "element" | "text" | null = null;
   private onMessage = (e: MessageEvent) => {
     const win = this.getWindow();
     if (!win || e.source !== win) return;
@@ -52,6 +55,8 @@ export class PageAgentLink {
       this.ready = true;
       this.errors = Array.isArray(data.errors) ? (data.errors as PageError[]) : this.errors;
       this.emit("errors", { list: this.errors });
+      if (this.queuedPick) this.send("pick", { mode: this.queuedPick });
+      this.queuedPick = null;
     } else if (data.type === "error" && data.entry) {
       this.errors = [...this.errors.slice(-99), data.entry as PageError];
       this.emit("errors", { list: this.errors });
@@ -131,10 +136,12 @@ export class PageAgentLink {
   }
 
   pick(mode: "element" | "text"): void {
+    if (!this.ready) this.queuedPick = mode;
     this.send("pick", { mode });
   }
 
   cancelPick(): void {
+    this.queuedPick = null;
     this.send("cancel");
   }
 
@@ -250,5 +257,15 @@ export function makeScreenshotUploader(hookBase: string) {
     const data = (await res.json().catch(() => ({}))) as { path?: string; name?: string; error?: string };
     if (!res.ok || !data.path || !data.name) throw new Error(data.error ?? `${res.status} ${res.statusText}`);
     return { path: data.path, url: `${hookBase}/screenshot/${encodeURIComponent(data.name)}` };
+  };
+}
+
+// Reads what agents are doing through an extension's agent-state route
+// (agentStateRoutes.mjs) mounted at `hookBase` ("/api/ext/<id>").
+export function makeAgentStateReader(hookBase: string) {
+  return async (windowId?: string): Promise<{ boot?: string; seq: number; last: { seq: number; event: string } | null; hooks: boolean }> => {
+    const res = await fetch(`${hookBase}/agent-state${windowId ? `?window=${encodeURIComponent(windowId)}` : ""}`);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
   };
 }

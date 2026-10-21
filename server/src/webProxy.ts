@@ -124,15 +124,59 @@ function htmlEscape(s: string): string {
 
 // What the frame shows when a page can't load. The Perch tab draws the real
 // message in its own theme from the posted copy; the text here is the
-// fallback for a frame nobody is listening to.
+// fallback for a frame nobody is listening to. The page is an entry in the
+// frame's history like any other, so it answers the tab's Back, Forward and
+// Reload too, and says how it was reached (a back/forward visit isn't a new
+// entry).
+const FRAME_PAGE_SCRIPT =
+  "(function(m){try{var n=performance.getEntriesByType('navigation')[0];if(n)m.__webPreview.kind=n.type}catch(e){}" +
+  "parent.postMessage(m,'*');addEventListener('message',function(e){if(e.source!==parent)return;var c=e.data&&e.data.__webPreviewCmd;" +
+  "if(c==='back')history.back();else if(c==='forward')history.forward();else if(c==='reload')location.reload();" +
+  "else if(c==='replace'&&typeof e.data.url==='string'&&e.data.url.charAt(0)==='/')location.replace(e.data.url)})})";
+
 function framePage(message: Record<string, unknown>, text: string): string {
   const json = JSON.stringify({ __webPreview: message }).replace(/</g, "\\u003c");
   return (
     `<!doctype html><meta charset="utf-8"><title>${htmlEscape(text)}</title>` +
     `<style>body{font:13px system-ui,sans-serif;color:#888;background:transparent;padding:24px}</style>` +
-    `<p>${htmlEscape(text)}</p><script>parent.postMessage(${json},"*")</script>`
+    `<p>${htmlEscape(text)}</p><script>${FRAME_PAGE_SCRIPT}(${json})</script>`
   );
 }
+
+// A file the frame was sent to that isn't a web page (an image, a JSON or
+// text file, a video), as a small page that shows it. A page, unlike the
+// bare file, carries the runtime, so the tab still learns the address and
+// its Back, Forward and Reload still work.
+function fileViewerPage(target: URL, contentType: string, text: string | null): string {
+  const name = htmlEscape(decodeURIComponent(target.pathname.split("/").pop() || target.host));
+  const src = htmlEscape(target.href);
+  const kind = contentType.split(";")[0].trim();
+  let body: string;
+  if (kind.startsWith("image/")) {
+    body = `<img src="${src}" alt="${name}">`;
+  } else if (kind.startsWith("video/")) {
+    body = `<video src="${src}" controls></video>`;
+  } else if (kind.startsWith("audio/")) {
+    body = `<audio src="${src}" controls></audio>`;
+  } else {
+    body = `<pre>${htmlEscape(text ?? "")}</pre>`;
+  }
+  return (
+    `<!doctype html><html><head><meta charset="utf-8"><title>${name}</title>` +
+    `<style>html{color-scheme:light dark}body{margin:0;font:13px ui-monospace,monospace}` +
+    `img,video{display:block;max-width:100%;margin:0 auto}audio{margin:24px}` +
+    `pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}</style></head>` +
+    `<body>${body}</body></html>`
+  );
+}
+
+// What fileViewerPage shows as text: the content types a browser would
+// display rather than download.
+function isTextual(contentType: string): boolean {
+  return /^text\/|[/+](json|xml|javascript|ecmascript)\b|^application\/x-(sh|yaml)|^application\/(yaml|toml|csv)/.test(contentType);
+}
+
+const MAX_TEXT_VIEW_BYTES = 2 * 1024 * 1024;
 
 function sendFrameError(res: ServerResponse, status: number, title: string, detail: string, url?: string): void {
   if (res.headersSent) {
@@ -582,7 +626,8 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
     if (isDocument && disposition.startsWith("attachment")) {
       up.resume();
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      res.end(framePage({ type: "download", url: target.href }, `Downloading ${target.href}`));
+      // "replaced": the frame moved here to download, and goes back.
+      res.end(framePage({ type: "download", url: target.href, replaced: true }, `Downloading ${target.href}`));
       return;
     }
 
@@ -590,6 +635,38 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
     const isCss = contentType.includes("text/css");
     const isScript = (ctx.dest === "script" || ctx.dest === "worker" || ctx.dest === "sharedworker") && /javascript|ecmascript/.test(contentType);
     const noBody = req.method === "HEAD" || status === 204 || status === 304;
+
+    if (isDocument && !isHtml && !noBody && !(status >= 300 && status < 400 && location)) {
+      const media = /^(image|video|audio)\//.test(contentType);
+      if (!media && !isTextual(contentType)) {
+        up.resume();
+        sendFrameError(
+          res,
+          200,
+          "This file can't be shown in the preview",
+          `${target.pathname.split("/").pop() || target.host} is ${contentType.split(";")[0] || "an unknown type"}. Open it in your browser instead.`,
+          target.href,
+        );
+        return;
+      }
+      let text: string | null = null;
+      if (media) {
+        up.resume();
+      } else {
+        const raw = decompress(await readBody(up, MAX_REWRITE_BYTES), headerValue(up.headers["content-encoding"]));
+        text = new TextDecoder(charsetOf(contentType)).decode(raw.subarray(0, MAX_TEXT_VIEW_BYTES));
+        if (raw.length > MAX_TEXT_VIEW_BYTES) text += `\n\n… (the first ${MAX_TEXT_VIEW_BYTES / 1024 / 1024} MB of ${Math.round(raw.length / 1024 / 1024)} MB)`;
+      }
+      const cookie = ctx.firstParty ? await cookies().documentCookie(target) : "";
+      const body = await rewriteHtml(fileViewerPage(target, contentType, text), { target, token, cookie });
+      for (const name of ["content-encoding", "content-length", "etag", "content-md5", "content-range", "accept-ranges"]) delete out[name];
+      out["content-type"] = "text/html; charset=utf-8";
+      out["referrer-policy"] = "unsafe-url";
+      out["cache-control"] = "no-store";
+      res.writeHead(status, out);
+      res.end(body);
+      return;
+    }
     if (noBody || !(isHtml || isCss || isScript)) {
       res.writeHead(status, out);
       up.pipe(res);
@@ -716,7 +793,7 @@ export function createWebProxy(opts: WebProxyOptions = {}) {
     }
     const site = siteOf(target);
     const token = mintToken(site);
-    res.json({ src: toDocumentPath(target, token), url: target.href, site });
+    res.json({ src: toDocumentPath(target, token), url: target.href, site, token });
   });
   api.post("/clear", async (req: Request, res) => {
     const site = typeof req.body?.site === "string" ? req.body.site : null;

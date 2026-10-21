@@ -951,6 +951,7 @@ interface ExtensionContext {
     extensions: string[];
     mode: "default" | "preview";
     component: typeof BrowserView;
+    icon?: string;
   }): void;
   registerCommand?(command: { id: string; label: string; defaultBinding?: string; run: () => void }): void;
   registerUrlHandler?(handler: (url: string) => boolean): void;
@@ -1229,6 +1230,8 @@ export function activate(ctx: ExtensionContext): void {
     extensions: [],
     mode: "default",
     component: BrowserView,
+    // Every tab is a web page, whatever its address ends in.
+    icon: "globe",
   });
   configureBrowser({
     fetchListeningPorts: () => fetchPorts(),

@@ -11,6 +11,8 @@ export interface TerminalWindow {
   index: number;
   name: string;
   command: string;
+  // The window's id ($PERCH_WINDOW inside it), which agent hook events name.
+  id?: string;
 }
 
 export interface TerminalSession {
@@ -24,6 +26,7 @@ export interface AgentWindow {
   windowIndex: number;
   windowName: string;
   command: string;
+  windowId?: string;
 }
 
 const WINDOW_TAB_PREFIX = "perch-view-";
@@ -151,6 +154,7 @@ export function agentWindows(
           windowIndex: window.index,
           windowName: window.name,
           command: window.command,
+          windowId: window.id,
         });
       }
     }
