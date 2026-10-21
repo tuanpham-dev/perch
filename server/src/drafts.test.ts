@@ -98,4 +98,22 @@ describe("drafts routes", () => {
     expect(await (await get("prompts", "/p1")).json()).toBeNull();
     expect((await (await get("csv-preview", "/keep")).json()).value).toBe(2);
   });
+
+  it("lists every draft without its value, newest first", async () => {
+    await put("text-editor", "/list/a.txt", { text: "a" });
+    await new Promise((r) => setTimeout(r, 5));
+    await put("csv-preview", "/list/b.csv", { rows: [] });
+    const res = await (await fetch(base)).json();
+    const listed = res.drafts.filter((d: { key: string }) => d.key.startsWith("/list/"));
+    expect(listed.map((d: { key: string }) => d.key)).toEqual(["/list/b.csv", "/list/a.txt"]);
+    expect(listed[0]).not.toHaveProperty("value");
+    expect(listed[0].extId).toBe("csv-preview");
+  });
+
+  it("prunes drafts older than the given age", async () => {
+    await put("text-editor", "/old.txt", "x");
+    const removed = await store.prune(1000, Date.now() + 2000);
+    expect(removed).toBeGreaterThan(0);
+    expect(await (await get("text-editor", "/old.txt")).json()).toBeNull();
+  });
 });

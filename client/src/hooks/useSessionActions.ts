@@ -11,6 +11,7 @@ import {
   type ProjectNode,
   type WorktreeNode,
 } from "../lib/projects";
+import { revealInFiles } from "../extensions";
 import { isRealTab, tabVirtualPath } from "../lib/tabs";
 import { notifyProjectCreated } from "../lib/projectSetupBridge";
 import type { SplitDirection } from "../lib/splits";
@@ -750,6 +751,12 @@ export function useSessionActions(
                       ? virtualPath.slice(filesRootDir.length + 1)
                       : virtualPath;
                   copyText(rel).catch(showError);
+                },
+              },
+              {
+                label: "Reveal in Files",
+                onClick: () => {
+                  if (!revealInFiles(virtualPath)) showError(`${virtualPath} isn't in this project's folder`);
                 },
               },
             ];

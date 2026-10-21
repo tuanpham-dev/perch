@@ -83,38 +83,48 @@ export function useFileActions(
     [promptDialog, showError, setFilesRefreshKey],
   );
 
-  const deleteFileEntry = useCallback(
-    async (entryPath: string, isDir: boolean) => {
-      const base = entryPath.slice(entryPath.lastIndexOf("/") + 1);
-      if (!(await confirmDialog(`Delete ${isDir ? "folder" : "file"} "${base}"?`, "Delete")))
-        return;
-      try {
-        await api.deleteEntry(entryPath);
-        setPrunePath({ paths: [entryPath] });
-        setFilesRefreshKey((k) => k + 1);
-      } catch (err) {
-        showError(err);
-      }
-    },
-    [confirmDialog, showError, setFilesRefreshKey],
-  );
-
+  // Delete goes to the OS trash where there is one (server trash.ts); the
+  // confirmation says which. An item the trash refuses (another disk, a
+  // network mount) is offered for permanent deletion, asked separately.
   const deleteFileEntries = useCallback(
     async (entries: { path: string; isDir: boolean }[]) => {
       if (entries.length === 0) return;
-      const label =
-        entries.length === 1
-          ? `Delete ${entries[0].isDir ? "folder" : "file"} "${entries[0].path.slice(entries[0].path.lastIndexOf("/") + 1)}"?`
-          : `Delete ${entries.length} items?`;
-      if (!(await confirmDialog(label, "Delete"))) return;
+      const baseOf = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+      const what =
+        entries.length === 1 ? `${entries[0].isDir ? "folder" : "file"} "${baseOf(entries[0].path)}"` : `${entries.length} items`;
+      const toTrash = await api.trashAvailable(entries[0].path);
+      const ok = toTrash
+        ? await confirmDialog(`Move ${what} to the Trash?`, "Move to Trash")
+        : await confirmDialog(`Delete ${what} permanently? This can't be undone.`, "Delete Permanently");
+      if (!ok) return;
       const succeeded: string[] = [];
+      const refused: { path: string; reason: string }[] = [];
       const errors: string[] = [];
-      for (const { path } of entries) {
-        try {
-          await api.deleteEntry(path);
-          succeeded.push(path);
-        } catch {
-          errors.push(path);
+      const deleteAll = async (list: string[], mode: "trash" | "permanent") => {
+        for (const p of list) {
+          try {
+            await api.deleteEntry(p, mode);
+            succeeded.push(p);
+          } catch (err) {
+            if (mode === "trash") refused.push({ path: p, reason: err instanceof Error ? err.message : String(err) });
+            else errors.push(p);
+          }
+        }
+      };
+      await deleteAll(
+        entries.map((e) => e.path),
+        toTrash ? "trash" : "permanent",
+      );
+      if (refused.length > 0) {
+        const label =
+          refused.length === 1
+            ? `"${baseOf(refused[0].path)}" couldn't go to the Trash (${refused[0].reason}). Delete it permanently? This can't be undone.`
+            : `${refused.length} items couldn't go to the Trash. Delete them permanently? This can't be undone.`;
+        if (await confirmDialog(label, "Delete Permanently")) {
+          await deleteAll(
+            refused.map((r) => r.path),
+            "permanent",
+          );
         }
       }
       if (succeeded.length > 0) {
@@ -128,6 +138,11 @@ export function useFileActions(
       }
     },
     [confirmDialog, showError, setFilesRefreshKey],
+  );
+
+  const deleteFileEntry = useCallback(
+    (entryPath: string, isDir: boolean) => deleteFileEntries([{ path: entryPath, isDir }]),
+    [deleteFileEntries],
   );
 
   // Copy/Cut also best-effort write the path list as plain text to the OS

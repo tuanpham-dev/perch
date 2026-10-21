@@ -30,12 +30,20 @@ function MessageDialog({ dialog }: Props) {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (dialog.type === "prompt") {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    } else {
-      confirmRef.current?.focus();
-    }
+    const focus = () => {
+      if (dialog.type === "prompt") {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      } else {
+        confirmRef.current?.focus();
+      }
+    };
+    focus();
+    // Again after the frame: a dialog opened from the command palette would
+    // otherwise lose focus to the terminal the palette hands it back to as
+    // it closes, and its keys would go to the terminal.
+    const frame = requestAnimationFrame(focus);
+    return () => cancelAnimationFrame(frame);
   }, [dialog]);
 
   const cancel = () => dialog.resolve(dialog.type === "prompt" ? null : false);
@@ -104,6 +112,9 @@ function PickDialog({ dialog }: Props) {
 
   useEffect(() => {
     inputRef.current?.focus();
+    // See MessageDialog: win back focus from a closing command palette.
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   // A new query starts at the top of what it matched. Compared against the

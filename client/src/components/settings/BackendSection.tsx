@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import * as api from "../../api";
+import { restartPerch } from "../../lib/restartServer";
 import { useSettingsContext } from "./context";
 import DaemonSettings from "./DaemonSettings";
 import { useTerminalBackends } from "./useTerminalBackends";
@@ -14,6 +17,11 @@ export default function BackendSection() {
     ? backends
     : [...backends, { id: settings.terminalBackend, label: `${settings.terminalBackend} (not installed)`, description: "", selected: true, active: false }];
   const chosen = backendOptions.find((b) => b.id === settings.terminalBackend);
+  const needsRestart = !!running && running.id !== settings.terminalBackend;
+  const [canRestart, setCanRestart] = useState(false);
+  useEffect(() => {
+    if (needsRestart) void api.restartAvailable().then(setCanRestart);
+  }, [needsRestart]);
 
   return (
     <>
@@ -37,6 +45,13 @@ export default function BackendSection() {
         Where terminals run. Changing this takes effect when the server restarts
         {running && running.id !== settings.terminalBackend ? ` - running on ${running.label} now` : ""}.
       </div>
+      {needsRestart && canRestart && (
+        <div className="settings-row">
+          <button className="dialog-button" onClick={() => void restartPerch()}>
+            Restart Perch Server
+          </button>
+        </div>
+      )}
       {chosen?.description && <div className="settings-hint">{chosen.description}</div>}
       <div className="settings-hint">Extensions can add more backends, for example tmux Terminal Backend.</div>
 

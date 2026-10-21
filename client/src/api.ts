@@ -713,8 +713,30 @@ export function renameEntry(targetPath: string, newName: string): Promise<{ path
   });
 }
 
-export function deleteEntry(targetPath: string): Promise<void> {
-  return request(`/api/fs?path=${encodeURIComponent(targetPath)}`, { method: "DELETE" });
+// "trash" moves it to the OS trash (and fails, leaving it in place, when the
+// trash can't take it); "permanent" deletes it for good.
+export function deleteEntry(targetPath: string, mode: "trash" | "permanent" = "permanent"): Promise<void> {
+  return request(`/api/fs?path=${encodeURIComponent(targetPath)}&mode=${mode}`, { method: "DELETE" });
+}
+
+// Whether this server can restart itself (server restart.ts), and the restart.
+export function restartAvailable(): Promise<boolean> {
+  return request<{ available: boolean }>("/api/restart").then(
+    (r) => r.available,
+    () => false,
+  );
+}
+
+export function restartServer(): Promise<void> {
+  return request("/api/restart", { method: "POST" });
+}
+
+// Whether deleting `targetPath` can go to the OS trash.
+export function trashAvailable(targetPath: string): Promise<boolean> {
+  return request<{ available: boolean }>(`/api/fs/trash?path=${encodeURIComponent(targetPath)}`).then(
+    (r) => r.available,
+    () => false,
+  );
 }
 
 // Server-held FILES-tree clipboard — see server/src/api.ts's fsClipboard.
@@ -1017,6 +1039,12 @@ export async function putDraft(extId: string, key: string, value: unknown, opts:
     body,
     keepalive: opts.keepalive === true && body.length <= KEEPALIVE_MAX_BODY,
   });
+}
+
+// Every saved draft (which extension, its key - usually the file's path -
+// and when), newest first.
+export function listDrafts(): Promise<{ extId: string; key: string; savedAt: number }[]> {
+  return request<{ drafts: { extId: string; key: string; savedAt: number }[] }>("/api/drafts").then((r) => r.drafts);
 }
 
 export async function deleteDraft(extId: string, key: string, opts: { keepalive?: boolean } = {}): Promise<void> {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "../../_shared/Icon";
 import { DEFAULT_TOUCH_KEYS, parseSend, snippetIdOf, type TouchKey } from "./touchKeys";
 import { TouchKeyButton, visibleKeys } from "./TouchKeyBar";
-import { readLayout, useTouchKeySettingsTick, writeKeys } from "./client";
+import { readLayout, savedSnippets, useTouchKeySettingsTick, writeKeys } from "./client";
 
 // Drop position for an in-progress row drag: `id` is the target row's drop
 // indicator id (its index in settings.touchKeys), `edge` says above or below
@@ -27,32 +27,10 @@ export default function TouchKeysEditor() {
   const set = (_key: "touchKeys", next: TouchKey[]) => writeKeys(next);
 
   const [previewTag, setPreviewTag] = useState("All");
-  // Saved snippets from the bundled snippets extension, for the "Add
-  // snippet key" picker. Read from the synced settings doc rather than a
-  // cross-extension API (extensions only see their own ctx) — the same
-  // first-party coupling category as core knowing git-scm's diff viewer.
-  // Empty (extension absent, no snippets, or fetch failure) just hides the
-  // picker; existing {snippet:…} keys keep working regardless.
-  const [snippetChoices, setSnippetChoices] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((doc) => {
-        const raw = doc?.extensionSettings?.["perch.snippets"]?.["snippets.items"];
-        if (typeof raw !== "string" || !raw.trim()) return;
-        const parsed: unknown = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return;
-        setSnippetChoices(
-          parsed
-            .filter((s): s is { id: string; name: string } =>
-              typeof s === "object" && s !== null &&
-              typeof (s as { id?: unknown }).id === "string" &&
-              typeof (s as { name?: unknown }).name === "string")
-            .map((s) => ({ id: s.id, name: s.name })),
-        );
-      })
-      .catch(() => {});
-  }, []);
+  // Saved snippets from the bundled Snippets extension (ctx.app.snippets),
+  // for the "Add snippet key" picker. Empty (Snippets absent or without
+  // snippets) just hides the picker; existing {snippet:…} keys keep working.
+  const [snippetChoices] = useState<{ id: string; name: string }[]>(() => savedSnippets());
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const rowRefs = useRef<Map<number, HTMLDivElement>>(new Map());

@@ -117,6 +117,8 @@ import {
 import { writeThemePaint } from "./themePaint.js";
 import { writeZip } from "./zip.js";
 import { writeStreamAtomically } from "./atomicWrite.js";
+import { moveToTrash, trashAvailable } from "./trash.js";
+import { restartMethod, restartServer } from "./restart.js";
 
 export const api = Router();
 
@@ -217,6 +219,21 @@ api.post("/sessions", async (req, res) => {
 // (useSettingsSync.ts) already fetch-merges client-side before calling PUT
 // with the complete doc, so it's unaffected either way — PATCH exists for
 // callers that want to send just what changed.
+// Whether the app can restart this server itself, and the restart (see
+// restart.ts). Terminals keep running through it.
+api.get("/restart", (_req, res) => {
+  res.json({ available: restartMethod() !== null });
+});
+
+api.post("/restart", (_req, res) => {
+  try {
+    restartServer();
+    res.status(202).json({ restarting: true });
+  } catch (err) {
+    res.status(409).json({ error: errMessage(err) });
+  }
+});
+
 api.get("/settings", async (_req, res) => {
   try {
     // The server-owned keys never leave the server — see settingsStore's
@@ -1325,6 +1342,20 @@ api.post("/fs/rename", async (req, res) => {
   }
 });
 
+// Whether deleting `path` can go to the OS trash (trash.ts), so the app's
+// confirmation can say what will happen.
+api.get("/fs/trash", async (req, res) => {
+  const raw = typeof req.query.path === "string" ? req.query.path : "";
+  if (!raw) {
+    res.status(400).json({ error: "path is required" });
+    return;
+  }
+  res.json({ available: await trashAvailable(expandHome(raw)) });
+});
+
+// mode=trash moves it to the OS trash and fails (with the item left where it
+// was) when the trash can't take it; without it, the delete is permanent, as
+// it always was for callers that don't ask.
 api.delete("/fs", async (req, res) => {
   const raw = typeof req.query.path === "string" ? req.query.path : "";
   if (!raw) {
@@ -1332,10 +1363,11 @@ api.delete("/fs", async (req, res) => {
     return;
   }
   try {
-    await deletePath(expandHome(raw));
+    if (req.query.mode === "trash") await moveToTrash(expandHome(raw));
+    else await deletePath(expandHome(raw));
     res.status(204).end();
   } catch (err) {
-    res.status(400).json({ error: errMessage(err) });
+    res.status(400).json({ error: errMessage(err), ...(req.query.mode === "trash" ? { code: "TRASH_FAILED" } : {}) });
   }
 });
 

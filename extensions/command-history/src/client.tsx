@@ -1,6 +1,6 @@
 // command-history: the COMMANDS accordion section of the Run tab plus a "!"
 // quick-switcher mode — per-pane shell command history (exit codes,
-// durations) from core's GET /api/command-events, which is fed by the
+// durations) from core (ctx.app.commandEvents, over GET /api/command-events), which is fed by the
 // shell-integration snippet. Primary action re-runs a command in the active
 // session's pane (via this extension's own /type server route — see
 // server.js); secondary inserts it at the prompt without running. Host hooks
@@ -43,6 +43,8 @@ interface ActiveContext {
 // ---- Module-level host bridge ----
 
 let serverFetch: ((path: string, init?: RequestInit) => Promise<Response>) | null = null;
+// ctx.app.commandEvents: the session's command history from core.
+let commandEvents: ((session: string) => Promise<{ panes: unknown[] }>) | null = null;
 let setSidebarPanelVisible: ((panelId: string, visible: boolean) => void) | null = null;
 let refreshSwitcher: (() => void) | null = null;
 let removeStylesheet: (() => void) | null = null;
@@ -77,9 +79,8 @@ async function refetch(): Promise<void> {
     return;
   }
   try {
-    const res = await fetch(`/api/command-events?session=${encodeURIComponent(session)}`);
-    if (!res.ok) return;
-    const data = (await res.json()) as { panes?: PaneHistory[] };
+    if (!commandEvents) return;
+    const data = (await commandEvents(session)) as { panes?: PaneHistory[] };
     // A context switch mid-flight would otherwise land stale panes over the
     // newer session's fetch.
     if (seq !== fetchSeq) return;
@@ -297,6 +298,7 @@ interface ExtensionContext {
     getActiveContext(): ActiveContext;
     onDidChangeContext(cb: (ctx: ActiveContext) => void): () => void;
     setSidebarPanelVisible(panelId: string, visible: boolean): void;
+    commandEvents(session: string): Promise<{ panes: unknown[] }>;
   };
   serverFetch(path: string, init?: RequestInit): Promise<Response>;
   assetUrl(relPath: string): string;
@@ -307,6 +309,7 @@ const SWITCHER_LIMIT = 20;
 export function activate(ctx: ExtensionContext): void {
   serverFetch = ctx.serverFetch;
   setSidebarPanelVisible = ctx.app.setSidebarPanelVisible;
+  commandEvents = ctx.app.commandEvents;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
 
   ctx.registerSidebarPanel({
@@ -373,6 +376,7 @@ export function deactivate(): void {
   }
   serverFetch = null;
   setSidebarPanelVisible = null;
+  commandEvents = null;
   refreshSwitcher = null;
   cachedPanes = [];
   activeContext = NO_CONTEXT;

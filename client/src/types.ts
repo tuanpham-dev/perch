@@ -387,6 +387,9 @@ export interface ExtensionInfo {
   clientEntry: string | null;
   hasClient: boolean;
   hasServer: boolean;
+  // Why the server is still running an older copy of this extension's server
+  // code (an update that couldn't load in place); absent when it's current.
+  serverStale?: string;
   // Shipped from the repo's extensions/ dir rather than user-installed.
   builtin: boolean;
   // Bundled + manifest perch.required — cannot be disabled or

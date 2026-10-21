@@ -40,6 +40,36 @@ export interface ActiveContext {
   cwd: string | null;
 }
 
+// One terminal's command history (ctx.app.commandEvents).
+export interface CommandPaneHistory {
+  pane: string;
+  windowIndex: number;
+  paneIndex: number;
+  active: boolean;
+  currentCommand: string;
+  title: string;
+  running: { command: string; cwd: string; startedAt: number } | null;
+  history: { command: string; cwd: string; startedAt: number; endedAt: number; exitCode: number; durationMs: number }[];
+}
+
+// Reads a core JSON route for the ctx.app wrappers above: the body, or an
+// Error carrying the route's own message.
+async function coreJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const text = await res.text();
+  let body: unknown = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  if (!res.ok) {
+    const message = (body as { error?: unknown } | undefined)?.error;
+    throw new Error(typeof message === "string" ? message : `${res.status} ${res.statusText}`);
+  }
+  return body as T;
+}
+
 export interface RegisteredCommand {
   // Namespaced ext.<extensionId>.<id> — see registerCommand.
   id: string;
@@ -604,6 +634,37 @@ export interface ExtensionContext {
     // command that opens a panel's UI must never end with it hidden. No-ops
     // if that panel was never registered.
     revealSidebarPanel(panelId: string): void;
+    // Shows the FILES section, expanded down to `path` with it selected and
+    // scrolled into view. False when the path isn't under the folder FILES
+    // is showing (a file from another project).
+    revealInFiles(path: string): boolean;
+    // ---- Core state for first-party features ----
+    // Documented and kept compatible (fields may be added, never removed),
+    // so an extension never fetches core routes by hand.
+    //
+    // The tunnel this browser reaches Perch through (perch tunnel): the
+    // sign-in it forwards, and whether it's connected and which ports it
+    // forwards for `client` (the id this browser's tunnel uses).
+    tunnels: {
+      auth(): Promise<{ cookie: string | null; authorization: string | null }>;
+      status(client: string): Promise<{ connected: boolean; ports: number[]; allForwarded: boolean }>;
+    };
+    // The first configured PROXY_DOMAIN, or null: a port's address is
+    // "<port>.<domain>" with one, the app's own "/proxy/<port>/" without.
+    proxyConfig(): Promise<{ domain: string | null }>;
+    // The built-in browser's proxy: `open` an address (the frame src, the
+    // address as understood, its site and the token for later addresses on
+    // it); `clear` one site's stored cookies, or every site's.
+    webPreview: {
+      open(url: string): Promise<{ src: string; url: string; site: string; token: string }>;
+      clear(site?: string): Promise<void>;
+    };
+    // The commands run in a session's terminals (shell integration): each
+    // pane's finished commands and what's running now.
+    commandEvents(session: string): Promise<{ panes: CommandPaneHistory[] }>;
+    // The saved snippets (the bundled Snippets extension's list): id and
+    // name. Empty when Snippets isn't installed or has none.
+    snippets(): { id: string; name: string }[];
     // Opens the PROJECTS tree's create-worktree form, revealing the tree
     // first. runCommandIndex preselects one of the configured worktree run
     // agents (the app's registry, Settings → AI Providers); omit it for none.
@@ -1912,6 +1973,28 @@ export function focusProjectsPanel(): void {
 // Backs ExtensionContext.app.revealSidebarPanel. A panel that IS its own
 // tab (an untouched "tab" panel) reveals that tab; one living inside an
 // accordion reveals the tab and focuses the section.
+// "Reveal in Files" (a file tab's menu, ctx.app.revealInFiles): shows the
+// FILES section and asks each mounted FILES tree to expand to the path and
+// select it. A tree that isn't mounted yet (a collapsed section expanding
+// now) picks the request up when it mounts. False when no tree has the path
+// under its root (a file outside the current project's folder).
+const revealInFilesListeners = new Set<(path: string) => boolean>();
+let pendingRevealInFiles: string | null = null;
+
+export function onRevealInFiles(cb: (path: string) => boolean): () => void {
+  revealInFilesListeners.add(cb);
+  if (pendingRevealInFiles && cb(pendingRevealInFiles)) pendingRevealInFiles = null;
+  return () => revealInFilesListeners.delete(cb);
+}
+
+export function revealInFiles(path: string): boolean {
+  focusAccordionPanel("files");
+  let handled = false;
+  for (const listener of revealInFilesListeners) handled = listener(path) || handled;
+  pendingRevealInFiles = handled ? null : path;
+  return handled || revealInFilesListeners.size === 0;
+}
+
 export function revealSidebarPanelById(panelId: string): void {
   const bridge = sidebarLayoutBridge;
   if (!bridge) return;
@@ -2436,6 +2519,48 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       },
       cleanUpWorktrees() {
         startWorktreeCleanup();
+      },
+      revealInFiles(path) {
+        return revealInFiles(path);
+      },
+      tunnels: {
+        auth: () => coreJson("/api/tunnel-auth"),
+        status: (client) => coreJson(`/api/tunnel-status?client=${encodeURIComponent(client)}`),
+      },
+      proxyConfig: () => coreJson("/api/proxy-config"),
+      webPreview: {
+        open: (url) =>
+          coreJson("/api/web-preview/open", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ url }),
+          }),
+        clear: (site) =>
+          coreJson<void>("/api/web-preview/clear", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(site ? { site } : {}),
+          }),
+      },
+      commandEvents: (session) =>
+        coreJson<{ panes?: CommandPaneHistory[] }>(`/api/command-events?session=${encodeURIComponent(session)}`).then(
+          (data) => ({ panes: data?.panes ?? [] }),
+        ),
+      snippets() {
+        const raw = resolvedExtensionSettings["perch.snippets"]?.["snippets.items"];
+        if (typeof raw !== "string" || !raw.trim()) return [];
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed
+            .filter(
+              (s): s is { id: string; name: string } =>
+                typeof s === "object" && s !== null && typeof s.id === "string" && typeof s.name === "string",
+            )
+            .map((s) => ({ id: s.id, name: s.name }));
+        } catch {
+          return [];
+        }
       },
       revealSidebarPanel(panelId) {
         const namespaced = `ext.${ext.id}.${panelId}`;

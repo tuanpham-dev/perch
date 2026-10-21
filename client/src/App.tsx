@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
+import { restartPerch } from "./lib/restartServer";
+import { showUnsavedChanges } from "./lib/unsavedChanges";
 import BottomPanel from "./components/BottomPanel";
 import OutputView from "./components/OutputView";
 import ContextMenu from "./components/ContextMenu";
@@ -2177,6 +2179,8 @@ export default function App() {
         if (activeTabId) closeOtherTabs(activeTabId);
       },
       "settings.open": openSettingsTab,
+      "app.restartServer": () => void restartPerch(),
+      "drafts.list": () => void showUnsavedChanges({ pick: pickDialog, openFile: openFileOrViewer, showError }),
       "settings.openKeyboardShortcuts": openKeyboardShortcutsTab,
       "session.new": () => setFolderPickerMode("project"),
       "session.kill": () => {
@@ -2348,6 +2352,9 @@ export default function App() {
       cycleTab,
       openSettingsTab,
       openKeyboardShortcutsTab,
+      pickDialog,
+      openFileOrViewer,
+      showError,
       closeProject,
       togglePinSession,
       createWindow,

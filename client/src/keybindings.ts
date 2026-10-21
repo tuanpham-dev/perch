@@ -48,6 +48,8 @@ export const COMMANDS: Command[] = [
   { id: "sidebar.focusExtensions", label: "Sidebar: Focus Extensions", defaultBindings: [{ key: "ctrl+shift+KeyX" }], scope: "global" },
   { id: "quickSwitcher.toggle", label: "Toggle Quick Switcher", defaultBindings: [{ key: "ctrl+KeyP" }], scope: "global" },
   { id: "commandPalette.toggle", label: "Show Command Palette", defaultBindings: [{ key: "ctrl+shift+KeyP" }], scope: "global" },
+  { id: "app.restartServer", label: "Restart Perch Server", defaultBindings: [], scope: "global" },
+  { id: "drafts.list", label: "Unsaved Changes…", defaultBindings: [], scope: "global" },
   { id: "quickSwitcher.selectNext", label: "Quick Switcher: Select Next Item", defaultBindings: [{ key: "alt+KeyJ", when: "quickSwitcherOpen" }], scope: "global" },
   { id: "quickSwitcher.selectPrevious", label: "Quick Switcher: Select Previous Item", defaultBindings: [{ key: "alt+KeyK", when: "quickSwitcherOpen" }], scope: "global" },
   { id: "tab.next", label: "Next Tab", defaultBindings: [{ key: "ctrl+Tab" }], scope: "global" },

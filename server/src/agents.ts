@@ -17,6 +17,7 @@
 // A sibling of an existing core concept rather than a new one: ai.ts already
 // names claude / codex / agy as AI providers, and reads its own list out of
 // the settings document exactly the same way.
+import { constants as fsConstants } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -971,9 +972,10 @@ async function readHookDoc(file: string): Promise<Record<string, unknown> | null
   return parsed;
 }
 
-// Milliseconds included deliberately: two installs in the same second would
-// otherwise share a name, and the second backup would overwrite the first —
-// losing the only copy of what the file looked like before core touched it.
+// Every write gets its own backup: two installs in the same millisecond
+// would otherwise share a name, and the second backup would overwrite the
+// first — losing the only copy of what the file looked like before core
+// touched it. A taken name gets a counter.
 function backupName(file: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace(/Z$/, "");
   return `${file}.perch-backup-${stamp}`;
@@ -990,8 +992,18 @@ async function writeTextFile(file: string, text: string): Promise<string | null>
   try {
     const info = await stat(file);
     mode = info.mode & 0o777;
-    backup = backupName(file);
-    await copyFile(file, backup);
+    const base = backupName(file);
+    backup = base;
+    // COPYFILE_EXCL: never replace an earlier backup that has this name.
+    for (let n = 2; ; n++) {
+      try {
+        await copyFile(file, backup, fsConstants.COPYFILE_EXCL);
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST" || n > 1000) throw err;
+        backup = `${base}-${n}`;
+      }
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }

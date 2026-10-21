@@ -39,6 +39,9 @@ let getActiveContext: (() => ActiveContext) | null = null;
 // session opener for extensions, and the status item then keeps its popover.
 let openSessionWindow: ((sessionName: string, opts?: { windowIndex?: number }) => void) | null = null;
 let togglePanelView: ((viewId: string) => boolean) | null = null;
+// The core state this extension reads (ctx.app's tunnels, proxy config and
+// web preview).
+let coreApp: Pick<ExtensionContext["app"], "tunnels" | "proxyConfig" | "webPreview"> | null = null;
 // Other extensions' items for a port's menu (ctx.app.portMenuItems); null on a host
 // that predates ctx.registerPortMenuItem.
 let extraPortMenuItems:
@@ -148,14 +151,17 @@ function killPort(port: number): Promise<void> {
   return serverFetch(`/kill/${port}`, { method: "POST" }).then((res) => readJson<void>(res));
 }
 
-// Core routes — tunnel/proxy are core infrastructure; this panel only reads
-// their config to compose URLs and the tunnel command.
+// Tunnel and proxy are core infrastructure; this panel only reads their
+// config (ctx.app.tunnels / proxyConfig) to compose URLs and the tunnel
+// command.
 function fetchTunnelAuth(): Promise<TunnelAuth> {
-  return fetch("/api/tunnel-auth").then((res) => readJson<TunnelAuth>(res));
+  if (!coreApp) return Promise.reject(new Error("extension not activated"));
+  return coreApp.tunnels.auth();
 }
 
 function fetchProxyConfig(): Promise<ProxyConfig> {
-  return fetch("/api/proxy-config").then((res) => readJson<ProxyConfig>(res));
+  if (!coreApp) return Promise.reject(new Error("extension not activated"));
+  return coreApp.proxyConfig();
 }
 
 // ---- Panel ----
@@ -277,9 +283,8 @@ interface TunnelStatus {
 const NO_TUNNEL: TunnelStatus = { connected: false, ports: [], allForwarded: false };
 
 function fetchTunnelStatus(): Promise<TunnelStatus> {
-  return fetch(`/api/tunnel-status?client=${encodeURIComponent(tunnelClient())}`).then((res) =>
-    readJson<TunnelStatus>(res),
-  );
+  if (!coreApp) return Promise.reject(new Error("extension not activated"));
+  return coreApp.tunnels.status(tunnelClient());
 }
 
 // The ports list plus the tunnel state, on one timer for the whole extension.
@@ -981,6 +986,15 @@ interface ExtensionContext {
     openSessionWindow?(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void;
     togglePanelView?(viewId: string): boolean;
     portMenuItems?(port: { port: number; address: string; pid?: number; process?: string }): { label: string; onClick: () => void }[];
+    tunnels: {
+      auth(): Promise<TunnelAuth>;
+      status(client: string): Promise<TunnelStatus>;
+    };
+    proxyConfig(): Promise<ProxyConfig>;
+    webPreview: {
+      open(url: string): Promise<{ src: string; url: string; site: string; token: string }>;
+      clear(site?: string): Promise<void>;
+    };
   };
 }
 
@@ -1205,6 +1219,7 @@ export function activate(ctx: ExtensionContext): void {
   openSessionWindow = ctx.app.openSessionWindow ?? null;
   togglePanelView = ctx.app.togglePanelView ?? null;
   extraPortMenuItems = ctx.app.portMenuItems ?? null;
+  coreApp = ctx.app;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   // The wide table, for hosts that have a bottom panel to put it in.
   ctx.registerPanelView?.({
@@ -1246,6 +1261,7 @@ export function activate(ctx: ExtensionContext): void {
     readSendAutoSubmit,
     hookBase: (ctx.assetUrl("x").match(/^(\/api\/extensions\/[^/]+)\/file\//)?.[1] ?? "").replace("/extensions/", "/ext/"),
     pageAgentUrl: ctx.assetUrl("dist/page-agent.js"),
+    webPreview: ctx.app.webPreview,
   });
   if (ctx.app.promptDialog) setViewportPrompt(ctx.app.promptDialog);
   ctx.registerCommand?.({
@@ -1281,6 +1297,7 @@ export function deactivate(): void {
   removeStylesheet?.();
   removeStylesheet = null;
   openSessionWindow = null;
+  coreApp = null;
   togglePanelView = null;
   extraPortMenuItems = null;
   serverFetch = null;

@@ -79,7 +79,8 @@ import { compare as semverCompare, parse as semverParse, valid as semverValid } 
 import { createExtensionStorageService, type ExtensionStorage } from "./extensionStorage.js";
 import { stateDir } from "./stateDir.js";
 import { extractZip } from "./zip.js";
-import { registerEngine, type EngineRegistration } from "./multiplexer.js";
+import { getMultiplexer, registerEngine, type EngineRegistration } from "./multiplexer.js";
+import { clearServerCopies, dropServerCopy, freshServerCopy, serverFolder } from "./extensionReload.js";
 
 export const extensionsDir = path.join(configDir, "extensions");
 // Every extension's own records, files and runtime folder (extensionStorage.ts).
@@ -379,6 +380,10 @@ export interface ExtensionInfo {
   clientEntry: string | null;
   hasClient: boolean;
   hasServer: boolean;
+  // Set when the server is still running an older copy of this extension's
+  // server code (an update whose new code couldn't be loaded in place): why,
+  // for the app's Restart button. Absent when the running code is current.
+  serverStale?: string;
   // Shipped from the repo's extensions/ dir rather than user-installed —
   // see bundledExtensionsDir. Uninstalling one tombstones it in the state
   // file instead of deleting repo files (see uninstallExtension).
@@ -622,8 +627,16 @@ export async function listExtensions(): Promise<ExtensionInfo[]> {
     // only an explicit `false` in the state file turns it off.
     results.push(toInfo(manifest, id, enablement !== false, builtin, false, source));
   }
+  for (const info of results) {
+    const stale = staleServerHooks.get(info.id);
+    if (stale) info.serverStale = stale;
+  }
   return results;
 }
+
+// Extensions whose updated server code couldn't be loaded in place, and
+// why: their routes come back when the server restarts.
+const staleServerHooks = new Map<string, string>();
 
 async function findExtensionFolder(id: string): Promise<DiscoveredExtension | null> {
   return (await discoverExtensions()).get(id) ?? null;
@@ -663,6 +676,10 @@ export async function installFromPackageFile(
     const folder = isSafeId(manifest.name) ? manifest.name : `ext-${randomUUID().slice(0, 8)}`;
     await mkdir(extensionsDir, { recursive: true });
     const dest = path.join(extensionsDir, folder);
+    const replacing = await stat(dest).then(
+      () => true,
+      () => false,
+    );
     await rm(dest, { recursive: true, force: true });
     // Not a rename: the OS temp dir and ~/.config commonly live on
     // different filesystems/devices (containers, separate /tmp mounts), and
@@ -683,11 +700,23 @@ export async function installFromPackageFile(
     // hook must mount now too — before this, an installed extension's
     // routes 404'd until a disable/enable round trip or a server restart
     // (unnoticed until ai-command, the first .perch with a server entry).
-    // Re-installing over an already-mounted version keeps the OLD hook (the
-    // imported module can't be re-imported anyway — see unmountServerHook's
-    // module comment) — a restart picks up the new server.js, same as any
-    // server-side code change.
-    await mountServerHookIfNeeded(id, dest, manifest);
+    // Re-installing over an existing copy loads the new server code in
+    // place (extensionReload.ts): the old hook is taken down and the new code
+    // runs from a fresh copy of the folder. When it fails to load, the
+    // extension's routes stay down and the app offers a restart (the log has
+    // the error).
+    if (replacing) {
+      const wasMounted = serverHooks.has(id);
+      if (wasMounted) unmountServerHook(id);
+      staleServerHooks.delete(id);
+      if (manifest.perch?.server) await freshServerCopy(id, dest);
+      await mountServerHookIfNeeded(id, dest, manifest);
+      if (manifest.perch?.server && !serverHooks.has(id) && wasMounted) {
+        staleServerHooks.set(id, "its updated server code didn't load without a restart");
+      }
+    } else {
+      await mountServerHookIfNeeded(id, dest, manifest);
+    }
 
     const info = (await listExtensions()).find((e) => e.id === id);
     if (!info) throw new Error("extension installed but could not be read back");
@@ -705,6 +734,7 @@ export async function uninstallExtension(id: string): Promise<void> {
     throw new Error("this extension is required and cannot be uninstalled");
   }
   unmountServerHook(id);
+  await dropServerCopy(id);
   const state = await readState();
   if (found.builtin) {
     // Tombstone rather than delete repo files — a future .perch install with
@@ -762,6 +792,28 @@ const apiMutationListeners = new Map<string, Set<() => void>>();
 
 // Terminal engines an extension registered, undone when its hook unmounts.
 const engineRegistrations = new Map<string, Set<() => void>>();
+
+// host.sessions.onChange / onBell subscriptions (their unsubscribes), keyed
+// by extension id and dropped when its hook unmounts, as above.
+const sessionEventSubscriptions = new Map<string, Set<() => void>>();
+
+// How long session changes are gathered into one onChange call: opening a
+// project fires several in a row.
+const SESSION_CHANGE_DEBOUNCE_MS = 250;
+
+function subscribeSessionEvents(id: string, listen: (event: { event: string; session?: string; windowId?: string }) => void): () => void {
+  const unsubscribe = getMultiplexer().onEvent(listen);
+  let set = sessionEventSubscriptions.get(id);
+  if (!set) {
+    set = new Set();
+    sessionEventSubscriptions.set(id, set);
+  }
+  set.add(unsubscribe);
+  return () => {
+    unsubscribe();
+    set.delete(unsubscribe);
+  };
+}
 
 // Fired by api.ts's post-mutation middleware after any non-GET/HEAD core
 // API call finishes — the extension-facing generalization of the same
@@ -843,6 +895,16 @@ export interface ExtensionHostApi {
     createWindow(session: string, cwd?: string, name?: string, command?: string): Promise<number>;
     // Makes a window the session's current one.
     selectWindow(session: string, index: number): Promise<void>;
+    // Called after sessions or windows change: one opens, closes, is renamed
+    // or renumbered, or the terminal daemon restarts (which may change the
+    // whole listing). Changes within 250ms arrive as one call; read the new
+    // state with list(). Returns an unsubscribe; dropped when the hook
+    // unmounts. Replaces polling list() on a timer.
+    onChange(cb: () => void): () => void;
+    // A terminal rang its bell (an agent finishing, a long command done):
+    // the session and the window's id ($PERCH_WINDOW inside it). Returns an
+    // unsubscribe; dropped when the hook unmounts.
+    onBell(cb: (event: { session: string; windowId: string }) => void): () => void;
     // Types `text` literally into the session's window, then Enter when
     // `submit`. Without `windowIndex` it targets the session's current window,
     // which is whichever last had focus.
@@ -997,6 +1059,33 @@ function makeHostApi(id: string): ExtensionHostApi {
     },
     sessions: {
       list: () => listSessions(),
+      onChange: (cb) => {
+        let timer: NodeJS.Timeout | null = null;
+        const unsubscribe = subscribeSessionEvents(id, (event) => {
+          if (event.event !== "sessions-changed" || timer) return;
+          timer = setTimeout(() => {
+            timer = null;
+            try {
+              cb();
+            } catch (err) {
+              console.error(`extension ${id}: sessions.onChange listener threw:`, err);
+            }
+          }, SESSION_CHANGE_DEBOUNCE_MS);
+        });
+        return () => {
+          if (timer) clearTimeout(timer);
+          unsubscribe();
+        };
+      },
+      onBell: (cb) =>
+        subscribeSessionEvents(id, (event) => {
+          if (event.event !== "bell" || !event.session || !event.windowId) return;
+          try {
+            cb({ session: event.session, windowId: event.windowId });
+          } catch (err) {
+            console.error(`extension ${id}: sessions.onBell listener threw:`, err);
+          }
+        }),
       // Core's own routes drop the ≤500ms session-listing cache after any
       // mutating request; a call from a timer has no request, so do it here.
       create: async (name, cwd, exactCwd = false) => {
@@ -1196,7 +1285,7 @@ export async function mountServerHookIfNeeded(
     return;
   }
   try {
-    const entryPath = path.resolve(folderPath, serverEntry);
+    const entryPath = path.resolve(serverFolder(id, folderPath), serverEntry);
     const mod: unknown = await import(pathToFileURL(entryPath).href);
     const activate = (mod as { activate?: unknown }).activate;
     if (typeof activate !== "function") {
@@ -1241,6 +1330,8 @@ export function unmountServerHook(id: string): void {
   apiMutationListeners.delete(id);
   for (const undo of engineRegistrations.get(id) ?? []) undo();
   engineRegistrations.delete(id);
+  for (const unsubscribe of sessionEventSubscriptions.get(id) ?? []) unsubscribe();
+  sessionEventSubscriptions.delete(id);
   dropAgentHookSubscriptions(id);
   dropAgentCompanions(id);
   // Last, so the extension tears down after its routes and subscriptions are
@@ -1252,6 +1343,7 @@ export function unmountServerHook(id: string): void {
 }
 
 export async function loadEnabledServerHooks(): Promise<void> {
+  await clearServerCopies();
   for (const ext of await listExtensions()) {
     if (!ext.enabled || !ext.hasServer) continue;
     const found = await findExtensionFolder(ext.id);

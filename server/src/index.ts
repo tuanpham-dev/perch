@@ -9,7 +9,7 @@ import path from "node:path";
 import express from "express";
 import { WebSocketServer } from "ws";
 import { agentHookBodyParser, ensureAgentHookShim } from "./agentHooks.js";
-import { draftsRouter } from "./drafts.js";
+import { draftsRouter, startDraftPruning } from "./drafts.js";
 import { createExtensionStorageRouter } from "./extensionStorageRoutes.js";
 import { resumeRestoredAgents } from "./agentResume.js";
 import { applyTerminalSettings } from "./terminalSettings.js";
@@ -231,6 +231,7 @@ app.use("/api/agent-hooks/report", agentHookBodyParser);
 // Drafts (unsaved editor edits, server/src/drafts.ts) bring their own
 // larger-limit JSON parser, for the same reason.
 app.use("/api/drafts", draftsRouter);
+startDraftPruning();
 // Extension storage (server/src/extensionStorage*.ts) too: a record may be 16 MB.
 app.use(
   "/api/storage",

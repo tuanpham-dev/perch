@@ -5,6 +5,7 @@ import { reloadPendingIds, useExtensionRegistryVersion } from "../extensions";
 import { useListNavigation } from "../hooks/useListNavigation";
 import { byDisplayName, isOfficialPublisher, parsePublisher } from "../lib/extensionId";
 import { outdatedExtensions } from "../lib/extensionUpdates";
+import { restartPerch } from "../lib/restartServer";
 import type { ExtensionInfo, RegistryCatalogEntry, RegistrySourceResult } from "../types";
 import Icon from "./Icon";
 
@@ -177,7 +178,13 @@ export default function ExtensionsPanel({
   const reloadPending = reloadPendingIds();
   // Installed order, so the banner reads the same way the list below does.
   const pendingReload = installedExtensions.filter((e) => reloadPending.has(e.id));
-  const pendingReloadWithServer = pendingReload.filter((e) => e.hasServer);
+  // Updated server code normally loads in place (server extensionReload.ts);
+  // only the ones it couldn't need a server restart.
+  const pendingReloadWithServer = installedExtensions.filter((e) => e.hasServer && e.serverStale);
+  const [canRestart, setCanRestart] = useState(false);
+  useEffect(() => {
+    if (pendingReloadWithServer.length > 0) void api.restartAvailable().then(setCanRestart);
+  }, [pendingReloadWithServer.length]);
 
   // Updating the last outdated extension leaves the chip gone and the filter
   // on, i.e. an empty list with nothing to explain it. Drop the filter with
@@ -446,25 +453,33 @@ export default function ExtensionsPanel({
 
       {error && <div className="extension-error">{error}</div>}
 
-      {pendingReload.length > 0 && (
+      {(pendingReload.length > 0 || pendingReloadWithServer.length > 0) && (
         // One banner rather than a button per row: the reload is a single
         // page-wide act, and the rows it concerns may be scrolled out of
         // sight (or filtered away) when the user gets here.
         <div className="extension-reload-banner">
           <div className="extension-reload-banner-head">
-            <div className="extension-reload-banner-title">Reload required</div>
-            <button
-              className="dialog-button primary extension-reload-button"
-              onClick={() => window.location.reload()}
-            >
-              Reload
-            </button>
+            <div className="extension-reload-banner-title">
+              {pendingReload.length > 0 ? "Reload required" : "Restart required"}
+            </div>
+            {pendingReload.length > 0 && (
+              <button
+                className="dialog-button primary extension-reload-button"
+                onClick={() => window.location.reload()}
+              >
+                Reload
+              </button>
+            )}
           </div>
           <div className="extension-reload-banner-body">
             <div className="extension-reload-banner-names">
-              {pendingReload.map((e) => e.displayName).join(", ")}{" "}
-              {pendingReload.length === 1 ? "was updated" : "were updated"} - the page is still running
-              the old code
+              {pendingReload.length > 0 && (
+                <>
+                  {pendingReload.map((e) => e.displayName).join(", ")}{" "}
+                  {pendingReload.length === 1 ? "was updated" : "were updated"} - the page is still running
+                  the old code
+                </>
+              )}
             </div>
             {pendingReloadWithServer.length > 0 && (
               // A reload re-imports client code; a server hook is a module
@@ -473,8 +488,17 @@ export default function ExtensionsPanel({
               // it covers everything.
               <div className="extension-reload-note">
                 {pendingReloadWithServer.map((e) => e.displayName).join(", ")}{" "}
-                {pendingReloadWithServer.length === 1 ? "also serves" : "also serve"} routes that keep
-                the old code until the server restarts - run <code>perch restart</code>
+                {pendingReloadWithServer.length === 1 ? "needs" : "need"} a server restart:{" "}
+                {pendingReloadWithServer[0].serverStale}.{" "}
+                {canRestart ? (
+                  <button className="dialog-button extension-restart-button" onClick={() => void restartPerch()}>
+                    Restart Perch Server
+                  </button>
+                ) : (
+                  <>
+                    Run <code>perch restart</code>.
+                  </>
+                )}
               </div>
             )}
           </div>

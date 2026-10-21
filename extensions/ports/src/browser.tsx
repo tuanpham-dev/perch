@@ -35,6 +35,11 @@ export interface BrowserHost {
   hookBase: string;
   // The page agent bundle (dist/page-agent.js).
   pageAgentUrl: string;
+  // The web preview's proxy (ctx.app.webPreview).
+  webPreview: {
+    open(url: string): Promise<{ src: string; url: string; site: string; token: string }>;
+    clear(site?: string): Promise<void>;
+  };
 }
 
 let host: BrowserHost | null = null;
@@ -337,14 +342,8 @@ export function BrowserView({ filePath, active, toolbarTarget, setTitle, showMen
           const src = base.replace(/\/$/, "") + url.pathname + url.search + url.hash;
           next = { mode: "local", port, src, base, crossOrigin, origin: url.origin };
         } else {
-          const res = await fetch("/api/web-preview/open", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ url: url.href }),
-          });
-          const data = (await res.json().catch(() => ({}))) as { src?: string; site?: string; token?: string; error?: string };
+          const data = await host.webPreview.open(url.href);
           if (seq !== navSeq.current) return;
-          if (!res.ok || !data.src || !data.site || !data.token) throw new Error(data.error ?? `${res.status} ${res.statusText}`);
           next = { mode: "external", src: data.src, site: data.site, token: data.token };
         }
         const prev = pageRef.current;
@@ -621,11 +620,7 @@ export function BrowserView({ filePath, active, toolbarTarget, setTitle, showMen
 
   const clearSiteData = useCallback(async () => {
     if (page?.mode !== "external") return;
-    await fetch("/api/web-preview/clear", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ site: page.site }),
-    }).catch(() => undefined);
+    await host?.webPreview.clear(page.site).catch(() => undefined);
     command("reload");
   }, [page, command]);
 

@@ -11,7 +11,7 @@
 // decides what a draft is (text plus a hash of the on-disk baseline, a grid's
 // parse options, ...).
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import express, { Router, type Request, type Response } from "express";
 import { configDir } from "./configDir.js";
@@ -68,7 +68,49 @@ export function createDraftStore(rootDir: string) {
     await rm(dirFor(extId), { recursive: true, force: true });
   }
 
-  return { get, set, remove, clearExtension };
+  // Every draft, newest first, without its value: what the app's Unsaved
+  // Changes list shows.
+  async function list(): Promise<{ extId: string; key: string; savedAt: number }[]> {
+    const out: { extId: string; key: string; savedAt: number }[] = [];
+    let extIds: string[];
+    try {
+      extIds = await readdir(rootDir);
+    } catch {
+      return out;
+    }
+    for (const extId of extIds.filter((id) => EXT_ID_RE.test(id))) {
+      let files: string[];
+      try {
+        files = await readdir(dirFor(extId));
+      } catch {
+        continue;
+      }
+      for (const name of files.filter((f) => f.endsWith(".json"))) {
+        try {
+          const parsed = JSON.parse(await readFile(path.join(dirFor(extId), name), "utf8")) as StoredDraft;
+          if (typeof parsed.key === "string") out.push({ extId, key: parsed.key, savedAt: Number(parsed.savedAt) || 0 });
+        } catch {
+          // a half-written or foreign file: not a draft
+        }
+      }
+    }
+    return out.sort((a, b) => b.savedAt - a.savedAt);
+  }
+
+  // Removes drafts nobody has touched for `maxAgeMs`: a file edited once and
+  // never reopened would otherwise keep its draft forever.
+  async function prune(maxAgeMs: number, now = Date.now()): Promise<number> {
+    let removed = 0;
+    for (const draft of await list()) {
+      if (now - draft.savedAt > maxAgeMs) {
+        await remove(draft.extId, draft.key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  return { get, set, remove, clearExtension, list, prune };
 }
 
 export type DraftStore = ReturnType<typeof createDraftStore>;
@@ -93,6 +135,11 @@ export function createDraftsRouter(store: DraftStore): Router {
     if (typeof key !== "string" || key.length === 0 || key.length > MAX_KEY_LENGTH) return null;
     return { extId, key };
   };
+
+  // Every draft (extension, key, when), for the Unsaved Changes list.
+  router.get("/", handle(async (_req, res) => {
+    res.set("Cache-Control", "no-store").json({ drafts: await store.list() });
+  }));
 
   router.get("/:extId", handle(async (req, res) => {
     const target = parse(req.params.extId, req.query.key);
@@ -122,3 +169,11 @@ export function createDraftsRouter(store: DraftStore): Router {
 
 export const draftStore = createDraftStore(path.join(configDir, "drafts"));
 export const draftsRouter = createDraftsRouter(draftStore);
+
+// Drafts untouched for 30 days are dropped: at start-up and once a day.
+export const DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export function startDraftPruning(store: DraftStore = draftStore): void {
+  const run = () => void store.prune(DRAFT_MAX_AGE_MS).catch((err) => console.error("draft pruning failed:", err));
+  run();
+  setInterval(run, 24 * 60 * 60 * 1000).unref();
+}

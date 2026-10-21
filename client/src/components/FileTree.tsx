@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import { getContextGetter } from "../contextKeys";
-import { getFileDecoration, useExtensionRegistryVersion, type FileDecoration } from "../extensions";
+import { getFileDecoration, onRevealInFiles, useExtensionRegistryVersion, type FileDecoration } from "../extensions";
 import { bindingMatches, recorderState, serializeEvent, type Keybinding } from "../keybindings";
 import type { FsEntry, MenuItem } from "../types";
 import FileIcon from "./FileIcon";
@@ -598,6 +598,40 @@ export default function FileTree({
   // just-pruned focus target) still gives roving tabindex a real landing
   // spot instead of no row being reachable by Tab at all.
   const effectiveFocusedPath = focusedPath ?? visibleRows[0]?.path ?? null;
+
+  // "Reveal in Files" (extensions.ts revealInFiles): expand every folder
+  // between the root and the path, select it, and scroll it into view once
+  // its row exists (its folders may still be loading).
+  const [revealTarget, setRevealTarget] = useState<string | null>(null);
+  const revealRef = useRef<(path: string) => boolean>(() => false);
+  revealRef.current = (target: string) => {
+    if (!rootDir) return false;
+    const root = rootDir.replace(/\/+$/, "");
+    if (target !== root && !target.startsWith(`${root}/`)) return false;
+    const parts = target === root ? [] : target.slice(root.length + 1).split("/");
+    const dirs: string[] = [];
+    let current = root;
+    for (const segment of parts.slice(0, -1)) {
+      current = `${current}/${segment}`;
+      dirs.push(current);
+    }
+    setQuery("");
+    setExpanded((prev) => new Set([...prev, ...dirs]));
+    for (const dir of [root, ...dirs]) if (!dirCache.has(dir)) fetchDir(dir);
+    setSelectedPaths(new Set([target]));
+    setFocusedPath(target);
+    setRevealTarget(target);
+    return true;
+  };
+  useEffect(() => onRevealInFiles((path) => revealRef.current(path)), []);
+  useEffect(() => {
+    if (!revealTarget) return;
+    const row = rowRefs.current.get(revealTarget);
+    if (!row) return;
+    row.scrollIntoView({ block: "nearest" });
+    row.focus({ preventScroll: true });
+    setRevealTarget(null);
+  }, [revealTarget, visibleRows]);
   const indexOf = (path: string | null) => (path ? visibleRows.findIndex((r) => r.path === path) : -1);
 
   // Imperative DOM focus (not just the roving-tabindex state) — the target

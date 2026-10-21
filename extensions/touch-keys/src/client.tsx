@@ -24,6 +24,14 @@ interface SettingsApi {
 let extSettings: SettingsApi | null = null;
 let removeStylesheet: (() => void) | null = null;
 let removeSettingsListener: (() => void) | null = null;
+// ctx.app.snippets: the Snippets extension's saved snippets, for the editor's
+// "Add snippet key" picker and for telling a snippet key that has nowhere to
+// go.
+let readSnippets: (() => { id: string; name: string }[]) | null = null;
+
+export function savedSnippets(): { id: string; name: string }[] {
+  return readSnippets?.() ?? [];
+}
 
 // One host subscription fanned out to local component listeners, so every
 // consumer re-reads on a Settings edit (including another device's, via the
@@ -139,10 +147,14 @@ interface ExtensionContext {
   registerSettingsComponent(component: { id: string; component: typeof TouchKeysEditor }): void;
   settings: SettingsApi;
   assetUrl(relPath: string): string;
+  app: {
+    snippets(): { id: string; name: string }[];
+  };
 }
 
 export function activate(ctx: ExtensionContext): void {
   extSettings = ctx.settings;
+  readSnippets = () => ctx.app.snippets();
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   removeSettingsListener = ctx.settings.onDidChange(() => {
     for (const cb of settingsListeners) cb();
@@ -158,5 +170,6 @@ export function deactivate(): void {
   removeStylesheet?.();
   removeStylesheet = null;
   extSettings = null;
+  readSnippets = null;
   settingsListeners.clear();
 }
