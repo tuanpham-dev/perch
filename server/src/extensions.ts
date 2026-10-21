@@ -192,6 +192,7 @@ interface ConfigurationProperty {
   // "ai-profile": a picker of the AIs configured in Settings → AI Providers; the
   // stored value is a profile id to pass as ctx.ai.run's opts.profileId
   // (empty = whatever the user's default profile is).
+  // "ai-model": a model box for the sibling "ai-profile" AI, with Fetch models.
   format?: string;
   default?: unknown;
   description?: string;
@@ -296,8 +297,8 @@ export interface AgentContribution {
 export interface ExtensionConfigurationProperty {
   key: string;
   type: "boolean" | "number" | "integer" | "string";
-  // See ConfigurationProperty.format — only "ai-profile" is recognized by
-  // the settings UI today; anything else falls back to a text box.
+  // See ConfigurationProperty.format — the settings UI recognizes
+  // "ai-profile" and "ai-model"; anything else falls back to a text box.
   format?: string;
   default: unknown;
   description: string;

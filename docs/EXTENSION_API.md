@@ -22,8 +22,10 @@ to read).
 - [Client API](#client-api)
   - [`activate(ctx)` / `deactivate()`](#activatectx--deactivate)
   - [Commands](#commands--registercommand)
+  - [Taking over the keyboard](#taking-over-the-keyboard--data-keyboard-capture)
   - [File viewers](#file-viewers--registerfileviewer)
   - [File-open interceptors](#file-open-interceptors--registerfileopeninterceptor)
+  - [URL handlers](#url-handlers--registerurlhandler)
   - [Sidebar panels](#sidebar-panels--registersidebarpanel)
   - [Sidebar tabs](#sidebar-tabs--registersidebartab)
   - [Sidebar tab menu items](#sidebar-tab-menu-items--registersidebartabmenuitem)
@@ -32,6 +34,7 @@ to read).
   - [Tab group menu items](#tab-group-menu-items--registertabgroupmenuitem)
   - [Window actions](#window-actions--registerwindowaction)
   - [File decorations](#file-decorations--registerfiledecorationprovider)
+  - [Quick diff](#quick-diff--registerquickdiffprovider--ctxquickdiff)
   - [Session decorations](#session-decorations--registersessiondecorationprovider)
   - [Managed grids](#managed-grids--registermanagedgrid)
   - [Terminal engines](#terminal-engines--registerterminalengine)
@@ -40,6 +43,7 @@ to read).
   - [Viewer accessories](#viewer-accessories--registervieweraccessory)
   - [App overlays](#app-overlays--registerappoverlay)
   - [Status bar items](#status-bar-items--registerstatusbaritem)
+  - [Panel views](#panel-views--registerpanelview)
   - [Quick-switcher providers](#quick-switcher-providers--registerquickswitcherprovider)
   - [Settings components](#settings-components--registersettingscomponent)
   - [The `ctx.app` host API](#the-ctxapp-host-api)
@@ -96,6 +100,12 @@ disabled or uninstalled.
   resident until the server restarts — Node can't unload it — so a server
   entry may export an optional `deactivate()`, which runs after its routes
   unmount, to stop its own timers and watchers.
+- Installing an update of an extension whose server hook is running reloads
+  it in place: the old hook unmounts (its `deactivate()` runs) and the new
+  version mounts from a fresh copy of its folder, so its updated modules
+  load instead of the cached ones. When that fails, the Extensions panel
+  marks the extension **Restart required** and offers **Restart Perch
+  Server** (shown only when Perch runs as a service that restarts it).
 - Client entries dynamic-import and `activate()` once per page load, after
   the extension list and settings have loaded. Disable/enable while the page
   is open calls the module's optional `deactivate()` and re-`activate()`s
@@ -540,8 +550,11 @@ Settings section and readable from both entries:
   richer config, store a JSON **string** property and edit it with a
   [settings component](#settings-components--registersettingscomponent)
   (that's how `touch-keys` persists its key layout).
-- An array of `{ title, properties }` sections is accepted and flattened in
-  order.
+- An array of `{ title, properties }` sections is accepted. Each renders as
+  its own group, in order, under its `title` (a title that only repeats the
+  extension's display name is left out).
+- `markdownDescription` is accepted in place of `description` and shown as
+  plain text (VS Code manifests carry it).
 - Values are server-synced: manifest defaults overridden by the user's
   stored values, shared across the user's devices.
 - `"format": "ai-profile"` on a string property renders a dropdown of the
@@ -1617,6 +1630,14 @@ toggle-hide-when-already-active branch — a command that opens a panel's UI
 should never end with it hidden. No-ops if the panel isn't registered.
 
 ```ts
+ctx.app.revealInFiles(path: string): boolean
+```
+Shows the FILES section, expanded down to `path` with it selected and
+scrolled into view. Returns `false`, doing nothing, when the path isn't under
+the folder FILES is showing (a file from another project), so the caller can
+say so. Reference: `markdown-preview` (a link to a folder).
+
+```ts
 ctx.app.newWorktree(opts?: { runCommandIndex?: number }): void
 ctx.app.cleanUpWorktrees(): void
 ```
@@ -1691,6 +1712,49 @@ the chosen `id`, or `null` on cancel. `current` starts that row highlighted.
 `pickIcon` is `pickItem` over every codicon, searchable by name and by its
 descriptive tags (typing "person" finds `account`), and resolves the icon
 name. Each resolves `false`/`null` if the app isn't mounted yet.
+
+```ts
+ctx.app.showError(message: string): void
+```
+Shows a short error in the app's error banner, which fades after a few
+seconds. Use it when an action the user just took fails, so a click never
+does nothing silently (a snippet that couldn't be typed, a Stop that found
+nothing running).
+
+```ts
+ctx.app.tunnels.auth(): Promise<{ cookie: string | null; authorization: string | null }>
+ctx.app.tunnels.status(client: string): Promise<{ connected: boolean; ports: number[]; allForwarded: boolean }>
+ctx.app.proxyConfig(): Promise<{ domain: string | null }>
+ctx.app.webPreview.open(url: string): Promise<{ src: string; url: string; site: string; token: string }>
+ctx.app.webPreview.clear(site?: string): Promise<void>
+ctx.app.commandEvents(session: string): Promise<{ panes: CommandPaneHistory[] }>
+ctx.app.snippets(): { id: string; name: string }[]
+
+interface CommandPaneHistory {
+  pane: string; windowIndex: number; paneIndex: number; active: boolean;
+  currentCommand: string; title: string;
+  running: { command: string; cwd: string; startedAt: number } | null;
+  history: { command: string; cwd: string; startedAt: number; endedAt: number; exitCode: number; durationMs: number }[];
+}
+```
+Core state that first-party features read. These are kept compatible
+(fields may be added, never removed); the core routes behind them are
+internal and can change, so call these instead of fetching `/api/...` by hand.
+- `tunnels`: the `perch tunnel` this browser reaches Perch through. `auth`
+  is the sign-in it forwards; `status` says whether the tunnel with id
+  `client` is connected and which ports it forwards. Reference: `ports`.
+- `proxyConfig`: the first configured `PROXY_DOMAIN`, or `null`. With one, a
+  port's address is `<port>.<domain>`; without, the app's own `/proxy/<port>/`.
+- `webPreview`: the built-in browser's proxy. `open` turns an address into
+  the frame `src`, the address as understood, its site and a token for later
+  addresses on that site; `clear` drops one site's stored cookies, or every
+  site's. Reference: `ports` (BrowserHost).
+- `commandEvents`: the commands run in a session's terminals, from shell
+  integration: each window's finished commands with exit codes and
+  durations, and what's running now. Reference: `command-history`.
+- `snippets`: the saved snippets' ids and names (the bundled Snippets
+  extension's list), empty when Snippets isn't installed. Reference:
+  `touch-keys`.
 
 ```ts
 ctx.app.getFileIcon(fileName: string): IconResult
@@ -1993,7 +2057,7 @@ export function activate({ router, log, getSettings, host, ai, secrets, storage 
 | Piece | Contract |
 | --- | --- |
 | `router` | An Express router mounted at `/api/ext/<extensionId>` while the extension is enabled. JSON bodies up to 17 MB are parsed (`req.body`; Perch before 0.9 parsed only 100 KB); send errors as `res.status(4xx/5xx).json({ error: "…" })` — client helpers surface the `error` field. Routes 404 immediately on disable/uninstall. |
-| `log(...args)` | `console.log` prefixed with `[ext:<id>]`. |
+| `log(...args)` | `console.log` prefixed with `[ext:<id>]`, and also kept in the **OUTPUT** panel under the extension's display name, where users look when something goes wrong. |
 | `getSettings()` | `Promise<Record<string, unknown>>` — this extension's current configuration values (defaults + user overrides), read fresh per call. |
 | `host.ports.list()` | `Promise<ListeningPort[]>` — listening ports attributed to terminal sessions (`{ port, address, process?, pid?, session, orphan? }`). How far past the still-open terminals it reaches is the user's `portScope` setting; `orphan` marks a process that outlived its terminal (`session` is then the name it remembers, empty when no terminal started it). The same attribution data the WS tunnel's security gate uses; consume it rather than re-scanning `/proc`. |
 | `host.ports.find(port)` | `Promise<ListeningPort \| null>` — one port's fresh attribution (kill-confirmation flows). |
@@ -2008,6 +2072,8 @@ export function activate({ router, log, getSettings, host, ai, secrets, storage 
 | `host.sessions.selectWindow(session, index)` | `Promise<void>` - makes a window the session's current one. |
 | `host.sessions.sendText(session, text, submit, windowIndex?)` | `Promise<void>` - types `text` literally into the session's window, then presses Enter when `submit` is true (after a short settle, so Ink-based TUIs do not drop it). **Without `windowIndex` it targets the session's current window** - whichever window last had focus, not necessarily the one you created - so pass it whenever you know which window you mean. |
 | `host.sessions.sendTextToWindow(windowId, text, submit)` | `Promise<void>` - the same, addressed by window id, which survives renumbering and renames. |
+| `host.sessions.onChange(cb)` | Calls `cb()` after sessions or windows change: one opens, closes, is renamed or renumbered, or the terminal daemon restarts. Changes within 250ms arrive as one call; read the new state with `list()`. Returns an unsubscribe; dropped when the hook unmounts. Use it instead of polling `list()` on a timer. Perch 0.9.3 and later: declare `"minPerch": "0.9.3"`. |
+| `host.sessions.onBell(cb)` | Calls `cb({ session, windowId })` when a terminal rings its bell (an agent finishing, a long command done); `windowId` is the window's stable id, `$PERCH_WINDOW` inside it. Returns an unsubscribe; dropped when the hook unmounts. Perch 0.9.3 and later. |
 | `host.sessions.kill(name)` | `Promise<void>` - kills the session by exact name. **No confirmation of any kind runs**; a panel that offers it should ask first (`confirmDialog`). A session that is already gone is not an error. |
 | `host.sessions.listPanes(session)` | `Promise<SessionPane[]>` - one entry per window of `session` (a window is one terminal): `{ windowIndex, paneIndex, paneActive, active, id, command, pid, title }`. `id` is the window's stable id, the same value its shell sees as `$PERCH_WINDOW` and `host.agentHooks` events carry as `paneId`; `title` is the window's name; `paneIndex` is always 0. Rejects when the session does not exist. |
 | `host.sessions.capture(windowId, opts?)` | `Promise<string>` - the window's screen as plain text: its visible rows plus `opts.scrollback` history lines above them, one line per row joined with `\n`, trailing blank rows dropped. Rows are not re-joined where a long line wrapped. With `opts.styles: true`, each row keeps its colors and attributes as SGR escapes (`\x1b[0;1;44m`), every style change starting with a reset and a styled row ending with `\x1b[0m`: for text a TUI tells apart only by color, like a highlighted tab. Strip the escapes to get the plain text back; a backend that can't style returns plain text. Works on the bundled daemon and on any terminal backend that implements `capture`; rejects when the window is gone or the backend cannot read screens. Read-only: pair it with `sendTextToWindow` to act on what a TUI shows. |
@@ -2248,8 +2314,13 @@ selection Symbol, the link detector) must come through a shim; small
 (`Icon.tsx`, `FileIcon.tsx`, `useListNavigation.ts`,
 `useMarqueeSelection.ts`, `clipboard.ts`, `injectStylesheet.ts`,
 `types.ts`, `terminalEngineTypes.ts`, `fileApi.ts`, `useLongPressMenu.ts`,
-`agentTarget.ts`) — each extension's build inlines its
-own copy, and structural typing keeps host-passed values compatible.
+`agentTarget.ts`, `drafts.ts`, `diskConflict.ts`) — each extension's build
+inlines its own copy, and structural typing keeps host-passed values
+compatible. Two of them set conventions worth reusing: `diskConflict.ts`'s
+`checkDiskConflict` is the Overwrite / Reload / Cancel question every editor
+asks before saving over a file that changed on disk, and `fileApi.ts`'s
+`fileLoadProblem(url)` turns a failed file load into the server's reason
+(the file is gone, can't be read) to show instead of a blank view.
 
 If you bundle with your own tooling instead of `build.mjs`, replicate the
 aliases: map those module names to thin files re-exporting from
