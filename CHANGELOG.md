@@ -3,6 +3,44 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.9.3 - 2026-10-21
+
+- **The built-in browser follows every page.** The address bar keeps up as a
+  site navigates, the preview recovers from a page error, comments can skip
+  the screenshot, Check Fixes works on feedback sent from several pages, and
+  a comment shows whether its fix agent is still working or done.
+- **Terminal tabs stay open through a daemon hiccup.** A failed listing or a
+  slow reattach no longer closes tabs; only a window that is really gone does.
+- **No more lost or half-written files.** Uploads and saves write to a temp
+  file and swap it in, so a cut-off save never leaves a truncated file.
+  Settings saves no longer overwrite each other, documents up to 1 MB are
+  accepted, and a save the server refuses shows a banner with Retry.
+- **Saving over a file that changed on disk asks first**: Overwrite, Reload
+  or Cancel, in the JSON, CSV and other built-in editors.
+- **Delete moves to the OS trash** (Linux, macOS and Windows), with a
+  permanent delete offered when the trash can't take it.
+- **Restart Perch from the app.** When Perch runs as a service, the command
+  palette and the Extensions panel can restart it, and an updated extension's
+  server code reloads in place without a restart.
+- **Unsaved Changes** lists drafts kept from earlier sessions, and drafts
+  older than 30 days are pruned. **Reveal in Files** shows a file tab's file
+  in FILES.
+- **Search no longer crashes on files that aren't UTF-8**, finds matches at
+  the right place after accented or wide characters, replaces exactly the
+  text it highlighted, and leaves non-UTF-8 files untouched.
+- **Extension fixes:** big JSON opens collapsed and Format keeps every digit
+  and key order; CSV keeps row heights right while scrolling; snippets and
+  command history type into the tab you're looking at; Tasks can Stop and
+  Restart a script; git works on huge repositories and slow commit hooks;
+  subagents show a count of recently finished runs; terminal links after
+  emoji or CJK characters are underlined in the right place; image, video and
+  PDF previews have Refresh and say why a file didn't load; the ports
+  popover follows `ports.clickAction`; live preview no longer serves dotfiles.
+- **For extension authors:** server hooks get `host.sessions.onChange` and
+  `onBell`, and the client gets `ctx.app.revealInFiles`, `showError` and
+  documented APIs for tunnels, the proxy, the built-in browser, command
+  history and snippets. All are described in `docs/EXTENSION_API.md`.
+
 ## 0.9.2 - 2026-10-20
 
 - **Commenting on a web preview no longer breaks the page.** The screenshot
