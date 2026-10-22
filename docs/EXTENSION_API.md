@@ -1638,6 +1638,18 @@ the folder FILES is showing (a file from another project), so the caller can
 say so. Reference: `markdown-preview` (a link to a folder).
 
 ```ts
+ctx.app.openUrlInApp(url: string): boolean
+```
+Shows an `http(s)` address inside the app, in whatever web preview an
+extension provides through [`registerUrlHandler`](#url-handlers--registerurlhandler)
+(the `ports` extension's built-in browser), the way a terminal link opens
+there. Returns `false`, doing nothing, when nothing in the app can show it;
+open the address in the browser then. Perch 0.9.4 and later: check that the
+method exists before calling it. Call it from a Shift+click, Perch's
+secondary click, on a link. Reference: `markdown-preview`, and `notes` in the
+[perch-extensions](https://github.com/tuanpham-dev/perch-extensions) registry.
+
+```ts
 ctx.app.newWorktree(opts?: { runCommandIndex?: number }): void
 ctx.app.cleanUpWorktrees(): void
 ```

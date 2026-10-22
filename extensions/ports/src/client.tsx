@@ -60,11 +60,16 @@ function readClickAction(): "app" | "browser" {
   return extSettings?.get("ports.clickAction") === "browser" ? "browser" : "app";
 }
 
-// A secondary click on a port's open action (Ctrl/Cmd+click, or the middle
-// button) opens it the other way: in Perch's own web preview tab where a
-// click opens the browser, and the reverse.
+// A secondary click on a port's open action (Shift+click, Perch's secondary
+// click everywhere, or the middle button) opens it the other way: in Perch's
+// own web preview tab where a click opens the browser, and the reverse.
 function isSecondaryClick(e: ReactMouseEvent): boolean {
-  return e.button === 1 || e.ctrlKey || e.metaKey;
+  return e.button === 1 || e.shiftKey;
+}
+
+// The tooltip's note on what a secondary click does with the current setting.
+function secondaryHint(): string {
+  return readClickAction() === "app" ? "Shift+click: in the browser" : "Shift+click: in Perch";
 }
 
 function openPortInApp(port: number): void {
@@ -73,7 +78,7 @@ function openPortInApp(port: number): void {
 
 // Click and middle-click handlers for a port's open action: a plain click
 // opens it where ports.clickAction says (an app tab by default, or the
-// browser), a secondary click (Ctrl/Cmd, the middle button) the other way.
+// browser), a secondary click (Shift, the middle button) the other way.
 // The middle button's own autoscroll is kept from starting.
 function openActionProps(openInBrowser: () => void, port: number) {
   const open = (secondary: boolean) => {
@@ -566,8 +571,8 @@ function PortsTableView({ context }: PanelViewProps) {
                     className="ports-table-link"
                     title={
                       forwarded.has(p.port)
-                        ? `Forwarded - open http://localhost:${p.port}/ (Ctrl+click: in Perch)`
-                        : `Open port ${p.port} (Ctrl+click: in Perch)`
+                        ? `Forwarded - open http://localhost:${p.port}/ (${secondaryHint()})`
+                        : `Open port ${p.port} (${secondaryHint()})`
                     }
                     {...openActionProps(() => openPort(p.port), p.port)}
                   >
@@ -605,7 +610,7 @@ function PortsTableView({ context }: PanelViewProps) {
                   <div className="ports-table-action-row">
                   <button
                     className="icon-button port-action-button"
-                    title={`${forwarded.has(p.port) ? "Open at localhost" : "Open"} (Ctrl+click: in Perch)`}
+                    title={`${forwarded.has(p.port) ? "Open at localhost" : "Open"} (${secondaryHint()})`}
                     {...openActionProps(() => openPort(p.port), p.port)}
                   >
                     <Icon name="link-external" />
@@ -803,8 +808,8 @@ function PortsStatusPopover({ context }: StatusItemProps) {
               className="port-item"
               title={
                 forwarded.has(p.port)
-                  ? `Forwarded - open http://localhost:${p.port}/ (Ctrl+click: in Perch)`
-                  : `Open port ${p.port} (Ctrl+click: in Perch)`
+                  ? `Forwarded - open http://localhost:${p.port}/ (${secondaryHint()})`
+                  : `Open port ${p.port} (${secondaryHint()})`
               }
               {...openActionProps(() => openPort(p.port), p.port)}
             >
@@ -817,7 +822,7 @@ function PortsStatusPopover({ context }: StatusItemProps) {
             <div className="port-actions">
               <button
                 className="icon-button port-action-button"
-                title={`${forwarded.has(p.port) ? "Open at localhost" : "Open"} (Ctrl+click: in Perch)`}
+                title={`${forwarded.has(p.port) ? "Open at localhost" : "Open"} (${secondaryHint()})`}
                 tabIndex={-1}
                 {...openActionProps(() => openPort(p.port), p.port)}
               >

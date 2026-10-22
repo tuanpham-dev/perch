@@ -34,6 +34,7 @@ let extSettings: SettingsApi | null = null;
 let openFileTab: ((path: string, line?: number) => void) | null = null;
 let openViewerTab: ((viewerId: string, path: string, opts?: { title?: string }) => void) | null = null;
 let revealInFiles: ((path: string) => boolean) | null = null;
+let openUrlInApp: ((url: string) => boolean) | null = null;
 
 // lowlight's default "common" set (~35 languages) excludes several
 // devops/config languages that show up in READMEs — nginx, dockerfile,
@@ -427,13 +428,24 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
       ),
       // Three link kinds: in-document fragments keep the existing
       // clobber-prefix scroll; external URLs open a new browser
-      // tab; everything else is a file path opened in-app.
+      // tab (Shift+click, the secondary click: a web address in the
+      // web preview); everything else is a file path opened in-app.
       a: ({ href, ...props }) => {
         if (!href || href.startsWith("#")) {
           return <a {...props} href={href ? resolveHref(href) : href} />;
         }
         if (isExternalHref(href)) {
-          return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
+          return (
+            <a
+              {...props}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                if (e.shiftKey && /^https?:\/\//i.test(href) && openUrlInApp?.(href)) e.preventDefault();
+              }}
+            />
+          );
         }
         return (
           <a
@@ -510,6 +522,7 @@ export function activate(ctx: {
     openFileTab: (path: string, line?: number) => void;
     openViewerTab: (viewerId: string, path: string, opts?: { title?: string }) => void;
     revealInFiles?: (path: string) => boolean;
+    openUrlInApp?: (url: string) => boolean;
   };
   assetUrl: (relPath: string) => string;
   settings: SettingsApi;
@@ -518,6 +531,7 @@ export function activate(ctx: {
   openFileTab = ctx.app.openFileTab;
   openViewerTab = ctx.app.openViewerTab;
   revealInFiles = ctx.app.revealInFiles ?? null;
+  openUrlInApp = ctx.app.openUrlInApp ?? null;
   removeStylesheet = injectStylesheet(ctx.assetUrl, "dist/client.css");
   setMermaidAssetUrl(ctx.assetUrl);
   ctx.registerFileViewer({
@@ -538,6 +552,7 @@ export function deactivate() {
   openFileTab = null;
   openViewerTab = null;
   revealInFiles = null;
+  openUrlInApp = null;
   setMermaidAssetUrl(null);
   pendingAnchors.clear();
 }

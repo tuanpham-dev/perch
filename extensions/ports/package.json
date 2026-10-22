@@ -21,7 +21,7 @@
             "A port's Open action opens it in an app tab (iframe), staying inside perch.",
             "A port's Open action opens it in a new browser tab."
           ],
-          "description": "What a port row's Open action does. Both are always available from the row's context menu regardless of this setting."
+          "description": "What a port row's Open action does. Shift+click (or middle-click) does the other, and both are always in the row's context menu."
         },
         "ports.sendAutoSubmit": {
           "type": "boolean",

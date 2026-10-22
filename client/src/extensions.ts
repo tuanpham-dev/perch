@@ -638,6 +638,11 @@ export interface ExtensionContext {
     // scrolled into view. False when the path isn't under the folder FILES
     // is showing (a file from another project).
     revealInFiles(path: string): boolean;
+    // Shows an http(s) address inside the app, in whatever web preview an
+    // extension provides (the ports extension's built-in browser), the way a
+    // terminal link opens there. False, doing nothing, when nothing in the
+    // app can show it: open it in the browser instead.
+    openUrlInApp(url: string): boolean;
     // ---- Core state for first-party features ----
     // Documented and kept compatible (fields may be added, never removed),
     // so an extension never fetches core routes by hand.
@@ -2532,6 +2537,16 @@ function makeContext(ext: ExtensionInfo, runtime: ExtensionRuntime): ExtensionCo
       },
       revealInFiles(path) {
         return revealInFiles(path);
+      },
+      openUrlInApp(url) {
+        if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return false;
+        return [...extensionUrlHandlers].some((h) => {
+          try {
+            return h.handle(url);
+          } catch {
+            return false;
+          }
+        });
       },
       tunnels: {
         auth: () => coreJson("/api/tunnel-auth"),
