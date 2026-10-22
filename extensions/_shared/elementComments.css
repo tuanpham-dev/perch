@@ -803,3 +803,13 @@
   font-size: 11px;
   color: var(--fg-inactive);
 }
+
+/* The panel's collapse chevron, and the panel folded to its header. */
+.pc-collapse {
+  flex-shrink: 0;
+  margin-left: -4px;
+}
+
+.pc-panel.collapsed .pc-panel-summary {
+  padding-block: 4px;
+}

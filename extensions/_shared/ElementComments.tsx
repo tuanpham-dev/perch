@@ -460,6 +460,27 @@ function saveSubmitChoice(value: boolean): void {
   }
 }
 
+// Whether the comments panel is collapsed to its header: remembered across
+// previews in this browser.
+const COLLAPSED_KEY = "perch.previewComments.collapsed";
+
+function loadCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveCollapsed(value: boolean): void {
+  try {
+    if (value) localStorage.setItem(COLLAPSED_KEY, "true");
+    else localStorage.removeItem(COLLAPSED_KEY);
+  } catch {
+    // remembered for this page only
+  }
+}
+
 // Whether Add Comment takes a screenshot: the popover's toggle, remembered
 // across previews, on until it's first turned off.
 const SHOT_KEY = "perch.previewComments.screenshot";
@@ -657,6 +678,13 @@ export function ElementComments({
   const storedRef = useRef(stored);
   storedRef.current = stored;
   const [view, setView] = useState<"pending" | "sent">("pending");
+  // The panel folded down to its header (tabs, agent status, Send/Clear).
+  // A new or reopened comment unfolds it, so it never lands out of sight.
+  const [collapsed, setCollapsedState] = useState(loadCollapsed);
+  const setCollapsed = useCallback((value: boolean) => {
+    setCollapsedState(value);
+    saveCollapsed(value);
+  }, []);
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -825,8 +853,9 @@ export function ElementComments({
     if (withShot) takeShot(comment);
     setPickComment("");
     setView("pending");
+    setCollapsed(false);
     onPickDone();
-  }, [activePick, pickComment, pickViewport, pickedText, bothText, pickFrame, otherFrame, onPickDone, setPending, takeShot, withShot, page, where]);
+  }, [activePick, pickComment, pickViewport, pickedText, bothText, pickFrame, otherFrame, onPickDone, setPending, takeShot, withShot, page, where, setCollapsed]);
 
   const removeComment = useCallback(
     (id: string) => {
@@ -1118,6 +1147,7 @@ export function ElementComments({
       const reopened: PendingElementComment = { ...rest, id: newId(), pickId: undefined, shot: after ?? rest.shot };
       setStored((prev) => ({ pending: [...prev.pending, reopened], sent: prev.sent.filter((x) => x.id !== s.id) }));
       setView("pending");
+      setCollapsed(false);
       setExpandedId(reopened.id);
       setEditingId(reopened.id);
       setEditText(`Still not right: ${rest.text}`);
@@ -1301,15 +1331,27 @@ export function ElementComments({
         </div>
       )}
       {(pending.length > 0 || sent.length > 0) && (
-        <div className="pc-panel">
+        <div className={`pc-panel${collapsed ? " collapsed" : ""}`}>
           <div className="pc-panel-summary">
+            <button
+              type="button"
+              className="icon-button pc-collapse"
+              title={collapsed ? "Show the comments" : "Collapse the comments"}
+              aria-expanded={!collapsed}
+              onClick={() => setCollapsed(!collapsed)}
+            >
+              <Icon name={collapsed ? "chevron-up" : "chevron-down"} />
+            </button>
             <div className="pc-tabs" role="tablist">
               <button
                 type="button"
                 role="tab"
                 aria-selected={view === "pending"}
                 className={`pc-tab${view === "pending" ? " active" : ""}`}
-                onClick={() => setView("pending")}
+                onClick={() => {
+                  setView("pending");
+                  setCollapsed(false);
+                }}
               >
                 Pending <span className="pc-count">{pending.length}</span>
               </button>
@@ -1319,7 +1361,10 @@ export function ElementComments({
                   role="tab"
                   aria-selected={view === "sent"}
                   className={`pc-tab${view === "sent" ? " active" : ""}`}
-                  onClick={() => setView("sent")}
+                  onClick={() => {
+                    setView("sent");
+                    setCollapsed(false);
+                  }}
                 >
                   Sent <span className="pc-count">{sent.length}</span>
                 </button>
@@ -1389,7 +1434,7 @@ export function ElementComments({
             )}
           </div>
           {sendError && <div className="pc-panel-error">{sendError}</div>}
-          {view === "pending" && errorCount > 0 && (
+          {!collapsed && view === "pending" && errorCount > 0 && (
             <div className="pc-errors">
               <label className="pc-errors-toggle">
                 <input type="checkbox" checked={includeErrors} onChange={(e) => setIncludeErrors(e.target.checked)} />
@@ -1409,7 +1454,7 @@ export function ElementComments({
               )}
             </div>
           )}
-          {view === "pending" ? (
+          {collapsed ? null : view === "pending" ? (
             <ul className="pc-panel-list">
               {pending.map((pc, index) => (
                 <li
