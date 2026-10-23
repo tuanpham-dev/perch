@@ -3,6 +3,30 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.0 - 2026-10-23
+
+- **Ask Claude Code about your projects.** `perch mcp` serves Perch to
+  Claude Code (register it once with `claude mcp add perch -- perch mcp`).
+  Ask what the agent in a project is doing, read its last messages or a
+  terminal's screen, tell it what to do and wait until it's done, open a
+  terminal in a project and run a command, open a preview of a URL, a port or
+  the project's dev server, get the port forward command, or run palette
+  commands such as Close Tab or Toggle Sidebar. Actions happen in the Perch
+  window you're looking at and leave a short notice there. A Read-only
+  setting hides every tool that types or opens and closes things. Bundled as
+  the new Assistant extension.
+- **Floating terminal.** Float any terminal over the whole app in a window
+  you drag by its bar and resize from any edge, or minimize it to a bubble
+  you can drag anywhere, like the floating touch keys. Float it from a
+  terminal tab's right-click menu, `Ctrl+Shift+Space` or the status bar
+  button; Dock as Tab puts it back. Works on phones too. Settings → UI hides
+  the status bar button or the bubble.
+- **Shift+click a web link in a Markdown preview** to open it in the web
+  preview. Shift+click is now the Ports secondary click as everywhere else,
+  and extensions can open an address in the web preview.
+- **The preview comments panel collapses** to its header, remembered in this
+  browser; a new or reopened comment opens it again.
+
 ## 0.9.3 - 2026-10-21
 
 - **The built-in browser follows every page.** The address bar keeps up as a
