@@ -7,6 +7,7 @@ import {
 } from './commands.ts';
 import { cmdDoctor } from './doctor.ts';
 import { cmdExt } from './extensions.ts';
+import { cmdMcp } from './mcp.ts';
 import { cmdOpen } from './open.ts';
 import { cmdSettings } from './settings.ts';
 import { Exit, fail, info } from './output.ts';
@@ -39,6 +40,8 @@ Commands:
              enable, disable (see: perch ext --help)
   settings   Export settings to a shareable file, or import one
              (see: perch settings --help)
+  mcp        Serve Perch to Claude Code and other MCP clients over stdio
+             (setup: claude mcp add perch -- perch mcp; see: perch mcp --help)
   tui        Browse projects and terminals in a terminal UI and attach to
              them (see: perch tui --help)
   ls         List terminal sessions
@@ -66,6 +69,7 @@ async function main(argv: string[]): Promise<void> {
     case 'open': return cmdOpen(rest);
     case 'ext': return cmdExt(rest);
     case 'settings': return cmdSettings(rest);
+    case 'mcp': return cmdMcp(rest);
     case 'path': return cmdPath();
     // Loaded on demand: it pulls in the terminal daemon's path helpers.
     case 'tui': return (await import('./tui.ts')).cmdTui(rest);

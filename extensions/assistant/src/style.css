@@ -1,0 +1,113 @@
+/* The notice an assistant action leaves in the corner, above the status
+   bar. Portaled to <body> at the app's notice layer (1500), so it shows over
+   the floating terminal (600) and under dialogs (2000). */
+.assistant-notice {
+  position: fixed;
+  z-index: 1500;
+  right: 16px;
+  bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+  width: min(460px, calc(100% - 32px));
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  font-size: 12px;
+}
+
+.assistant-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.assistant-notice-title {
+  color: var(--fg-bright);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-notice-source {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.assistant-notice-buttons {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.assistant-notice-button {
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--button-secondary-border, var(--border));
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.assistant-notice-button:hover {
+  background: var(--button-secondary-hover-bg, var(--button-secondary-bg));
+}
+
+.assistant-notice-button.primary {
+  border-color: var(--button-border, transparent);
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.assistant-notice-button:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.assistant-notice-detail {
+  font-family: var(--font-mono, monospace);
+  color: var(--fg-inactive);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings → Extensions → Assistant */
+.assistant-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assistant-setup-text {
+  margin: 0;
+  color: var(--fg-inactive);
+}
+
+.assistant-setup-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.assistant-setup-command code {
+  font-family: var(--font-mono, monospace);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  user-select: all;
+}
+
+.assistant-setup-examples {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg-inactive);
+}

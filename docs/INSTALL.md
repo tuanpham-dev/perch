@@ -129,6 +129,7 @@ On Linux and macOS it goes in `~/.local/bin`, and the app tells you if that fold
 | `perch open [path]` | Open a folder or file in the app, like `code`/`code-server` — see below |
 | `perch ext <cmd>` | Install and manage extensions: `install`, `ls`, `uninstall`, `enable`, `disable` — see below |
 | `perch settings <cmd>` | `export` your settings to a shareable file, or `import` one — see below |
+| `perch mcp` | Serve Perch to Claude Code and other MCP clients over stdio: `claude mcp add perch -- perch mcp` - see [Features](FEATURES.md) |
 | `perch ls` | List terminal sessions |
 | `perch attach <session>` | Attach this terminal to a session (`work`) or one window (`work:1`); detach with `Ctrl+\` twice |
 | `perch tui` | Browse projects and terminals in a terminal UI and attach to them - see [The terminal UI](TUI.md) |

@@ -48,7 +48,9 @@ or a reboot.
   runs its own server or opens remote ones, and keeps itself up to date.
 - **AI agents as first-class citizens.** Claude Code and Codex are
   configured once and reused everywhere, with hooks written for you and
-  push notifications when an agent needs an answer.
+  push notifications when an agent needs an answer. Run Claude Code against
+  `perch mcp` and ask it what your agents are doing, hand them work, or open
+  a preview, from any terminal.
 - **Extensible on purpose.** Nearly every surface above is itself a bundled
   extension, built on the same API your own extensions get.
 

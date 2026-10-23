@@ -1,0 +1,25 @@
+{
+  "name": "assistant",
+  "private": true,
+  "publisher": "perch",
+  "version": "1.0.0",
+  "displayName": "Assistant",
+  "description": "Lets Claude Code (or any MCP client) see and drive Perch through `perch mcp`: agent status and conversations, terminal screens, ports and the forward command, previews, palette commands, sessions and worktrees (bundled - see extensions/build.mjs).",
+  "icon": "./icon.svg",
+  "perch": {
+    "client": "./dist/client.js",
+    "server": "./server.js"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "Assistant",
+      "properties": {
+        "assistant.readOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Offer only the tools that read state or open something on screen. Tools that type into terminals, start or close projects and windows, or change worktrees are hidden from the MCP client and refused if called."
+        }
+      }
+    }
+  }
+}
