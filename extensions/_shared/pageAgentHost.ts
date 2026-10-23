@@ -3,7 +3,7 @@
 // source to the page's bootstrap for a sandboxed frame; "eval" runs it
 // straight in a same-origin one (a dev server through /proxy/<port>/).
 import { useEffect, useMemo, useState } from "react";
-import type { ElementRect, PickedElement } from "./ElementComments";
+import type { ElementRect, PageStep, PickedElement } from "./ElementComments";
 
 export interface PageError {
   kind: "console" | "exception" | "rejection" | "network" | "resource";
@@ -175,6 +175,27 @@ export class PageAgentLink {
         else reject(new Error(typeof data.error === "string" ? data.error : "capture failed"));
       });
       this.send("capture", { reqId, item });
+    });
+  }
+
+  // Does a comment's steps again in the page (see pageAgent.js's replay):
+  // resolves with how many were skipped because their element never showed.
+  replay(steps: PageStep[], timeoutMs = 60000): Promise<number> {
+    if (steps.length === 0) return Promise.resolve(0);
+    const reqId = `r${++this.reqSeq}`;
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        off();
+        reject(new Error("the steps took too long"));
+      }, timeoutMs);
+      const off = this.on("replayed", (data) => {
+        if (data.reqId !== reqId) return;
+        window.clearTimeout(timer);
+        off();
+        if (typeof data.missed === "number") resolve(data.missed);
+        else reject(new Error(typeof data.error === "string" ? data.error : "the steps failed"));
+      });
+      this.send("replay", { reqId, steps });
     });
   }
 

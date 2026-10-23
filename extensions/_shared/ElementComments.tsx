@@ -29,6 +29,15 @@ export type PickKind = "element" | "elements" | "area" | "text";
 // Which frame of a side-by-side preview something is in.
 export type FrameId = "main" | "compare";
 
+// Something the user did on the page before picking (pageAgent.js records
+// them): Check Fixes does them again after reloading, so the subject is back
+// in the state it was commented on (a menu open, a later slide).
+export type PageStep =
+  | { t: "click"; sel: string; at?: { fx: number; fy: number } }
+  | { t: "key"; key: string; code?: string; keyCode?: number; sel: string | null; ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean }
+  | { t: "input"; sel: string; value: string }
+  | { t: "hash"; hash: string };
+
 export interface PickedElement {
   kind?: PickKind;
   // The frame it was picked in (side by side); the main one when unset.
@@ -45,6 +54,8 @@ export interface PickedElement {
   // Where in `rect` the user clicked, as fractions of its size: where the
   // comment's badge sits, moving with the element.
   anchor?: { fx: number; fy: number };
+  // What was done on the page since it loaded, to get it to this state.
+  steps?: PageStep[];
 }
 
 // A screenshot saved on the server: `path` is what the agent opens, `url`
@@ -107,6 +118,27 @@ function subjectLine(where: string, pc: PendingElementComment): string {
   }
 }
 
+function stepText(step: PageStep): string {
+  switch (step.t) {
+    case "click":
+      return `click ${step.sel}`;
+    case "key": {
+      const mods = [step.ctrl && "Ctrl", step.alt && "Alt", step.shift && "Shift", step.meta && "Meta"].filter(Boolean);
+      return `press ${[...mods, step.key === " " ? "Space" : step.key].join("+")}${step.sel ? ` in ${step.sel}` : ""}`;
+    }
+    case "input":
+      return `set ${step.sel} to ${JSON.stringify(step.value.length > 80 ? `${step.value.slice(0, 80)}…` : step.value)}`;
+    case "hash":
+      return `go to ${step.hash}`;
+  }
+}
+
+// The steps from a fresh load to the state the comment is about.
+function stepsBlock(steps: PageStep[] | undefined): string {
+  if (!steps?.length) return "";
+  return `\nTo get there after loading the page:\n${steps.map((x, i) => `${i + 1}. ${stepText(x)}`).join("\n")}`;
+}
+
 // `where` reads after the selector: "in index.html", "on https://…".
 function buildElementContextBlock(fallbackWhere: string, pc: PendingElementComment): string {
   const where = pc.where ?? fallbackWhere;
@@ -123,7 +155,7 @@ function buildElementContextBlock(fallbackWhere: string, pc: PendingElementComme
       : shots.length > 1
         ? `\nScreenshots, the subject outlined in pink:\n${shots.map((x) => `- at ${x.at}: ${x.path}`).join("\n")}`
         : "";
-  return `${subjectLine(where, pc)}\n\`\`\`html\n${pc.outerHTML}\n\`\`\`\nComputed styles:\n${styleLines}${shot}\n\n${pc.text}`;
+  return `${subjectLine(where, pc)}\n\`\`\`html\n${pc.outerHTML}\n\`\`\`\nComputed styles:\n${styleLines}${shot}${stepsBlock(pc.steps)}\n\n${pc.text}`;
 }
 
 // The page's error log as the agent reads it: newest last, repeats folded.
@@ -1044,7 +1076,9 @@ export function ElementComments({
   // Reloads the page and photographs each sent comment's subject again, so
   // the before and after sit side by side. Comments sent from other pages
   // are checked by visiting each in turn, then the preview returns to the
-  // page it was on.
+  // page it was on. A comment made after doing something on the page (a
+  // menu opened, a slide moved on) has its steps done again first, from a
+  // fresh load each, so one comment's steps never run on top of another's.
   const checkFixes = useCallback(async () => {
     if (!agent || !uploadScreenshot || !reloadPage || sent.length === 0) return;
     const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -1109,21 +1143,41 @@ export function ElementComments({
       }
     };
 
+    // A page's comments, split by the steps that reach them; the ones with
+    // none first.
+    const bySteps = (list: SentComment[]) => {
+      const runs = new Map<string, SentComment[]>();
+      for (const s of list) {
+        const key = JSON.stringify(s.steps ?? []);
+        runs.set(key, [...(runs.get(key) ?? []), s]);
+      }
+      return [...runs.values()].sort((x, y) => (x[0].steps?.length ?? 0) - (y[0].steps?.length ?? 0));
+    };
+
     let moved = false;
     try {
       for (const key of order) {
-        const list = groups.get(key) ?? [];
-        try {
-          if (key === startPage || !key || !openPage) {
-            await loadThen(reloadPage);
-          } else {
-            moved = true;
-            await loadThen(() => openPage(key));
+        let first = true;
+        for (const list of bySteps(groups.get(key) ?? [])) {
+          try {
+            if (key === startPage || !key || !openPage || !first) {
+              await loadThen(reloadPage);
+            } else {
+              moved = true;
+              await loadThen(() => openPage(key));
+            }
+            first = false;
+            const steps = list[0].steps ?? [];
+            if (steps.length > 0) {
+              await agent.replay(steps);
+              // Let what the last step set off finish (a menu's animation).
+              await sleep(600);
+            }
+            await checkGroup(list);
+          } catch {
+            const ids = new Set(list.map((s) => s.id));
+            setSent((prev) => prev.map((s) => (ids.has(s.id) && s.check === "checking" ? { ...s, check: "failed" as const } : s)));
           }
-          await checkGroup(list);
-        } catch {
-          const ids = new Set(list.map((s) => s.id));
-          setSent((prev) => prev.map((s) => (ids.has(s.id) && s.check === "checking" ? { ...s, check: "failed" as const } : s)));
         }
       }
     } finally {

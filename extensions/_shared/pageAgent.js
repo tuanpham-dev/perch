@@ -294,6 +294,7 @@
   function finish(pick) {
     disarm();
     swallowClickUntil = Date.now() + 500;
+    pick.steps = stepsSoFar();
     post("picked", { pick: pick });
   }
 
@@ -416,6 +417,219 @@
     }
     mode = "element";
     document.documentElement.style.cursor = "crosshair";
+  }
+
+  // ---- The steps that got the page here ----
+  // What the user did on this page since it loaded (clicks, keys, typing,
+  // the address's #hash), kept with each pick so Check Fixes can reload the
+  // page, do them again (open the menu, go to the next slide) and photograph
+  // the subject in the state it was commented on.
+
+  var MAX_STEPS = 60;
+  var steps = [];
+  // A step log is for one document address: a single-page app moving to
+  // another path starts a new one, as a reload of that path would.
+  var stepsPath = location.pathname + location.search;
+  var lastClick = null;
+
+  function stepsFresh() {
+    var path = location.pathname + location.search;
+    if (path !== stepsPath) {
+      stepsPath = path;
+      steps = [];
+    }
+  }
+
+  function stepsSoFar() {
+    stepsFresh();
+    // Where the page started, when it started on a #hash: a reload or a
+    // visit by address may come back without it.
+    var out = steps.slice();
+    if (startHash && (!out.length || out[0].t !== "hash")) out.unshift({ t: "hash", hash: startHash });
+    return out;
+  }
+  var startHash = location.hash;
+
+  function record(step) {
+    stepsFresh();
+    var last = steps[steps.length - 1];
+    // Typing into a field is one step: the value it ended with.
+    if (step.t === "input" && last && last.t === "input" && last.sel === step.sel) steps.pop();
+    steps.push(step);
+    if (steps.length > MAX_STEPS) steps.shift();
+  }
+
+  // What a click was meant for: the control around an icon or a label's
+  // text, which is what can be found again.
+  var ACTIONABLE = "a,button,input,select,textarea,label,summary,[role=button],[role=tab],[role=menuitem]," +
+    "[role=option],[role=link],[role=checkbox],[role=switch],[onclick],[tabindex]";
+
+  function actionable(el) {
+    var found = el.closest ? el.closest(ACTIONABLE) : null;
+    return found && found !== document.body ? found : el;
+  }
+
+  function isField(el) {
+    var tag = el && el.tagName;
+    if (tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (tag !== "INPUT") return false;
+    return !/^(checkbox|radio|button|submit|reset|image|file|range|color)$/i.test(el.type || "");
+  }
+
+  function recording(e) {
+    return e.isTrusted && !mode && e.target && e.target.nodeType === 1 && !isOurs(e.target);
+  }
+
+  window.addEventListener("click", function (e) {
+    if (!recording(e) || e.button !== 0) return;
+    var el = actionable(e.target);
+    var now = Date.now();
+    // A label's click reaches its control as a second click; doing both again
+    // would toggle a checkbox twice.
+    if (lastClick && now - lastClick.time < 100 && lastClick.el.tagName === "LABEL" && lastClick.el.control === el) return;
+    lastClick = { el: el, time: now };
+    var r = el.getBoundingClientRect();
+    record({ t: "click", sel: selectorFor(el), at: anchorIn(rectOf(r), { x: e.clientX, y: e.clientY }) });
+  }, true);
+
+  document.addEventListener("keydown", function (e) {
+    if (!recording(e) || /^(Shift|Control|Alt|Meta|CapsLock)$/.test(e.key)) return;
+    var t = e.target;
+    var typing = isField(t) || t.isContentEditable;
+    // A character typed into a field arrives as its value (see "input").
+    if (typing && e.key.length === 1 && !e.ctrlKey && !e.metaKey) return;
+    record({
+      t: "key",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      sel: t === document.body || t === document.documentElement ? null : selectorFor(t),
+      ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey,
+    });
+  }, true);
+
+  function onValue(e) {
+    if (!recording(e) || !isField(e.target)) return;
+    record({ t: "input", sel: selectorFor(e.target), value: String(e.target.value) });
+  }
+  document.addEventListener("input", onValue, true);
+  document.addEventListener("change", onValue, true);
+
+  var replaying = false;
+  window.addEventListener("hashchange", function () {
+    if (!replaying) record({ t: "hash", hash: location.hash });
+  });
+
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  // The element a step was done to, given a moment to appear (a menu still
+  // opening, a slide still sliding in).
+  function findSoon(sel, ms) {
+    var until = Date.now() + ms;
+    function look() {
+      var el = null;
+      try {
+        el = document.querySelector(sel);
+      } catch (e) {
+        return Promise.resolve(null);
+      }
+      if (el && el.getClientRects().length) return Promise.resolve(el);
+      if (Date.now() >= until) return Promise.resolve(el);
+      return sleep(100).then(look);
+    }
+    return look();
+  }
+
+  function clickLike(el, at) {
+    var r = el.getBoundingClientRect();
+    var x = r.left + r.width * (at ? at.fx : 0.5);
+    var y = r.top + r.height * (at ? at.fy : 0.5);
+    var init = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, button: 0 };
+    var Pointer = window.PointerEvent || window.MouseEvent;
+    el.dispatchEvent(new Pointer("pointerdown", Object.assign({ pointerId: 1, isPrimary: true, buttons: 1 }, init)));
+    el.dispatchEvent(new MouseEvent("mousedown", Object.assign({ buttons: 1 }, init)));
+    if (typeof el.focus === "function") el.focus({ preventScroll: true });
+    el.dispatchEvent(new Pointer("pointerup", Object.assign({ pointerId: 1, isPrimary: true }, init)));
+    el.dispatchEvent(new MouseEvent("mouseup", init));
+    el.dispatchEvent(new MouseEvent("click", init));
+  }
+
+  function keyLike(el, step) {
+    ["keydown", "keyup"].forEach(function (type) {
+      var ev = new KeyboardEvent(type, {
+        key: step.key, code: step.code, bubbles: true, cancelable: true, composed: true,
+        ctrlKey: !!step.ctrl, shiftKey: !!step.shift, altKey: !!step.alt, metaKey: !!step.meta,
+      });
+      // Older handlers (slide decks among them) read keyCode, which the
+      // constructor can't set.
+      if (step.keyCode) {
+        Object.defineProperty(ev, "keyCode", { get: function () { return step.keyCode; } });
+        Object.defineProperty(ev, "which", { get: function () { return step.keyCode; } });
+      }
+      el.dispatchEvent(ev);
+    });
+  }
+
+  function setValue(el, value) {
+    // Through the prototype's setter, so a framework that tracks the value
+    // (React) sees the change the input event reports.
+    var proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype
+      : el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    var desc = Object.getOwnPropertyDescriptor(proto, "value");
+    if (desc && desc.set) desc.set.call(el, value);
+    else el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Does `list` again, in order. A step whose element never shows up is
+  // skipped; how many were is reported.
+  function replay(list) {
+    var missed = 0;
+    var i = 0;
+    function next() {
+      if (i >= list.length) return Promise.resolve(missed);
+      var step = list[i++];
+      var done;
+      if (step.t === "hash") {
+        if (step.hash && location.hash !== step.hash) location.hash = step.hash;
+        done = Promise.resolve();
+      } else if (step.t === "key" && !step.sel) {
+        keyLike(document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body, step);
+        done = Promise.resolve();
+      } else {
+        done = findSoon(step.sel, 3000).then(function (el) {
+          if (!el) {
+            missed++;
+            return;
+          }
+          if (step.t === "click") clickLike(el, step.at);
+          else if (step.t === "key") keyLike(el, step);
+          else if (step.t === "input") setValue(el, step.value);
+        });
+      }
+      // Time for what the step set off (a menu opening, a slide moving).
+      return done.then(function () {
+        return sleep(300);
+      }).then(next);
+    }
+    // The replay's own events aren't the user's (they're untrusted, so
+    // `recording` leaves them out), but the page is now in the state they
+    // lead to: a comment made here next is reached the same way.
+    replaying = true;
+    return next().then(function (n) {
+      replaying = false;
+      stepsPath = location.pathname + location.search;
+      steps = list.slice(-MAX_STEPS);
+      return n;
+    }, function (err) {
+      replaying = false;
+      throw err;
+    });
   }
 
   // ---- Where picked things are now ----
@@ -965,6 +1179,15 @@
         .catch(function (err) {
           post("captured", { reqId: d.reqId, error: String((err && err.message) || err || "capture failed") });
         });
+    } else if (d.cmd === "replay") {
+      replay(Array.isArray(d.steps) ? d.steps : []).then(
+        function (missed) {
+          post("replayed", { reqId: d.reqId, missed: missed });
+        },
+        function (err) {
+          post("replayed", { reqId: d.reqId, error: String((err && err.message) || err) });
+        },
+      );
     } else if (d.cmd === "errors") {
       post("errors", { list: (window.__pagePreviewErrors || []).slice() });
     }
