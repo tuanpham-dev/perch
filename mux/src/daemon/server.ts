@@ -42,6 +42,12 @@ type Conn = {
   tail: boolean;
 };
 
+/** Whether a viewer has told us its real size. A browser tab attached while
+ *  hidden can't measure itself and attaches at 0x0. */
+function measured(conn: Conn): boolean {
+  return conn.cols > 0 && conn.rows > 0;
+}
+
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 // Reset attributes, leave any alt screen, show cursor, clear screen and client
@@ -246,7 +252,7 @@ export class DaemonServer {
         conn.rows = req.rows;
         conn.colors = req.colors ?? null;
         conn.tail = req.tail === true;
-        conn.lastActiveAt = Date.now(); // a fresh attach is the active view
+        conn.lastActiveAt = measured(conn) ? Date.now() : 0; // a fresh attach is the active view
         let set = this.#attached.get(session.name);
         if (!set) { set = new Set(); this.#attached.set(session.name, set); }
         set.add(conn);
@@ -270,7 +276,7 @@ export class DaemonServer {
         conn.rows = req.rows;
         conn.colors = req.colors ?? null;
         conn.tail = req.tail === true;
-        conn.lastActiveAt = Date.now(); // a fresh attach is the active view
+        conn.lastActiveAt = measured(conn) ? Date.now() : 0; // a fresh attach is the active view
         let set = this.#attached.get(session.name);
         if (!set) { set = new Set(); this.#attached.set(session.name, set); }
         set.add(conn);
@@ -421,7 +427,7 @@ export class DaemonServer {
             // rotated that device. Claim, so the window reflows to the pane the
             // user is actually manipulating instead of staying sized for some
             // other (possibly forgotten) viewer. #markActive resizes the window.
-            this.#markActive(conn, session);
+            this.#markActive(conn, session, true);
           }
         }
         return {};
@@ -566,11 +572,14 @@ export class DaemonServer {
    * Promote a connection to "active" and reflow its window if that changed the
    * winner. Cheap and idempotent: when the conn was already active, the size
    * recompute yields the same numbers and #resizeWindow's early-out in
-   * Window.resize makes it a no-op.
+   * Window.resize makes it a no-op. A conn that just changed size always
+   * reflows: showing a tab focuses it (an activate) and reports its new box
+   * (a resize) within the same millisecond, and skipping the second left the
+   * window at the old size while the viewer drew at the new one.
    */
-  #markActive(conn: Conn, session: Session<Window>): void {
+  #markActive(conn: Conn, session: Session<Window>, resized = false): void {
     const now = Date.now();
-    if (conn.lastActiveAt === now) return;
+    if (conn.lastActiveAt === now && !resized) return;
     conn.lastActiveAt = now;
     if (session.windows.length === 0) return;
     const viewed = conn.pinnedWindowId
@@ -590,7 +599,7 @@ export class DaemonServer {
     let cols = Infinity;
     let rows = Infinity;
     for (const c of conns ?? []) {
-      if (c.pinnedWindowId) continue;
+      if (c.pinnedWindowId || !measured(c)) continue;
       cols = Math.min(cols, c.cols);
       rows = Math.min(rows, c.rows);
     }
@@ -624,6 +633,9 @@ export class DaemonServer {
       // whose close event hasn't landed would otherwise hold the window at its
       // size forever, and nothing the live viewers do could take it back.
       if (c.socket.destroyed) continue;
+      // A viewer that hasn't measured its box yet (a hidden tab) has no size
+      // to give: it mirrors whoever does, and claims once it reports one.
+      if (!measured(c)) continue;
       const views = c.pinnedWindowId ? c.pinnedWindowId === window.id : isCurrent;
       if (!views) continue;
       if (

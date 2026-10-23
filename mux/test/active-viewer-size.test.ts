@@ -122,3 +122,59 @@ test('resizing a viewer claims the window and reflows to it', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a resize right after an activate still reflows the window', async () => {
+  const { env, dir } = makeEnv();
+  try {
+    sp(env, 'new', 'sz');
+    await waitForMatch('the session to be listed', () => sp(env, 'ls'), /\bsz\b/);
+    const sock = join(env.PERCH_STATE_DIR, 'daemon.sock');
+
+    const a = new Viewer(sock); await a.ready(); a.attach('sz', 100, 30);
+    await waitForMatch('A to size the window', () => ptySize(env), /30 100/);
+    const b = new Viewer(sock); await b.ready(); b.attach('sz', 60, 20);
+    await waitForMatch('newest attach is active', () => ptySize(env), /20 60/);
+    a.activate();
+    await waitForMatch('A to claim the window back', () => ptySize(env), /30 100/);
+
+    // Showing a tab focuses it (an activate) and then reports its new box (a
+    // resize), usually within the same millisecond. Both have to land, or the
+    // window keeps B's old size while B draws at its new one.
+    b.activate();
+    b.resize(120, 40);
+    await waitForMatch('the window to follow B to its new size', () => ptySize(env), /40 120/);
+
+    a.close(); b.close();
+  } finally {
+    killDaemons(env);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a viewer attached without a size mirrors the window instead of claiming it', async () => {
+  const { env, dir } = makeEnv();
+  try {
+    sp(env, 'new', 'sz');
+    await waitForMatch('the session to be listed', () => sp(env, 'ls'), /\bsz\b/);
+    const sock = join(env.PERCH_STATE_DIR, 'daemon.sock');
+
+    const a = new Viewer(sock); await a.ready(); a.attach('sz', 100, 30);
+    await waitForMatch('A to size the window', () => ptySize(env), /30 100/);
+
+    // A page mounting this window in a hidden tab can't measure it. Attaching
+    // must not shrink the window under A, who is using it.
+    const hidden = new Viewer(sock); await hidden.ready(); hidden.attach('sz', 0, 0);
+    hidden.activate();
+    await new Promise((r) => setTimeout(r, 300));
+    assert.match(ptySize(env), /30 100/, 'an unmeasured viewer does not size the window');
+
+    // Revealed, it reports its box and claims the window like any resize.
+    hidden.resize(60, 20);
+    await waitForMatch('the revealed viewer claims the window', () => ptySize(env), /20 60/);
+
+    a.close(); hidden.close();
+  } finally {
+    killDaemons(env);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

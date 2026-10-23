@@ -11,6 +11,8 @@ export type Request =
   | { id: number; kind: 'session.rename'; session: string; to: string }
   // `tail`: replay only recent history first; the viewer asks for the rest
   // with history.full (the replayed event says whether anything was left out).
+  // `cols`/`rows` of 0: the viewer can't measure itself yet (a hidden tab), so
+  // it doesn't size the window until a resize reports its box.
   | { id: number; kind: 'session.attach'; session: string; cols: number; rows: number; colors?: ViewerColors; tail?: boolean }
   | { id: number; kind: 'window.attach'; target: string; cols: number; rows: number; colors?: ViewerColors; tail?: boolean }
   // Replay the attached window again with its whole history.

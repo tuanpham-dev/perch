@@ -1048,8 +1048,9 @@ export default function TerminalView({
         // long disconnect on a slow link that reflow storm left panes
         // visibly garbled. fit() is recomputed per attempt since the layout
         // can change while disconnected (rotation, keyboard); it returns
-        // null only when the terminal is hidden/unmeasurable, where the
-        // server's 80x24 default plus the onopen refit covers it as before.
+        // null only when the terminal is hidden/unmeasurable: it then attaches
+        // without a size, mirrors the window, and claims it on its first
+        // real measure (a reveal).
         const dims = keepTouchSelection(() => engine.fit());
         const size = dims ? `&cols=${dims.cols}&rows=${dims.rows}` : "";
         // The theme's colors ride along so the backend can answer color

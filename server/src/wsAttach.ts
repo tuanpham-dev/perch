@@ -42,8 +42,11 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
     const n = Number(v);
     return Number.isInteger(n) && n > 0 && n <= 10_000 ? n : null;
   };
-  const cols = parseDim(url.searchParams.get("cols")) ?? 80;
-  const rows = parseDim(url.searchParams.get("rows")) ?? 24;
+  // A page attaching a hidden tab can't measure it and sends no size. 0x0
+  // tells the daemon so: that viewer mirrors the window instead of claiming it
+  // at 80x24 under whoever is using it, until its first resize.
+  const cols = parseDim(url.searchParams.get("cols")) ?? 0;
+  const rows = parseDim(url.searchParams.get("rows")) ?? 0;
   // The viewer's theme colors, for the backend to answer color queries with.
   const parseColor = (v: string | null): string | undefined =>
     v && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : undefined;
