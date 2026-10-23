@@ -68,6 +68,31 @@ export default function UiSection() {
       <label className="settings-row checkbox-row">
         <input
           type="checkbox"
+          checked={settings.floatingTerminalStatusBar}
+          onChange={(e) => set("floatingTerminalStatusBar", e.target.checked)}
+        />
+        <span>Show floating terminal in status bar</span>
+      </label>
+      <div className="settings-hint">
+        A status bar button that opens or minimizes the floating terminal, or picks a terminal to float.
+      </div>
+
+      <label className="settings-row checkbox-row">
+        <input
+          type="checkbox"
+          checked={settings.floatingTerminalBubble}
+          onChange={(e) => set("floatingTerminalBubble", e.target.checked)}
+        />
+        <span>Show floating terminal bubble</span>
+      </label>
+      <div className="settings-hint">
+        A minimized floating terminal shrinks to a round handle you can drag anywhere and tap to reopen. Off, it
+        hides until the status bar button or Ctrl+Shift+Space brings it back.
+      </div>
+
+      <label className="settings-row checkbox-row">
+        <input
+          type="checkbox"
           checked={settings.customTitleBar}
           onChange={(e) => set("customTitleBar", e.target.checked)}
         />

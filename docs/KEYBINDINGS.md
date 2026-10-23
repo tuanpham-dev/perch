@@ -34,6 +34,7 @@ Keyboard Shortcuts).
 | `Ctrl+Alt+←` / `Ctrl+Alt+→` § | Move the active tab into the previous / next editor group |
 | ``Ctrl+` `` | Toggle the bottom terminal panel |
 | ``Ctrl+Shift+` `` | New terminal in the bottom panel |
+| `Ctrl+Shift+Space` | Open or minimize the floating terminal; with nothing floating, pick a terminal to float |
 | `Alt+←` / `Alt+→` / `Alt+↑` / `Alt+↓` | Focus the grid cell to the left / right / above / below (only while a grid tab is active; wraps at the edges) |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste files in the FILES tree (tree focused) |
 | `Ctrl+F` | Search file names in the FILES tree (tree focused) |

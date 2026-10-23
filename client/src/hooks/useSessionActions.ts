@@ -1,4 +1,5 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { isFloatableTab } from "./useFloatingTerminal";
 import * as api from "../api";
 import { copyText } from "../clipboard";
 import {
@@ -92,6 +93,10 @@ export function useSessionActions(
   // tab's "Move to Grid" submenu, and a grid tab's own items.
   moveToGridMenuItem: (tab: Tab) => MenuItem | null,
   gridTabMenuItems: (tab: Tab) => MenuItem[],
+  // "Float" (useFloatingTerminal): moves a terminal tab into the floating
+  // window. Null in a detached window, where the item is left out. App
+  // decides which tabs can float, so the item only shows on terminal tabs.
+  floatTab: ((tabId: string) => void) | null,
 ) {
   // Opens the project rooted in `cwd`: focuses the live session already
   // rooted there, or creates one — named after the folder, started in
@@ -725,6 +730,7 @@ export function useSessionActions(
         ...(moveTabToNewWindow && tab.gridId === undefined
           ? [{ label: "Move into New Window", onClick: () => moveTabToNewWindow(tab.id) }]
           : []),
+        ...(floatTab && isFloatableTab(tab) ? [{ label: "Float", onClick: () => floatTab(tab.id) }] : []),
       ];
       const moveToGrid = moveToGridMenuItem(tab);
       if (moveToGrid) splitItems.splice(5, 0, moveToGrid);
@@ -787,6 +793,7 @@ export function useSessionActions(
       showError,
       moveToGridMenuItem,
       gridTabMenuItems,
+      floatTab,
     ],
   );
 

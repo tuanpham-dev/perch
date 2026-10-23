@@ -3,6 +3,7 @@ import * as api from "./api";
 import { restartPerch } from "./lib/restartServer";
 import { showUnsavedChanges } from "./lib/unsavedChanges";
 import BottomPanel from "./components/BottomPanel";
+import FloatingTerminal from "./components/FloatingTerminal";
 import OutputView from "./components/OutputView";
 import ContextMenu from "./components/ContextMenu";
 import Dialog from "./components/Dialog";
@@ -71,6 +72,7 @@ import { DEFAULT_SETTINGS, TAB_BAR_SCOPES } from "./settings";
 import { evaluateWhen } from "./whenClause";
 import { setInAppUrlOpener, setOpenUrlsInAppByDefault } from "./terminalLinks";
 import { useBottomPanel } from "./hooks/useBottomPanel";
+import { isFloatableTab, useFloatingTerminal } from "./hooks/useFloatingTerminal";
 import { useOpenTarget } from "./hooks/useOpenTarget";
 import { useSessionActions } from "./hooks/useSessionActions";
 import { useSessions } from "./hooks/useSessions";
@@ -772,6 +774,8 @@ export default function App() {
     mobilePointer,
     syncedLayout: syncedStatusBarLayout,
     onLayoutChange: setSyncedStatusBarLayout,
+    floatingStatusBar: settings.floatingTerminalStatusBar,
+    setFloatingStatusBar: (visible) => setSettings((prev) => ({ ...prev, floatingTerminalStatusBar: visible })),
   });
 
   // Extension registry catalog (server/src/registry.ts) — fetched lazily on
@@ -1566,6 +1570,148 @@ export default function App() {
     [tabs, panel.tabs, sessions, attachPanelWindow, showMenu],
   );
 
+  // ---- Floating terminal (useFloatingTerminal, FloatingTerminal.tsx) ----
+  // One terminal parked over the whole app. Floating a tab moves it there
+  // (its attach kept, like "Move into New Window"); docking hands it back.
+  const {
+    floating,
+    floatingRef,
+    setFloating,
+    setExpanded: setFloatingExpanded,
+    floatFocused,
+    setFloatFocused,
+  } = useFloatingTerminal();
+
+  // Puts `tab` in the floating window. Whatever floated before goes back to
+  // the editor as a tab (not activated), so floating never loses a terminal.
+  const showFloating = useCallback(
+    (tab: Tab) => {
+      const current = floatingRef.current;
+      if (current && current.tab.id !== tab.id) adoptTabs([current.tab], null);
+      const { groupId: _groupId, ...parked } = tab;
+      setFloating({ tab: parked, expanded: true });
+      setFloatFocused(true);
+    },
+    [floatingRef, adoptTabs, setFloating, setFloatFocused],
+  );
+
+  const floatTab = useCallback(
+    (tabId: string) => {
+      const tab = tabsRef.current.find((t) => t.id === tabId);
+      if (!tab || !isFloatableTab(tab)) return;
+      removeTabForMove(tabId);
+      showFloating(tab);
+    },
+    [tabsRef, removeTabForMove, showFloating],
+  );
+
+  // A window by session and index: moved from its tab when this window shows
+  // it as one, otherwise attached fresh.
+  const floatWindow = useCallback(
+    async (session: string, index: number) => {
+      const current = floatingRef.current;
+      if (current && current.tab.sessionName === session && current.tab.windowIndex === index) {
+        setFloatingExpanded(true);
+        return;
+      }
+      const existing = tabsRef.current.find((t) => t.sessionName === session && t.windowIndex === index);
+      if (existing) {
+        floatTab(existing.id);
+        return;
+      }
+      try {
+        const { attachName } = await api.openWindowTab(session, index);
+        const windowId = sessions.find((s) => s.name === session)?.windows.find((w) => w.index === index)?.id;
+        showFloating({ id: randomUUID(), sessionName: session, attachName, windowIndex: index, windowId });
+      } catch (err) {
+        showError(err);
+      }
+    },
+    [floatingRef, setFloatingExpanded, tabsRef, floatTab, sessions, showFloating, showError],
+  );
+
+  const dockFloating = useCallback(() => {
+    const current = floatingRef.current;
+    if (!current) return;
+    setFloating(null);
+    setFloatFocused(false);
+    adoptTabs([current.tab], current.tab.id);
+    requestTerminalRefocus();
+  }, [floatingRef, setFloating, setFloatFocused, adoptTabs]);
+
+  // Stops floating without docking: the attach goes, the terminal itself
+  // keeps running and stays in PROJECTS.
+  const closeFloating = useCallback(() => {
+    const current = floatingRef.current;
+    if (!current) return;
+    setFloating(null);
+    setFloatFocused(false);
+    if (current.tab.windowIndex !== undefined) api.closeWindowTab(current.tab.attachName).catch(() => {});
+    requestTerminalRefocus();
+  }, [floatingRef, setFloating, setFloatFocused]);
+
+  const collapseFloating = useCallback(() => {
+    setFloatingExpanded(false);
+    requestTerminalRefocus();
+  }, [setFloatingExpanded]);
+
+  // What to float when nothing does: a new terminal in the active project,
+  // or any open terminal.
+  const pickFloatingTerminal = useCallback(
+    (anchor: { x: number; y: number }) => {
+      const items: MenuItem[] = [];
+      if (activeSessionName !== null) {
+        items.push({
+          label: `New Terminal in ${projectLabelForSession(activeSessionName)}`,
+          onClick: () => {
+            api
+              .createWindow(activeSessionName)
+              .then(({ index }) => floatWindow(activeSessionName, index))
+              .catch(showError);
+          },
+        });
+      }
+      for (const s of sessions) {
+        for (const w of s.windows) {
+          items.push({
+            label: `${projectLabelForSession(s.name)} · ${w.name}`,
+            onClick: () => void floatWindow(s.name, w.index),
+          });
+        }
+      }
+      if (items.length === 0) items.push({ label: "No terminals to float", disabled: true, onClick: () => {} });
+      showMenu(anchor.x, anchor.y, items);
+    },
+    [activeSessionName, sessions, projectLabelForSession, floatWindow, showMenu, showError],
+  );
+
+  // Ctrl+Shift+Space and the status bar item: open what's minimized,
+  // minimize what's open, or pick something to float.
+  const toggleFloating = useCallback(
+    (anchor?: { x: number; y: number }) => {
+      const current = floatingRef.current;
+      if (!current) {
+        pickFloatingTerminal(anchor ?? { x: Math.round(window.innerWidth / 2) - 120, y: Math.round(window.innerHeight / 3) });
+        return;
+      }
+      if (current.expanded) collapseFloating();
+      else setFloatingExpanded(true);
+    },
+    [floatingRef, pickFloatingTerminal, collapseFloating, setFloatingExpanded],
+  );
+
+  // The floated window as the sessions list knows it now, by id first so a
+  // rename or renumber still finds it.
+  const floatingWindowInfo = useMemo(() => {
+    if (!floating) return null;
+    const { tab } = floating;
+    for (const s of sessions) {
+      const w = s.windows.find((x) => (tab.windowId ? x.id === tab.windowId : s.name === tab.sessionName && x.index === tab.windowIndex));
+      if (w) return { label: `${projectLabelForSession(s.name)} · ${w.name}`, activity: w.activity };
+    }
+    return { label: projectLabelForSession(tab.sessionName), activity: false };
+  }, [floating, sessions, projectLabelForSession]);
+
   const {
     closeProject,
     killSessionNow,
@@ -1609,6 +1755,7 @@ export default function App() {
     mobilePointer ? null : moveTabToNewWindow,
     moveToGridMenuItem,
     gridTabMenuItems,
+    IS_DETACHED ? null : floatTab,
   );
 
   // Linked worktrees stopped being recorded as recent projects; this sweeps
@@ -2340,8 +2487,16 @@ export default function App() {
       "panel.split": () => !IS_DETACHED && splitActivePane(),
       "panel.toggleMaximized": () => !IS_DETACHED && togglePanelMaximized(),
       "panel.showOutput": () => !IS_DETACHED && showPanelView(OUTPUT_VIEW_ID),
+      "floating.toggle": () => !IS_DETACHED && toggleFloating(),
+      "floating.floatTab": () => {
+        if (!IS_DETACHED && activeTabId) floatTab(activeTabId);
+      },
+      "floating.dock": () => dockFloating(),
     }),
     [
+      toggleFloating,
+      floatTab,
+      dockFloating,
       activeSessionName,
       activeWindow,
       activeTabId,
@@ -2407,11 +2562,14 @@ export default function App() {
     setContextKey("rightSidebarVisible", rightSidebarVisible);
   }, [rightSidebarVisible]);
   useEffect(() => {
-    setContextKey("panelFocus", panelFocused);
-  }, [panelFocused]);
+    setContextKey("panelFocus", panelFocused && !floatFocused);
+  }, [panelFocused, floatFocused]);
   useEffect(() => {
-    setContextKey("gridFocus", activeTab?.gridId !== undefined && !panelFocused);
-  }, [activeTab?.gridId, panelFocused]);
+    setContextKey("floatingTerminalFocus", floatFocused);
+  }, [floatFocused]);
+  useEffect(() => {
+    setContextKey("gridFocus", activeTab?.gridId !== undefined && !panelFocused && !floatFocused);
+  }, [activeTab?.gridId, panelFocused, floatFocused]);
   useEffect(() => {
     setContextKey("quickSwitcherOpen", switcherQuery !== null);
     // Only the switcher's initial mode is tracked — typing/deleting the ">"
@@ -3098,7 +3256,7 @@ export default function App() {
           // The bottom panel's terminals compete for the same keyboard focus,
           // so an editor terminal only claims it while the panel doesn't hold
           // it (see useBottomPanel's panelFocused).
-          const focused = visible && groupId === activeGroupId && !panelFocused;
+          const focused = visible && groupId === activeGroupId && !panelFocused && !floatFocused;
           let content: React.ReactNode;
           if (tab.settingsView) {
             content = (
@@ -3445,7 +3603,7 @@ export default function App() {
           showMenu={showMenu}
           visibleTabs={panelVisibleTabs}
           activeTabId={panelActiveTabId}
-          panelFocused={panelFocused}
+          panelFocused={panelFocused && !floatFocused}
           sessions={sessions}
           settings={effectiveSettings}
           theme={activeTerminalTheme}
@@ -3485,6 +3643,46 @@ export default function App() {
           manageMenuItems={manageMenuItems}
           confirmDialog={confirmDialog}
           mobilePointer={mobilePointer}
+          floating={{
+            label: floatingWindowInfo?.label ?? null,
+            expanded: floating?.expanded === true,
+            onToggle: (rect) => toggleFloating({ x: rect.left, y: rect.top }),
+          }}
+        />
+      )}
+      {!IS_DETACHED && floating && floatingWindowInfo && (
+        <FloatingTerminal
+          floating={floating}
+          focused={floatFocused}
+          mobilePointer={mobilePointer}
+          showBubble={settings.floatingTerminalBubble}
+          label={floatingWindowInfo.label}
+          activity={floatingWindowInfo.activity}
+          onFocus={() => setFloatFocused(true)}
+          onExpand={() => setFloatingExpanded(true)}
+          onCollapse={collapseFloating}
+          onDock={dockFloating}
+          onClose={closeFloating}
+          // The terminal is gone (shell exited, window killed): nothing to
+          // detach, just stop floating.
+          onExit={() => {
+            setFloating(null);
+            setFloatFocused(false);
+          }}
+          terminal={{
+            settings: effectiveSettings,
+            theme: activeTerminalTheme,
+            fontsVersion,
+            bindings: resolvedBindings,
+            onError: showError,
+            showMenu,
+            onOpenFile: openFileOrViewer,
+            onOpenFileSecondary: openFileOrViewerSecondary,
+            onPreviewFile: openPreviewViewerTab,
+            isPreviewable,
+            onWindowSwitch: (session, windowIndex) => void openWindowTab(session, windowIndex),
+            onSessionSwitch: openSwitchedSession,
+          }}
         />
       )}
       {menu && (

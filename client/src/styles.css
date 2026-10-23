@@ -513,6 +513,12 @@ body.status-bar-dragging {
   font-size: 13px;
 }
 
+/* A toggle item whose thing is showing (the floating terminal, expanded). */
+.status-bar-item.active {
+  color: var(--fg-bright);
+  box-shadow: inset 0 -2px 0 var(--focus-border);
+}
+
 .status-bar-item:hover:not(:disabled) {
   background: var(--list-hover-bg);
   color: var(--fg);
@@ -5970,4 +5976,212 @@ body.scrollbar-dragging {
 
 .restart-overlay-box .dialog-button {
   margin-top: 10px;
+}
+
+/* The floating terminal (FloatingTerminal.tsx): one terminal over the whole
+   app, as a movable, resizable window or a draggable bubble. Above the app's
+   own surfaces and extension overlays (40) and the mobile sidebar drawer's
+   backdrop (800/801 stays above it, so the drawer still opens over it), below
+   menus (1000), notices (1500) and dialogs (2000). */
+.floating-terminal {
+  position: fixed;
+  z-index: 600;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.floating-terminal.focused {
+  border-color: var(--focus-border);
+}
+
+.floating-terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 4px 0 10px;
+  background: var(--tab-bar-bg);
+  color: var(--fg-inactive);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.floating-terminal-bar:active {
+  cursor: grabbing;
+}
+
+.floating-terminal.focused .floating-terminal-bar {
+  color: var(--fg-bright);
+}
+
+.floating-terminal-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.floating-terminal-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.floating-terminal-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.floating-terminal-button:hover {
+  background: var(--list-hover-bg);
+}
+
+.floating-terminal-button:focus-visible {
+  outline: 1px solid var(--focus-border);
+}
+
+.floating-terminal-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.floating-terminal-body > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Invisible grab strips along every edge and corner. Thicker for a finger. */
+.floating-terminal-resize {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+  --grip: 6px;
+}
+
+.floating-terminal.coarse .floating-terminal-resize {
+  --grip: 14px;
+}
+
+.floating-terminal-resize-n,
+.floating-terminal-resize-s {
+  left: var(--grip);
+  right: var(--grip);
+  height: var(--grip);
+  cursor: ns-resize;
+}
+
+.floating-terminal-resize-n {
+  top: 0;
+}
+
+.floating-terminal-resize-s {
+  bottom: 0;
+}
+
+.floating-terminal-resize-e,
+.floating-terminal-resize-w {
+  top: var(--grip);
+  bottom: var(--grip);
+  width: var(--grip);
+  cursor: ew-resize;
+}
+
+.floating-terminal-resize-e {
+  right: 0;
+}
+
+.floating-terminal-resize-w {
+  left: 0;
+}
+
+.floating-terminal-resize-ne,
+.floating-terminal-resize-nw,
+.floating-terminal-resize-se,
+.floating-terminal-resize-sw {
+  width: calc(var(--grip) * 2);
+  height: calc(var(--grip) * 2);
+}
+
+.floating-terminal-resize-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.floating-terminal-resize-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.floating-terminal-resize-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.floating-terminal-resize-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
+/* Collapsed: the same 44px round handle as the floating touch-keys toggle. */
+.floating-terminal-bubble {
+  position: fixed;
+  z-index: 600;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel-bg);
+  color: var(--fg-bright);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+  touch-action: none;
+}
+
+.floating-terminal-bubble .codicon {
+  font-size: 20px;
+}
+
+.floating-terminal-bubble:focus-visible {
+  outline: 2px solid var(--focus-border);
+  outline-offset: 2px;
+}
+
+.floating-terminal-bubble.activity::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel-bg);
 }

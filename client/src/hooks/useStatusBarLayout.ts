@@ -11,6 +11,7 @@ import { extensionStatusBarItems, useExtensionRegistryVersion } from "../extensi
 import { loadStatusBarLayout, saveStatusBarLayout } from "../settings";
 import {
   EMPTY_STATUS_BAR_LAYOUT,
+  FLOATING_ITEM_ID,
   MANAGE_ITEM_ID,
   TERMINALS_ITEM_ID,
   toggleStatusBarItemHidden,
@@ -58,6 +59,10 @@ interface Options {
   // one — applied once when it first arrives, never re-applied, so it can't
   // fight a later local drag (same contract as useSidebarLayout's).
   syncedLayout: StatusBarLayout | null;
+  // Core's floating terminal item, switched by its own setting (the
+  // core-side equivalent of an extension's visibilitySetting).
+  floatingStatusBar: boolean;
+  setFloatingStatusBar: (visible: boolean) => void;
   onLayoutChange: (layout: StatusBarLayout) => void;
 }
 
@@ -68,6 +73,8 @@ export function useStatusBarLayout({
   mobilePointer,
   syncedLayout,
   onLayoutChange,
+  floatingStatusBar,
+  setFloatingStatusBar,
 }: Options) {
   const [layout, setLayout] = useState<StatusBarLayout>(
     () => loadStatusBarLayout() ?? EMPTY_STATUS_BAR_LAYOUT,
@@ -124,6 +131,7 @@ export function useStatusBarLayout({
   const slots = useMemo<StatusBarSlot[]>(
     () => [
       ...extItems.map((item) => ({ id: item.id, defaultSide: item.placement })),
+      { id: FLOATING_ITEM_ID, defaultSide: "right" as const },
       { id: TERMINALS_ITEM_ID, defaultSide: "right" as const },
       ...(mobilePointer ? [{ id: MANAGE_ITEM_ID, defaultSide: "right" as const }] : []),
     ],
@@ -166,8 +174,14 @@ export function useStatusBarLayout({
       visible: !layout.hidden.includes(TERMINALS_ITEM_ID),
       toggle: () => applyLayout((prev) => toggleStatusBarItemHidden(prev, TERMINALS_ITEM_ID)),
     });
+    rows.push({
+      id: FLOATING_ITEM_ID,
+      label: "Floating Terminal",
+      visible: floatingStatusBar,
+      toggle: () => setFloatingStatusBar(!floatingStatusBar),
+    });
     return rows.sort((a, b) => a.label.localeCompare(b.label));
-  }, [extItems, extensions, extensionSettings, layout.hidden, setExtensionFlag, applyLayout]);
+  }, [extItems, extensions, extensionSettings, layout.hidden, setExtensionFlag, applyLayout, floatingStatusBar, setFloatingStatusBar]);
 
   // What the bar actually renders. A switched-off item is simply not a slot,
   // which is what keeps its stored position untouched while it's away.

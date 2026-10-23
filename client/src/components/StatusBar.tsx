@@ -14,6 +14,7 @@ import {
   type StatusBarItemContext,
 } from "../extensions";
 import {
+  FLOATING_ITEM_ID,
   MANAGE_ITEM_ID,
   TERMINALS_ITEM_ID,
   moveStatusBarItem,
@@ -71,6 +72,9 @@ interface Props {
   // capability sidebar panels get.
   confirmDialog: (message: string, confirmLabel?: string) => Promise<boolean>;
   mobilePointer: boolean;
+  // The floating terminal item (FLOATING_ITEM_ID): what floats, if anything,
+  // and the toggle the status bar button runs.
+  floating: { label: string | null; expanded: boolean; onToggle: (anchor: DOMRect) => void };
 }
 
 const MOUSE_DRAG_THRESHOLD_PX = 5;
@@ -93,6 +97,7 @@ export default function StatusBar({
   manageMenuItems,
   confirmDialog,
   mobilePointer,
+  floating,
 }: Props) {
   // What's in the popover, and where it points. `owner` is the id of whatever
   // opened it, so a second click on the same trigger closes rather than
@@ -173,6 +178,23 @@ export default function StatusBar({
         >
           <Icon name="terminal" />
           <span>{terminals}</span>
+        </button>
+      );
+    }
+    if (id === FLOATING_ITEM_ID) {
+      const title = floating.label
+        ? `${floating.expanded ? "Minimize" : "Open"} floating terminal: ${floating.label}`
+        : "Float a terminal";
+      return (
+        <button
+          className={`status-bar-item${floating.expanded ? " active" : ""}`}
+          data-menu-trigger="true"
+          aria-pressed={floating.expanded}
+          title={title}
+          aria-label={title}
+          onClick={(e) => floating.onToggle(e.currentTarget.getBoundingClientRect())}
+        >
+          <Icon name="multiple-windows" />
         </button>
       );
     }

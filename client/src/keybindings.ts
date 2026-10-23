@@ -114,6 +114,9 @@ export const COMMANDS: Command[] = [
   // their own "Panel: Show <title>" command on registration (extensions.ts).
   { id: "panel.toggleMaximized", label: "Panel: Toggle Maximized Panel", defaultBindings: [], scope: "global" },
   { id: "panel.showOutput", label: "Panel: Show Output", defaultBindings: [], scope: "global" },
+  { id: "floating.toggle", label: "Floating Terminal: Toggle", defaultBindings: [{ key: "ctrl+shift+Space" }], scope: "global" },
+  { id: "floating.floatTab", label: "Floating Terminal: Float Active Tab", defaultBindings: [], scope: "global", enablement: "activeSession && activeWindow" },
+  { id: "floating.dock", label: "Floating Terminal: Dock as Tab", defaultBindings: [], scope: "global" },
   { id: "settings.open", label: "Open Settings", defaultBindings: [{ key: "ctrl+Comma" }], scope: "global" },
   { id: "settings.openKeyboardShortcuts", label: "Preferences: Open Keyboard Shortcuts", defaultBindings: [], scope: "global" },
   { id: "session.new", label: "Project: New…", defaultBindings: [], scope: "global" },

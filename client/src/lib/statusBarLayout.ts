@@ -17,6 +17,9 @@ export const TERMINALS_ITEM_ID = "core.terminals";
 // Phone only: the sidebar's own gear sits behind a drawer that starts closed
 // there, so the bar carries the Manage menu's entry point instead.
 export const MANAGE_ITEM_ID = "core.manage";
+// The floating terminal's toggle (FloatingTerminal.tsx). Its switch is the
+// floatingTerminalStatusBar setting rather than the hidden list.
+export const FLOATING_ITEM_ID = "core.floatingTerminal";
 
 // The two groups alone — what a render pass needs, and all that resolving
 // produces. The stored layout below is this plus the user's hidden set.

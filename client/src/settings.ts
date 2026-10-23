@@ -179,6 +179,13 @@ export interface AppSettings {
   // The bottom status bar (git branch, terminals, listening ports, extension
   // items). Stays on phones, compacted to icons and counts.
   showStatusBar: boolean;
+  // The floating terminal's status bar item: tap to open, minimize or pick
+  // a terminal to float. Also its row in the bar's show/hide list.
+  floatingTerminalStatusBar: boolean;
+  // The draggable bubble a minimized floating terminal shrinks to. Off,
+  // minimizing hides it entirely until the status bar item or the toggle
+  // shortcut brings it back.
+  floatingTerminalBubble: boolean;
   // When the installed desktop app's browser title bar is hidden (Window
   // Controls Overlay), draw the app's own title bar in that strip and drop
   // the left sidebar footer whose buttons it carries. Off keeps the footer,
@@ -384,6 +391,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   restoreSessionsOnStart: true,
   resumeAgentsOnRestore: true,
   showStatusBar: true,
+  floatingTerminalStatusBar: true,
+  floatingTerminalBubble: true,
   customTitleBar: true,
   commandCenterAction: "quickSwitcher",
   uploadConflict: "rename",
