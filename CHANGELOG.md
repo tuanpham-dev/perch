@@ -3,6 +3,18 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.1 - 2026-10-23
+
+- **Check Fixes gets back to where you commented.** It redoes what you did on
+  the page before a comment (clicks, keys, typing, the address's #hash) after
+  reloading, so the menu is open and the slide is the right one again when
+  the fix is photographed. The agent is sent those steps too.
+- **Terminals stay drawn at their real size with two devices open.**
+  Switching tabs no longer leaves a terminal sized for the other device, which
+  garbled what Claude Code drew, and a tab open in the background no longer
+  shrinks its terminal to 80x24 under whoever is using it. Restart the
+  terminal daemon after updating (`perch daemon stop`; sessions come back).
+
 ## 0.10.0 - 2026-10-23
 
 - **Ask Claude Code about your projects.** `perch mcp` serves Perch to
