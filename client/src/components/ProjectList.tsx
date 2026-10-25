@@ -53,6 +53,9 @@ export interface ProjectListProps {
   onOpenWorktree: (node: WorktreeNode) => void;
   onNewTerminalInProject: (node: ProjectNode) => void;
   onNewTerminalInWorktree: (node: WorktreeNode) => void;
+  // A "+" menu's agent: a new terminal there running `command`.
+  onAgentInProject: (node: ProjectNode, command: string) => void;
+  onAgentInWorktree: (node: WorktreeNode, command: string) => void;
   // Creates a worktree in this project's repository and opens a session in
   // it. Resolves when the checkout exists; the row appears on the tree's
   // next poll.
@@ -74,7 +77,7 @@ export interface ProjectListProps {
   // The agents offered by the New Worktree form's picker, from the one
   // registry (see App.tsx). Each `command` already carries the app's
   // Yolo/Manual choice, so the form launches it as given and asks nothing.
-  worktreeAgents: { name: string; command: string }[];
+  worktreeAgents: { name: string; command: string; icon?: string }[];
   // Settings → AI Providers' Yolo/Manual choice, as the checkbox's starting
   // position. The form can override it for one launch.
   onShowMenu: (x: number, y: number, items: MenuItem[]) => void;
@@ -167,6 +170,8 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     onOpenWorktree,
     onNewTerminalInProject,
     onNewTerminalInWorktree,
+    onAgentInProject,
+    onAgentInWorktree,
     onCreateWorktree,
     onCleanUpWorktrees,
     loadBranches,
@@ -518,6 +523,20 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
   const canCreateWorktree = (node: ProjectNode) =>
     !!node.cwd && (node.worktrees.length > 0 || repoIndex.has(node.cwd));
 
+  // A "+" menu's agents (every enabled one, as the New Worktree form offers
+  // them), behind a separator, each starting a terminal that runs it.
+  const agentItems = (start: (command: string) => void): MenuItem[] =>
+    worktreeAgents.length === 0
+      ? []
+      : [
+          { label: "", separator: true, onClick: () => {} },
+          ...worktreeAgents.map((agent) => ({
+            label: agent.name,
+            icon: agent.icon ?? "sparkle",
+            onClick: () => start(agent.command),
+          })),
+        ];
+
   // Set right after useListNavigation below (same render) — lets onCollapse
   // move focus to a row's parent without a circular reference to the hook
   // it's passed into, same ref-indirection useGlobalKeybindings uses for
@@ -756,17 +775,24 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
         </button>
         <button
           className="row-add-button"
-          title={canCreateWorktree(node) ? "New…" : "New Terminal"}
+          title={canCreateWorktree(node) || worktreeAgents.length > 0 ? "New…" : "New Terminal"}
           tabIndex={-1}
           onClick={(e) => {
-            if (!canCreateWorktree(node)) {
+            const worktree = canCreateWorktree(node);
+            if (!worktree && worktreeAgents.length === 0) {
               onNewTerminalInProject(node);
               return;
             }
             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
             onShowMenu(rect.left, rect.bottom + 4, [
-              { label: "New Terminal", onClick: () => onNewTerminalInProject(node) },
-              { label: "New Worktree…", onClick: () => openCreateForm(node, rect) },
+              { label: "New Terminal", icon: "terminal", onClick: () => onNewTerminalInProject(node) },
+              ...agentItems((command) => onAgentInProject(node, command)),
+              ...(worktree
+                ? [
+                    { label: "", separator: true, onClick: () => {} },
+                    { label: "New Worktree…", icon: "git-branch", onClick: () => openCreateForm(node, rect) },
+                  ]
+                : []),
             ]);
           }}
         >
@@ -927,9 +953,19 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
         </button>
         <button
           className="row-add-button"
-          title="New Terminal"
+          title={worktreeAgents.length > 0 ? "New…" : "New Terminal"}
           tabIndex={-1}
-          onClick={() => onNewTerminalInWorktree(node)}
+          onClick={(e) => {
+            if (worktreeAgents.length === 0) {
+              onNewTerminalInWorktree(node);
+              return;
+            }
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            onShowMenu(rect.left, rect.bottom + 4, [
+              { label: "New Terminal", icon: "terminal", onClick: () => onNewTerminalInWorktree(node) },
+              ...agentItems((command) => onAgentInWorktree(node, command)),
+            ]);
+          }}
         >
           <Icon name="add" />
         </button>

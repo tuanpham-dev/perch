@@ -1728,6 +1728,8 @@ export default function App() {
     openWorktree,
     newTerminalInProject,
     newTerminalInWorktree,
+    agentInProject,
+    agentInWorktree,
     cleanUpWorktrees,
     recentProjectMenuItems,
     windowMenuItems,
@@ -2020,6 +2022,38 @@ export default function App() {
     });
   }, [refresh, openWindowTab, killSessionNow, showError]);
 
+  // The agents the New Worktree form, the PROJECTS rows' "+" and a chip's
+  // dropdown offer, from the one registry.
+  //
+  // There used to be a `worktreeRunCommands` setting here - a JSON list the
+  // user maintained by hand, which the registry then had to be reconciled
+  // with. It is gone: the agents ARE the list, so there is nothing to keep in
+  // sync and nothing to hand-edit.
+  //
+  // Fetched rather than read from `settings.agents`, because that key holds
+  // only the user's per-agent enabled overrides now - the agents themselves
+  // come from whatever extensions contribute, which only the server knows.
+  // Re-fetched when an agent is toggled or the Yolo/Manual choice changes,
+  // since both change what this list should say.
+  const agentSignature = settings.agents.map((a) => `${a.id}:${a.enabled}`).join(",");
+  const [worktreeAgents, setWorktreeAgents] = useState<api.AgentLaunchOption[]>([]);
+  useEffect(() => {
+    let live = true;
+    api
+      .fetchAgentLaunchOptions()
+      .then((list) => {
+        if (live) setWorktreeAgents(list);
+      })
+      .catch(() => {
+        // An empty list hides the picker, which is the right failure: better
+        // than offering a command that cannot be resolved.
+        if (live) setWorktreeAgents([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [agentSignature, settings.agentPermissions]);
+
   // Session-windows dropdown for a tab-group chip's arrow button. Scoped per
   // editor group (like groupMenuItems), since "checked" below means "already
   // open as a tab in this bar" — a window open only in a different split
@@ -2099,10 +2133,16 @@ export default function App() {
         ...(gridRows.length > 0 ? [{ separator: true, label: "", onClick: () => {} }, ...gridRows] : []),
         { separator: true, label: "", onClick: () => {} },
         { label: "New Terminal", icon: "add", onClick: () => createWindow(primary?.name ?? chipKey) },
+        // Every enabled agent, each in a new terminal of the project.
+        ...worktreeAgents.map((agent) => ({
+          label: agent.name,
+          icon: agent.icon ?? "sparkle",
+          onClick: () => createWindow(primary?.name ?? chipKey, undefined, agent.command),
+        })),
         { label: "New Grid", icon: "layout", onClick: () => void newGrid(editorGroupId, chipKey) },
       ]);
     },
-    [sessions, tabs, groupActive, openWindowTab, createWindow, projectKeyForSession, chipGridDropdownItems, newGrid],
+    [sessions, tabs, groupActive, openWindowTab, createWindow, projectKeyForSession, chipGridDropdownItems, newGrid, worktreeAgents],
   );
 
   // Chrome-style "+" in a tab bar (TabBar.tsx's tab-new-btn) — creates a new
@@ -2941,37 +2981,6 @@ export default function App() {
     openKeyboardShortcutsTab,
   ]);
 
-  // The agents the New Worktree form offers, from the one registry.
-  //
-  // There used to be a `worktreeRunCommands` setting here - a JSON list the
-  // user maintained by hand, which the registry then had to be reconciled
-  // with. It is gone: the agents ARE the list, so there is nothing to keep in
-  // sync and nothing to hand-edit.
-  //
-  // Fetched rather than read from `settings.agents`, because that key holds
-  // only the user's per-agent enabled overrides now - the agents themselves
-  // come from whatever extensions contribute, which only the server knows.
-  // Re-fetched when an agent is toggled or the Yolo/Manual choice changes,
-  // since both change what this list should say.
-  const agentSignature = settings.agents.map((a) => `${a.id}:${a.enabled}`).join(",");
-  const [worktreeAgents, setWorktreeAgents] = useState<api.AgentLaunchOption[]>([]);
-  useEffect(() => {
-    let live = true;
-    api
-      .fetchAgentLaunchOptions()
-      .then((list) => {
-        if (live) setWorktreeAgents(list);
-      })
-      .catch(() => {
-        // An empty list hides the picker, which is the right failure: better
-        // than offering a command that cannot be resolved.
-        if (live) setWorktreeAgents([]);
-      });
-    return () => {
-      live = false;
-    };
-  }, [agentSignature, settings.agentPermissions]);
-
   const projectListProps = useMemo(
     () => ({
       sessions,
@@ -2991,6 +3000,8 @@ export default function App() {
       onOpenWorktree: openWorktree,
       onNewTerminalInProject: newTerminalInProject,
       onNewTerminalInWorktree: newTerminalInWorktree,
+      onAgentInProject: agentInProject,
+      onAgentInWorktree: agentInWorktree,
       onCreateWorktree: createWorktreeSession,
       onCleanUpWorktrees: cleanUpWorktrees,
       loadBranches: loadWorktreeBranches,
@@ -3018,6 +3029,8 @@ export default function App() {
       openWorktree,
       newTerminalInProject,
       newTerminalInWorktree,
+      agentInProject,
+      agentInWorktree,
       createWorktreeSession,
       cleanUpWorktrees,
       loadWorktreeBranches,

@@ -301,11 +301,13 @@ export function getAiCliStatus(): Promise<Record<string, boolean>> {
 export interface AgentLaunchOption {
   name: string;
   command: string;
+  // A codicon for menus that list the agents.
+  icon?: string;
 }
 
 export async function fetchAgentLaunchOptions(): Promise<AgentLaunchOption[]> {
   const body = await request<{
-    agents?: { label?: string; command?: string; skipPermissionsArgs?: string }[];
+    agents?: { label?: string; command?: string; skipPermissionsArgs?: string; icon?: string }[];
     skipPermissions?: boolean;
   }>("/api/agents");
   const skip = body.skipPermissions === true;
@@ -317,6 +319,7 @@ export async function fetchAgentLaunchOptions(): Promise<AgentLaunchOption[]> {
       return {
         name: a.label || command,
         command: skip && args ? `${command} ${args}` : command,
+        icon: a.icon,
       };
     });
 }

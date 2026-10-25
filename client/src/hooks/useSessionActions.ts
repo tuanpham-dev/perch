@@ -270,9 +270,9 @@ export function useSessionActions(
   );
 
   const createWindow = useCallback(
-    async (session: string, cwd?: string) => {
+    async (session: string, cwd?: string, command?: string) => {
       try {
-        await api.createWindow(session, cwd);
+        await api.createWindow(session, cwd, command ? { command } : undefined);
         await refresh();
       } catch (err) {
         showError(err);
@@ -413,6 +413,39 @@ export function useSessionActions(
       else if (node.cwd) await openProject(node.cwd);
     },
     [createWindow, openProject],
+  );
+
+  // An agent started from a project or worktree row's "+": a new terminal
+  // there running it, or, with no session there yet, a new session it is
+  // typed into (as the New Worktree form does with its agent).
+  const agentInProject = useCallback(
+    async (node: ProjectNode, command: string) => {
+      const live = node.sessions[0] ?? node.worktrees.find((w) => w.worktree.main)?.sessions[0];
+      if (live) {
+        await createWindow(live.name, undefined, command);
+        return;
+      }
+      if (!node.cwd) return;
+      const name = await openProject(node.cwd);
+      if (name) void sendTextWithRetries(name, command).catch((err: unknown) => showError(err));
+    },
+    [createWindow, openProject, showError],
+  );
+
+  const agentInWorktree = useCallback(
+    async (node: WorktreeNode, command: string) => {
+      const live = node.sessions[0];
+      if (live) {
+        await createWindow(live.name, node.worktree.path, command);
+        return;
+      }
+      const branch = node.worktree.branch;
+      const name = await openProject(node.worktree.path, branch ? sessionNameForBranch(branch) : undefined, {
+        recordRecent: node.worktree.main,
+      });
+      if (name) void sendTextWithRetries(name, command).catch((err: unknown) => showError(err));
+    },
+    [createWindow, openProject, showError],
   );
 
   // Clean Up Worktrees: removes, in one go, the worktrees of a repository
@@ -810,6 +843,8 @@ export function useSessionActions(
     projectMenuItems,
     worktreeMenuItems,
     createWorktreeSession,
+    agentInProject,
+    agentInWorktree,
     loadWorktreeBranches,
     openWorktree,
     newTerminalInProject,
