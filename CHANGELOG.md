@@ -3,6 +3,14 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.2 - 2026-10-25
+
+- **Start an AI agent from where you are.** A project or worktree's **+**
+  in PROJECTS, and a project tab group chip's dropdown, list every enabled
+  agent (Claude Code, Codex, any an extension adds) beside New Terminal.
+  Picking one opens a terminal there running it, with your Yolo/Manual
+  choice applied.
+
 ## 0.10.1 - 2026-10-23
 
 - **Check Fixes gets back to where you commented.** It redoes what you did on
