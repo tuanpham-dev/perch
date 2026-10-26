@@ -1,7 +1,7 @@
 {
   "name": "perch",
   "private": true,
-  "version": "0.10.2",
+  "version": "0.10.3",
   "workspaces": [
     "mux",
     "server",

@@ -3,6 +3,22 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.3 - 2026-10-26
+
+- **A terminal tab shown again no longer stays garbled.** Output parsed
+  around a change of size (a tab coming back, another device taking the
+  window, a resize) could land at the wrong columns and stay that way until
+  a reload. Once the size settles, the terminal now redraws from what the
+  terminal daemon has, as a reload would, and the xterm engine resizes in
+  order with its output. Restart the terminal daemon after updating
+  (`perch daemon stop`; sessions come back).
+- **The desktop app can keep your computer awake.** With the Keep Awake
+  extension (1.1.0 or later) installed, its On and Agent modes block system
+  sleep through the OS's own lock (caffeinate, systemd-inhibit,
+  SetThreadExecutionState), whether the Perch window is in front or not.
+  The lock goes when you switch it off or close the window. In a browser or
+  installed PWA, Keep Awake keeps using the screen wake lock.
+
 ## 0.10.2 - 2026-10-25
 
 - **Start an AI agent from where you are.** A project or worktree's **+**
