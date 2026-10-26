@@ -14,11 +14,12 @@ import { findWindow, isWindowTabName, listSessions } from "./terminals.js";
 // Closing the socket only detaches: the terminal keeps running.
 
 interface ClientMsg {
-  type: "input" | "resize" | "activate" | "hscroll" | "ping" | "history";
+  type: "input" | "resize" | "activate" | "hscroll" | "ping" | "history" | "refresh";
   data?: string;
   cols?: number;
   rows?: number;
   amount?: number;
+  full?: boolean;
 }
 
 // A client that vanishes without a TCP FIN (phone sleep, network drop, NAT
@@ -143,6 +144,11 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
       handle.activate();
     } else if (msg.type === "history") {
       handle.loadFullHistory?.();
+    } else if (msg.type === "refresh") {
+      // An engine that can't replay says it's done at once, so the viewer
+      // doesn't hold input waiting for it.
+      if (handle.refresh) handle.refresh(msg.full === true);
+      else send({ type: "replayed" });
     } else if (msg.type === "hscroll" && Number.isFinite(msg.amount)) {
       const where = windowId ? { windowId } : { session: target };
       void scrollHorizontal(where, msg.amount!).catch(() => {});

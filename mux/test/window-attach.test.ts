@@ -120,6 +120,19 @@ test('a tail attach replays only recent history until history.full', async () =>
     assert.match(t.output, /row-0(0[0-9]{4})\r?\n[\s\S]*row-020000/, 'full replay follows with older lines');
     assert.equal(t.output.length > 128 * 1024, true, 'full replay is the whole log');
     assert.deepEqual(t.events.filter((e) => e.event === 'replayed').map((e) => e.partial), [true, undefined], 'second replay is complete');
+
+    // window.refresh replays the window as it is now: the tail, or all of it
+    // with `full`, for a viewer whose screen drifted.
+    let before = t.output.length;
+    t.request({ kind: 'window.refresh' });
+    await sleep(500);
+    const tail = t.output.slice(before);
+    assert.ok(tail.length <= 65 * 1024 && /row-020000/.test(tail), 'a refresh replays the tail');
+    before = t.output.length;
+    t.request({ kind: 'window.refresh', full: true });
+    await sleep(500);
+    assert.ok(t.output.length - before > 128 * 1024, 'a full refresh replays everything');
+    assert.deepEqual(t.events.filter((e) => e.event === 'replayed').map((e) => e.partial), [true, undefined, true, undefined], 'each refresh ends with replayed');
     t.close();
   } finally {
     killDaemons(env);

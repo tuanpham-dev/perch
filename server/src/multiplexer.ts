@@ -100,6 +100,10 @@ export interface AttachHandle {
   // Replays the window again with its whole history, after a tail attach.
   // Optional: an engine without it always replays everything.
   loadFullHistory?(): void;
+  // Replays the window again as it is now (with its whole history when
+  // `full`), for a viewer whose screen drifted from it. Followed by
+  // replayed() like an attach.
+  refresh?(full: boolean): void;
   close(): void;
 }
 

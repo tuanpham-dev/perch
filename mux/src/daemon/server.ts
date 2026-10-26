@@ -301,6 +301,16 @@ export class DaemonServer {
         if (window && !window.exited) this.#sendRefresh(conn, window, true);
         return {};
       }
+      case 'window.refresh': {
+        if (!conn.attachedSession) return {};
+        const session = this.store.sessions.get(conn.attachedSession);
+        if (!session || session.windows.length === 0) return {};
+        const window = conn.pinnedWindowId
+          ? session.windows.find((w) => w.id === conn.pinnedWindowId)
+          : this.store.currentWindow(session);
+        if (window && !window.exited) this.#sendRefresh(conn, window, req.full === true);
+        return {};
+      }
       case 'session.detach': {
         this.#detachConn(conn);
         return {};

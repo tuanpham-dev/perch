@@ -66,6 +66,10 @@ function isPrintableBurst(data: string): boolean {
 // the line, where appending is valid again.
 const CURSOR_MOVEMENT_KEY = /^(?:\x1b(?:\[|O)[ABDH]|\x01|\x02|\x1b[bB])$/;
 
+// How long a terminal's grid stays put before its window is replayed again
+// (see resync): a dragged divider or a phone keyboard resizes many times.
+const RESYNC_SETTLE_MS = 400;
+
 // Clipboard images have no filename; the ones dropped from a file manager
 // (handled separately, via file.name) do.
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -927,10 +931,46 @@ export default function TerminalView({
       // the touch-selection section below, where that state lives; until
       // then no selection can exist and this passthrough is correct).
       let keepTouchSelection: <T>(apply: () => T) => T = (apply) => apply();
+      // Output parsed around a change of grid can land at the other size:
+      // output the backend drew for the old grid still on its way, or still
+      // queued in the engine (xterm parses writes later, and a background
+      // tab's later is much later) when the new grid applies. The screen
+      // then differs from the window's until a reload. So once the grid
+      // settles, the window is replayed again, as a reload would; a hidden
+      // tab waits until it's shown.
+      let shownGrid = "";
+      let resyncTimer: number | undefined;
+      let resyncOnReveal = false;
+      const resync = () => {
+        resyncTimer = undefined;
+        if (disposed || ws.readyState !== WebSocket.OPEN) return;
+        if (!visibleRef.current || document.hidden) {
+          resyncOnReveal = true;
+          return;
+        }
+        resyncOnReveal = false;
+        // A replay is on its way already: the screen is replaced anyway.
+        if (historyLoading || !replayDone) return;
+        const { viewportY, length } = engine.getScrollState();
+        historyLoading = { fromBottom: length - viewportY, afterHistory: [] };
+        replayDone = false;
+        // All of the history again when it was all there.
+        ws.send(JSON.stringify({ type: "refresh", full: !historyPartial }));
+      };
+      const showGrid = (cols: number, rows: number) => {
+        keepTouchSelection(() => engine.resize!(cols, rows));
+        const grid = `${cols}x${rows}`;
+        if (grid === shownGrid) return;
+        // The first grid comes with the attach's own replay.
+        const first = shownGrid === "";
+        shownGrid = grid;
+        if (first) return;
+        window.clearTimeout(resyncTimer);
+        resyncTimer = window.setTimeout(resync, RESYNC_SETTLE_MS);
+      };
       const showWindowGrid = () => {
         if (!windowGrid || !engine.resize) return;
-        const grid = windowGrid;
-        keepTouchSelection(() => engine.resize!(grid.cols, grid.rows));
+        showGrid(windowGrid.cols, windowGrid.rows);
       };
       const refit = () => {
         // fit() itself no-ops (returns null) on a disposed/zero-size
@@ -954,12 +994,12 @@ export default function TerminalView({
             sentSize = size;
             // A changed box claims the window, so show it at the new size
             // now rather than a round trip later.
-            if (mirrors) keepTouchSelection(() => engine.resize!(result.cols, result.rows));
+            if (mirrors) showGrid(result.cols, result.rows);
             ws.send(JSON.stringify({ type: "resize", cols: result.cols, rows: result.rows }));
           } else if (mirrors) {
             // Re-measured for an idle reason: keep showing the window's grid.
             if (windowGrid) showWindowGrid();
-            else keepTouchSelection(() => engine.resize!(result.cols, result.rows));
+            else showGrid(result.cols, result.rows);
           }
         }
       };
@@ -1004,6 +1044,7 @@ export default function TerminalView({
         engine.reveal();
         refitRef.current?.();
         scrollQueryRef.current?.();
+        if (resyncOnReveal && resyncTimer === undefined) resyncTimer = window.setTimeout(resync, RESYNC_SETTLE_MS);
       };
 
       // Keys that move within the scrollback, so they must NOT snap it away:
@@ -2344,6 +2385,7 @@ export default function TerminalView({
         screen.removeEventListener("focusin", onFocusIn);
         screen.removeEventListener("focusout", onFocusOut);
         screen.removeEventListener("pointerdown", activate, true);
+        window.clearTimeout(resyncTimer);
         screen.removeEventListener("paste", onPaste, true);
         terminalBodyRef.current?.removeEventListener("dragover", onDragOver);
         terminalBodyRef.current?.removeEventListener("drop", onDrop);

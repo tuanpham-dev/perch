@@ -193,6 +193,13 @@ async function attach(
     resize: (cols, rows) => void conn.request({ kind: "resize", cols, rows }).catch(() => {}),
     activate: () => void conn.request({ kind: "activate" }).catch(() => {}),
     loadFullHistory: () => void conn.request({ kind: "history.full" }).catch(() => {}),
+    // A daemon older than window.refresh refuses it: the full replay is the
+    // same screen, only with all its history.
+    refresh: (full) =>
+      void conn
+        .request({ kind: "window.refresh", full })
+        .catch(() => conn.request({ kind: "history.full" }))
+        .catch(() => {}),
     close: () => {
       closed = true;
       conn.close();

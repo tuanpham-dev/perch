@@ -17,6 +17,10 @@ export type Request =
   | { id: number; kind: 'window.attach'; target: string; cols: number; rows: number; colors?: ViewerColors; tail?: boolean }
   // Replay the attached window again with its whole history.
   | { id: number; kind: 'history.full' }
+  // Replay the attached window again as it is now: the viewer's screen
+  // drifted from it (output parsed at another grid size around a resize).
+  // `full`: with its whole history, for a viewer that had loaded it.
+  | { id: number; kind: 'window.refresh'; full?: boolean }
   | { id: number; kind: 'session.detach' }
   /** This connection became the user's active view — it drives the window size. */
   | { id: number; kind: 'activate' }

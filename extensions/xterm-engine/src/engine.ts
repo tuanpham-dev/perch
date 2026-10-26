@@ -550,9 +550,15 @@ export async function createXtermEngine(
       const dims = fit.proposeDimensions();
       return dims && dims.cols > 0 && dims.rows > 0 ? { cols: dims.cols, rows: dims.rows } : null;
     },
+    // In order with the output: xterm parses writes later, so output that
+    // arrived before the resize (drawn for the old grid) may still be queued,
+    // and resized under it, it lands at the wrong columns.
     resize: (cols, rows) => {
-      if (disposed || (cols === term.cols && rows === term.rows)) return;
-      term.resize(cols, rows);
+      if (disposed) return;
+      term.write("", () => {
+        if (disposed || (cols === term.cols && rows === term.rows)) return;
+        term.resize(cols, rows);
+      });
     },
     // xterm has no render-suppression-while-hidden to undo — refresh(...)
     // just forces a repaint in case anything was missed, which is cheap
