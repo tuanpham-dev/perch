@@ -14,6 +14,7 @@ const COMMANDS: &[&str] = &[
     "reveal_path",
     "open_with_default",
     "pick_folder",
+    "keep_awake",
     "list_servers",
     "add_server",
     "update_server",

@@ -6,6 +6,7 @@ mod bridge;
 mod cli;
 mod compat;
 mod deeplink;
+mod keep_awake;
 mod launcher;
 mod local_server;
 mod paths;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub local: local_server::LocalServer,
     pub alerts: alerts::Alerts,
     pub updates: updater::Updates,
+    pub keep_awake: keep_awake::KeepAwake,
     // Set by Quit; otherwise closing the last window leaves the app in the
     // tray.
     quitting: AtomicBool,
@@ -86,6 +88,7 @@ pub fn run() {
         local,
         alerts: alerts::Alerts::default(),
         updates: updater::Updates::default(),
+        keep_awake: keep_awake::KeepAwake::default(),
         quitting: AtomicBool::new(false),
         loaded: Mutex::new(HashSet::new()),
         pending_scripts: Mutex::new(HashMap::new()),
@@ -128,6 +131,7 @@ pub fn run() {
             bridge::reveal_path,
             bridge::open_with_default,
             bridge::pick_folder,
+            keep_awake::keep_awake,
             launcher::list_servers,
             launcher::add_server,
             launcher::update_server,
@@ -197,6 +201,9 @@ pub fn run() {
         .expect("error while building Perch");
 
     app.run(|app, event| {
+        if let RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &event {
+            app.state::<AppState>().keep_awake.forget(label);
+        }
         if let RunEvent::ExitRequested { code, api, .. } = event {
             // Closing the last window isn't quitting: the tray stays, and
             // alerts keep arriving.

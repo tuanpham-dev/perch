@@ -69,6 +69,7 @@ const BASE_COMMANDS: &[&str] = &[
     "window_set_decorations",
     "show_notification",
     "open_external",
+    "keep_awake",
 ];
 const LOCAL_COMMANDS: &[&str] = &["reveal_path", "open_with_default", "pick_folder"];
 
@@ -335,6 +336,8 @@ fn configure<'a>(
                 PageLoadEvent::Started => {
                     state.loaded.lock().unwrap().remove(&label);
                     state.app_pages.lock().unwrap().remove(&label);
+                    // The page that asked is gone; the new one asks again.
+                    state.keep_awake.forget(&label);
                     *state.page_loads.lock().unwrap().entry(label.clone()).or_default() += 1;
                 }
                 PageLoadEvent::Finished => {
