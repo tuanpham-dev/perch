@@ -3,6 +3,14 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.5 - 2026-10-27
+
+- **Keep Awake keeps the screen on in the desktop app.** It kept only the
+  computer up, so the display still turned off after a while and the
+  session locked. Now, as in a browser, the screen stays on too while Keep
+  Awake holds (macOS and Windows; on Linux it depends on whether your
+  desktop honours systemd-inhibit's idle lock).
+
 ## 0.10.4 - 2026-10-27
 
 - **Typing on a Mac no longer lags while windows are listed or saved.**
