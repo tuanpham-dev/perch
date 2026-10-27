@@ -3,6 +3,18 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.4 - 2026-10-27
+
+- **Typing on a Mac no longer lags while windows are listed or saved.**
+  The terminal daemon used to look up each process's name, children and
+  working directory one call at a time, holding up keystrokes meanwhile. It
+  now answers from one `ps` and one `lsof` refreshed in the background, so
+  what you type echoes on time. Restart the terminal daemon after updating
+  (`perch daemon stop`; sessions come back).
+- **Unread alerts no longer keep the Mac desktop app busy.** Clicks on
+  alerts are now heard through one notification delegate instead of a
+  thread and a main-thread poll per alert.
+
 ## 0.10.3 - 2026-10-26
 
 - **A terminal tab shown again no longer stays garbled.** Output parsed
