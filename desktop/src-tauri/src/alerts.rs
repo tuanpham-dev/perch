@@ -264,6 +264,16 @@ pub fn show(app: &AppHandle, server_id: &str, title: &str, body: &str, window_id
     // Perch's own alerts are titled with its app name ("perch"); the server's
     // name says more.
     let summary = if title.eq_ignore_ascii_case("perch") { server_name } else { format!("{server_name}: {title}") };
+    // macOS: posted here and left to the OS; a click comes back through the
+    // one delegate init() set, with the server and terminal in its userInfo.
+    #[cfg(target_os = "macos")]
+    mac::deliver(&summary, body, server_id, window_id);
+    #[cfg(not(target_os = "macos"))]
+    notify(app, &summary, body, server_id, window_id);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn notify(app: &AppHandle, summary: &str, body: &str, server_id: &str, window_id: Option<&str>) {
     let mut notification = notify_rust::Notification::new();
     notification.summary(&summary).body(body).appname("Perch");
     // Linux: the icon by file path, since an AppImage or a development
@@ -288,22 +298,6 @@ pub fn show(app: &AppHandle, server_id: &str, title: &str, body: &str, window_id
     let window_id = window_id.map(str::to_string);
     let body = body.to_string();
     std::thread::spawn(move || {
-        // macOS: notify-rust can't tell a click from a dismissal; the library
-        // it uses underneath can, so a click opens the terminal that rang, as
-        // the Open action does on Linux. Blocks this thread until then.
-        #[cfg(target_os = "macos")]
-        {
-            let _ = notification;
-            let response = mac_notification_sys::Notification::new()
-                .title(&summary)
-                .message(&body)
-                .wait_for_click(true)
-                .send();
-            if matches!(response, Ok(mac_notification_sys::NotificationResponse::Click)) {
-                open_alert(&app, &server_id, window_id.as_deref());
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
         let Ok(handle) = notification.show() else { return };
         #[cfg(all(unix, not(target_os = "macos")))]
         handle.wait_for_action(|action| {
@@ -341,10 +335,92 @@ fn icon_path() -> Option<PathBuf> {
 }
 
 /// macOS shows a notification with the icon of the app it says it's from;
-/// without this, notify-rust says Finder. Call once at startup.
-pub fn init() {
+/// without this, notify-rust says Finder. Also sets the delegate that hears
+/// alert clicks. Call once at startup, on the main thread.
+pub fn init(app: &AppHandle) {
     #[cfg(target_os = "macos")]
-    let _ = notify_rust::set_application(crate::paths::IDENTIFIER);
+    {
+        let _ = notify_rust::set_application(crate::paths::IDENTIFIER);
+        mac::init(app);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+// One delegate for every alert, instead of a thread (and a main run loop
+// timer polling deliveredNotifications) per alert waiting for its click:
+// with a few dozen unread alerts in Notification Center that polling kept
+// the main thread, and with it every window, busy.
+// NSUserNotification is deprecated but still delivers, as it did through
+// mac-notification-sys; UNUserNotificationCenter needs a signed bundle.
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+mod mac {
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
+    use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
+    use objc2_foundation::{
+        ns_string, NSDictionary, NSString, NSUserNotification, NSUserNotificationActivationType,
+        NSUserNotificationCenter, NSUserNotificationCenterDelegate,
+    };
+    use std::sync::OnceLock;
+    use tauri::AppHandle;
+
+    static APP: OnceLock<AppHandle> = OnceLock::new();
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "PerchAlertDelegate"]
+        struct AlertDelegate;
+
+        unsafe impl NSObjectProtocol for AlertDelegate {}
+
+        unsafe impl NSUserNotificationCenterDelegate for AlertDelegate {
+            #[unsafe(method(userNotificationCenter:didActivateNotification:))]
+            fn did_activate(&self, center: &NSUserNotificationCenter, notification: &NSUserNotification) {
+                center.removeDeliveredNotification(notification);
+                if notification.activationType() != NSUserNotificationActivationType::ContentsClicked {
+                    return;
+                }
+                let (Some(app), Some(info)) = (APP.get(), notification.userInfo()) else { return };
+                let Some(server_id) = string(&info, ns_string!("serverId")) else { return };
+                super::open_alert(app, &server_id, string(&info, ns_string!("windowId")).as_deref());
+            }
+        }
+    );
+
+    fn string(info: &NSDictionary<NSString, AnyObject>, key: &NSString) -> Option<String> {
+        Some(info.objectForKey(key)?.downcast::<NSString>().ok()?.to_string())
+    }
+
+    pub fn init(app: &AppHandle) {
+        let _ = APP.set(app.clone());
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let delegate: Retained<AlertDelegate> = unsafe { msg_send![super(AlertDelegate::alloc(mtm).set_ivars(())), init] };
+        unsafe {
+            NSUserNotificationCenter::defaultUserNotificationCenter()
+                .setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        }
+        // The center holds its delegate weakly: this one lives as long as the app.
+        std::mem::forget(delegate);
+    }
+
+    pub fn deliver(title: &str, body: &str, server_id: &str, window_id: Option<&str>) {
+        let notification = NSUserNotification::new();
+        notification.setTitle(Some(&NSString::from_str(title)));
+        notification.setInformativeText(Some(&NSString::from_str(body)));
+        let mut keys = vec![ns_string!("serverId")];
+        let mut values = vec![NSString::from_str(server_id)];
+        if let Some(window_id) = window_id {
+            keys.push(ns_string!("windowId"));
+            values.push(NSString::from_str(window_id));
+        }
+        let values: Vec<&AnyObject> = values.iter().map(|v| v.as_ref()).collect();
+        let info = NSDictionary::from_slices(&keys, &values);
+        unsafe { notification.setUserInfo(Some(&info)) };
+        NSUserNotificationCenter::defaultUserNotificationCenter().deliverNotification(&notification);
+    }
 }
 
 #[cfg(test)]

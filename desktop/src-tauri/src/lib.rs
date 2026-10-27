@@ -149,7 +149,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            alerts::init();
+            alerts::init(&handle);
             windows::watch_button_layout(&handle);
             tray::create(&handle)?;
             // An AppImage or a development build has no installer to tell
