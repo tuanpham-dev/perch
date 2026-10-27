@@ -2,7 +2,8 @@
 // asks for it (the Keep Awake extension, which decides when: always, or
 // while agents work). A browser can only keep its screen on, and only while
 // the tab is in front; the app holds the OS's own lock, window in front or
-// not. The screen may still turn off; only the system stays up.
+// not. The screen stays on too, as in a browser: a screen that turns off
+// locks the session, which is what Keep Awake is there to stop.
 //
 // Every window asks for itself, and the computer stays up while any one
 // does. A window that closes or loads another page stops asking.
@@ -68,9 +69,10 @@ struct Hold {
 impl Hold {
     #[cfg(target_os = "macos")]
     fn take() -> Result<Self, String> {
-        // -i: no idle system sleep; -w: until this app exits, however it does.
+        // -d: no display sleep (it would lock the session); -i: no idle
+        // system sleep; -w: until this app exits, however it does.
         let child = std::process::Command::new("caffeinate")
-            .args(["-i", "-w", &std::process::id().to_string()])
+            .args(["-d", "-i", "-w", &std::process::id().to_string()])
             .spawn()
             .map_err(|e| format!("Couldn't run caffeinate: {e}"))?;
         Ok(Self { child })
@@ -126,7 +128,7 @@ impl Drop for Hold {
 mod windows_power {
     use std::sync::mpsc::{channel, Sender};
     use std::sync::{Mutex, OnceLock};
-    use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
+    use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED};
 
     static WORKER: OnceLock<Mutex<Sender<bool>>> = OnceLock::new();
 
@@ -135,7 +137,7 @@ mod windows_power {
             let (tx, rx) = channel::<bool>();
             std::thread::spawn(move || {
                 for on in rx {
-                    let flags = if on { ES_CONTINUOUS | ES_SYSTEM_REQUIRED } else { ES_CONTINUOUS };
+                    let flags = if on { ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED } else { ES_CONTINUOUS };
                     unsafe { SetThreadExecutionState(flags) };
                 }
             });
