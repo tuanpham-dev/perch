@@ -70,6 +70,9 @@ const snapshotter = new Snapshotter(
   () => config.persistScrollback,
   () => config.scrollbackWriteIntervalMs,
 );
+// A cwd or running command learned after the last snapshot read it (macOS
+// answers those from a cache refreshed in the background) is saved too.
+platform.onProcessChange?.(() => snapshotter.schedule());
 
 // Rebuild the tree BEFORE accepting clients, so the first `sp ls` already sees
 // restored sessions. Runs against server.store, which listen() then serves.

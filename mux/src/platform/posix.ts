@@ -1,16 +1,25 @@
 // Linux and macOS. Linux reads /proc; macOS has no /proc, so process facts
-// come from ps and lsof there.
-import { execFileSync, spawn } from 'node:child_process';
+// come from ps and lsof there, batched and cached (darwin-procs.ts).
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { chmodSync, linkSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { needsCommandLine, processLabel, withoutThreadName } from '../util/process-label.ts';
 import type { Platform } from './types.ts';
+import { DarwinProcs } from './darwin-procs.ts';
 
 const isLinux = process.platform === 'linux';
 
 function run(cmd: string, args: string[]): string {
   try { return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; }
 }
+
+// What a failed run printed still counts: lsof exits 1 when any one of the
+// pids it was given has gone, after answering for the rest.
+function runAsync(cmd: string, args: string[], done: (stdout: string) => void): void {
+  execFile(cmd, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }, (_err, stdout) => done(stdout ?? ''));
+}
+
+const darwin = new DarwinProcs(run, runAsync);
 
 export const posix: Platform = {
   socketAddress: (stateDir) => join(stateDir, 'daemon.sock'),
@@ -95,7 +104,7 @@ export const posix: Platform = {
         return readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number);
       } catch { return []; }
     }
-    return run('pgrep', ['-P', String(pid)]).split('\n').filter(Boolean).map(Number).sort((a, b) => a - b);
+    return darwin.childPids(pid);
   },
 
   // comm is the THREAD name, a runtime name says nothing about the program
@@ -112,13 +121,13 @@ export const posix: Platform = {
         return processLabel(argv, () => posix.cwdOf(pid)) ?? withoutThreadName(comm);
       } catch { return undefined; }
     }
-    const comm = run('ps', ['-o', 'comm=', '-p', String(pid)]).trim().split('/').pop()?.replace(/^-/, '');
+    const comm = darwin.comm(pid)?.split('/').pop()?.replace(/^-/, '');
     if (!comm) return undefined;
     if (!needsCommandLine(comm)) return comm;
-    // macOS keeps no /proc: the command line is one more ps column, and the
-    // working directory an lsof away (cwdOf) — both only for the handful of
-    // processes whose own name didn't answer.
-    const argv = run('ps', ['-o', 'command=', '-p', String(pid)]).trim().split(/\s+/).filter(Boolean);
+    // macOS keeps no /proc: the command line is one more ps (read once per
+    // process), and the working directory an lsof away (cwdOf) — both only
+    // for the handful of processes whose own name didn't answer.
+    const argv = darwin.argv(pid);
     return processLabel(argv, () => posix.cwdOf(pid)) ?? withoutThreadName(comm);
   },
 
@@ -126,8 +135,11 @@ export const posix: Platform = {
     if (isLinux) {
       try { return readlinkSync(`/proc/${pid}/cwd`); } catch { return null; }
     }
-    const line = run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn']).split('\n').find((l) => l.startsWith('n'));
-    return line ? line.slice(1) : null;
+    return darwin.cwd(pid);
+  },
+
+  onProcessChange: (cb) => {
+    if (!isLinux) darwin.onChange(cb);
   },
 
   defaultShell: () => process.env.SHELL ?? '/bin/bash',

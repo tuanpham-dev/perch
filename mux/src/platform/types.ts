@@ -43,6 +43,10 @@ export interface Platform {
   processName(pid: number): string | undefined;
   /** The live working directory of `pid`, or null when the OS won't say. */
   cwdOf(pid: number): string | null;
+  /** Where those answers are cached (macOS), calls `cb` when a background
+   *  refresh changes one that was asked for, so a snapshot taken from the
+   *  stale answer is taken again. */
+  onProcessChange?(cb: () => void): void;
 
   /** The shell a window runs when none is configured. */
   defaultShell(): string;
