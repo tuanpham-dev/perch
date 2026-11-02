@@ -2,6 +2,9 @@
 import "./nodeVersion.js";
 // Then: server/.env has to be in process.env before any other module loads.
 import "./loadEnv.js";
+// Then: a Finder-launched app's PATH lacks ~/.local/bin and Homebrew (guiPath.ts).
+import { ensureGuiPath } from "./guiPath.js";
+ensureGuiPath();
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type net from "node:net";

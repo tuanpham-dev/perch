@@ -6,11 +6,12 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, readlink, writeFile } from "node:fs/promises";
 import net from "node:net";
-import { homedir, tmpdir, userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { getMultiplexer, type MuxWindow } from "./multiplexer.js";
 import { buildProcessMap, findDescendants } from "./processes.js";
 import { findWindow, listSessionPanes, resolveAttachTarget } from "./terminals.js";
+import { extraBinDirs } from "./guiPath.js";
 import { isOnPath } from "./which.js";
 
 const mux = () => getMultiplexer();
@@ -165,24 +166,6 @@ function vimTabeCmd(filePath: string, line?: number): string {
 }
 
 const EDITOR_COMMANDS = new Set(["nvim", "vim", "vi"]);
-
-// Where an editor is often installed that the server's own PATH may lack: a
-// desktop app started from Finder gets only /usr/bin:/bin:/usr/sbin:/sbin,
-// while the user's shell finds Homebrew's nvim through their rc files.
-function extraBinDirs(): string[] {
-  const home = homedir();
-  return [
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/snap/bin",
-    "/nix/var/nix/profiles/default/bin",
-    path.join(home, ".nix-profile", "bin"),
-    path.join(home, ".local", "bin"),
-    path.join(home, "bin"),
-    path.join(home, ".local", "share", "mise", "shims"),
-    path.join(home, ".asdf", "shims"),
-  ];
-}
 
 // The editor typed or launched to open a file: nvim, else vim (same +N and
 // -d arguments), else vi, which every macOS and Linux has — rather than an
