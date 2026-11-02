@@ -3,6 +3,11 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.6 - 2026-11-02
+
+- Ship extensions/_shared's .mjs modules in the desktop bundle, so Live Preview and Ports load their server hooks instead of failing on a missing screenshotRoutes.mjs
+- Add the usual CLI install folders (~/.local/bin, Homebrew, mise, asdf) to the server's PATH at startup, so a desktop app started from Finder can run claude -p /usage and the Claude usage item keeps refreshing
+
 ## 0.10.5 - 2026-10-27
 
 - **Keep Awake keeps the screen on in the desktop app.** It kept only the
