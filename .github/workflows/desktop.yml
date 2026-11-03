@@ -121,8 +121,6 @@ jobs:
             runner: ubuntu-22.04-arm
           - name: macos-arm64
             runner: macos-latest
-          - name: macos-x64
-            runner: macos-15-intel
           - name: windows-x64
             runner: windows-latest
     runs-on: ${{ matrix.runner }}
