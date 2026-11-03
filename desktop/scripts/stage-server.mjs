@@ -225,13 +225,14 @@ async function main() {
     if (statSync(dir).isDirectory() && existsSync(join(dir, "package.json"))) copyExtension(name);
   }
   // extensions/_shared has no package.json, so the loop above skips it, but
-  // server hooks import its plain .mjs modules at run time (live-preview and
-  // ports load ../_shared/screenshotRoutes.mjs). Its .tsx/.ts files are
+  // server hooks load its plain .js/.mjs files at run time (live-preview and
+  // ports import ../_shared/screenshotRoutes.mjs; live-preview reads
+  // pageBootstrap.js on load). Its .tsx/.ts files are
   // bundled into each extension's client at build time and aren't needed here.
   const shared = join(repo, "extensions", "_shared");
   mkdirSync(join(out, "extensions", "_shared"), { recursive: true });
   for (const file of readdirSync(shared)) {
-    if (/\.mjs$/.test(file) && !/\.test\.mjs$/.test(file)) cpSync(join(shared, file), join(out, "extensions", "_shared", file));
+    if (/\.m?js$/.test(file) && !/\.test\.m?js$/.test(file)) cpSync(join(shared, file), join(out, "extensions", "_shared", file));
   }
 
   // npm from the downloaded release, run by its node: native modules
