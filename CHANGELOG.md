@@ -3,6 +3,10 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.10.7 - 2026-11-03
+
+- Ship extensions/_shared's .js files too in the desktop bundle, so Live Preview loads pageBootstrap.js and HTML previews work in the installed app
+
 ## 0.10.6 - 2026-11-02
 
 - Ship extensions/_shared's .mjs modules in the desktop bundle, so Live Preview and Ports load their server hooks instead of failing on a missing screenshotRoutes.mjs
