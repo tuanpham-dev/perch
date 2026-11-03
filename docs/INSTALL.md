@@ -62,7 +62,7 @@ Download it from the [Releases page](https://github.com/tuanpham-dev/perch/relea
 
 | Platform | File |
 |---|---|
-| macOS (Apple silicon, Intel) | `.dmg` |
+| macOS (Apple silicon only) | `.dmg` |
 | Windows | `-setup.exe` |
 | Linux (x64, arm64) | `.AppImage`, `.deb` (Debian, Ubuntu) or `.rpm` (Fedora) |
 
