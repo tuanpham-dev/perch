@@ -24,6 +24,7 @@ import {
   uninstallHooks,
 } from "./agents.js";
 import { agentSessionMessages, listAgentSessions } from "./agentSessions.js";
+import { findProjectIcon } from "./projectIcon.js";
 import { listNever, openProjectSetup, readProjectSetup, saveProjectSetup, setNever } from "./projectSetup.js";
 import { agentsForSession } from "./agentWindows.js";
 import { reportAgentHook, subscribedEvents, subscriberSummary } from "./agentHooks.js";
@@ -1504,6 +1505,22 @@ api.post("/newfile", async (req, res) => {
     await ensureDir(path.dirname(target));
     await createEmptyFile(target);
     res.status(201).json({ path: target });
+  } catch (err) {
+    sendFsError(res, err);
+  }
+});
+
+// The icon image a project folder already carries (icon.png, logo.svg,
+// public/favicon.svg, an index.html <link rel="icon">…), or null. Feeds the
+// automatic project avatar.
+api.get("/project-icon", async (req, res) => {
+  const raw = typeof req.query.cwd === "string" ? req.query.cwd : "";
+  if (!raw) {
+    res.status(400).json({ error: "cwd is required" });
+    return;
+  }
+  try {
+    res.json({ path: await findProjectIcon(expandHome(raw)) });
   } catch (err) {
     sendFsError(res, err);
   }

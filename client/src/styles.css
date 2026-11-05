@@ -1338,7 +1338,25 @@ body.resizing-row {
    case-sensitive, so shouting one would misrepresent the folder it names. */
 .project-item .item-cwd {
   text-transform: none;
-  font-size: 11px;
+  font-size: 10.5px;
+  flex: none;
+  text-align: left;
+  opacity: 0.8;
+}
+
+/* Title over path, stacked beside the avatar. */
+.project-item .project-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  line-height: 1.25;
+}
+
+.project-item .project-text > * {
+  max-width: 100%;
 }
 
 /* Uppercase bold is wider than the same name in lowercase, so on a narrow
@@ -1393,12 +1411,12 @@ body.resizing-row {
 .project-avatar {
   position: relative;
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 6px;
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 600;
   line-height: 1;
   color: #fff;
@@ -1406,7 +1424,7 @@ body.resizing-row {
 }
 .project-avatar.emoji {
   background: var(--bg-hover, rgba(255, 255, 255, 0.08));
-  font-size: 13px;
+  font-size: 15px;
 }
 .project-avatar.image {
   background: transparent;
@@ -1415,7 +1433,7 @@ body.resizing-row {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  border-radius: 5px;
+  border-radius: 6px;
 }
 .project-avatar-badge {
   position: absolute;

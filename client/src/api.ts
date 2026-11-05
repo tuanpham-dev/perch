@@ -795,6 +795,12 @@ export function transferEntries(
   });
 }
 
+// The icon image a project folder already has, if any (absolute path).
+export async function fetchProjectIcon(cwd: string): Promise<string | null> {
+  const r = await request<{ path: string | null }>(`/api/project-icon?cwd=${encodeURIComponent(cwd)}`);
+  return r.path;
+}
+
 export function downloadUrl(targetPath: string): string {
   return `/api/download?path=${encodeURIComponent(targetPath)}`;
 }

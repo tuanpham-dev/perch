@@ -18,7 +18,7 @@ import { useListNavigation } from "../hooks/useListNavigation";
 import { useLongPressMenu } from "../hooks/useLongPressMenu";
 import { bindingMatches, recorderState, serializeEvent, type Keybinding } from "../keybindings";
 import { autoAvatarColor, projectTree, sessionNameForBranch, type ProjectNode, type WorktreeNode } from "../lib/projects";
-import { downloadUrl } from "../api";
+import { downloadUrl, fetchProjectIcon } from "../api";
 import type { MenuItem, Project, ProjectAvatar, RepoInfo, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
 import Icon from "./Icon";
 
@@ -156,23 +156,30 @@ const worktreeRowId = (node: WorktreeNode) => `worktree:${node.key}`;
 const moreRowId = (node: ProjectNode) => `more:${node.key}`;
 
 
-// Files a repository commonly keeps its icon in, tried in order when the
-// user hasn't picked an avatar. The outcome is remembered per folder so a
-// repository without one costs a handful of 404s once, not on every render.
-const REPO_ICON_CANDIDATES = ["icon.png", "favicon.png", "favicon.svg", "logo.svg", "logo.png"];
+// What the server found for each folder (null = nothing), remembered so a
+// repository without an icon costs one lookup, not one per render.
 const repoIconCache = new Map<string, string | null>();
+const repoIconPending = new Map<string, Promise<void>>();
 
 function ProjectAvatarView({ node, attached }: { node: ProjectNode; attached: boolean }) {
   const letter = [...node.label][0]?.toUpperCase() ?? "?";
   const key = node.cwd ?? node.label;
   const avatar = node.avatar;
-  const [tried, setTried] = useState(0);
-  // Only the automatic avatar probes the repo for an icon.
+  // Only the automatic avatar looks in the repo for an icon.
   const auto = !avatar && !!node.cwd;
-  const cached = auto ? repoIconCache.get(key) : undefined;
-  let imagePath: string | null = null;
-  if (avatar?.kind === "image") imagePath = avatar.path;
-  else if (auto && cached !== null) imagePath = cached ?? (tried < REPO_ICON_CANDIDATES.length ? `${node.cwd}/${REPO_ICON_CANDIDATES[tried]}` : null);
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!auto || repoIconCache.has(key) || repoIconPending.has(key)) return;
+    const p = fetchProjectIcon(node.cwd!)
+      .then((found) => void repoIconCache.set(key, found))
+      .catch(() => void repoIconCache.set(key, null))
+      .finally(() => {
+        repoIconPending.delete(key);
+        bump((n) => n + 1);
+      });
+    repoIconPending.set(key, p);
+  }, [auto, key, node.cwd]);
+  const imagePath = avatar?.kind === "image" ? avatar.path : auto ? (repoIconCache.get(key) ?? null) : null;
 
   const [imgFailed, setImgFailed] = useState<string | null>(null);
   const showImage = imagePath !== null && imgFailed !== imagePath;
@@ -190,16 +197,7 @@ function ProjectAvatarView({ node, attached }: { node: ProjectNode; attached: bo
           src={downloadUrl(imagePath!)}
           alt=""
           draggable={false}
-          onLoad={() => {
-            if (auto) repoIconCache.set(key, imagePath);
-          }}
-          onError={() => {
-            if (avatar?.kind === "image") setImgFailed(imagePath);
-            else if (tried + 1 >= REPO_ICON_CANDIDATES.length) {
-              repoIconCache.set(key, null);
-              setTried(tried + 1);
-            } else setTried(tried + 1);
-          }}
+          onError={() => setImgFailed(imagePath)}
         />
       ) : avatar?.kind === "emoji" ? (
         avatar.emoji
@@ -834,8 +832,10 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
           {chevron(row.id)}
           <ProjectAvatarView node={node} attached={anyAttached} />
           {node.pinned && <Icon name="pinned" className="pin-indicator" />}
-          <span className="session-name">{node.label}</span>
-          {node.cwd && <span className="item-cwd">{node.cwd}</span>}
+          <span className="project-text">
+            <span className="session-name">{node.label}</span>
+            {node.cwd && <span className="item-cwd" title={node.cwd}>{node.cwd}</span>}
+          </span>
         </button>
         <button
           className="row-add-button"
