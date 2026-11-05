@@ -205,6 +205,11 @@ function ProjectAvatarView({ node, attached }: { node: ProjectNode; attached: bo
         letter
       )}
       {attached && <span className="project-avatar-badge" />}
+      {node.pinned && (
+        <span className="project-avatar-pin">
+          <Icon name="star-full" />
+        </span>
+      )}
     </span>
   );
 }
@@ -831,7 +836,6 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
         >
           {chevron(row.id)}
           <ProjectAvatarView node={node} attached={anyAttached} />
-          {node.pinned && <Icon name="pinned" className="pin-indicator" />}
           <span className="project-text">
             <span className="session-name">{node.label}</span>
             {node.cwd && <span className="item-cwd" title={node.cwd}>{node.cwd}</span>}
