@@ -88,6 +88,7 @@ import { useThemeAssets } from "./hooks/useThemeAssets";
 import type { MenuItem, MenuState, OpenTargetPayload, RegistrySourceResult, Tab, TerminalSession } from "./types";
 import { groupKeyForTab, isRealTab } from "./lib/tabs";
 import {
+  avatarMap,
   bumpRecent,
   isLinkedWorktreePath,
   projectName,
@@ -2981,6 +2982,7 @@ export default function App() {
     openKeyboardShortcutsTab,
   ]);
 
+  const avatars = useMemo(() => avatarMap(projects), [projects]);
   const projectListProps = useMemo(
     () => ({
       sessions,
@@ -2989,6 +2991,7 @@ export default function App() {
         activeRealTab?.windowIndex !== undefined && activeRealTab.sessionName === activeSessionName
           ? { sessionName: activeRealTab.sessionName, index: activeRealTab.windowIndex }
           : null,
+      avatars,
       onOpenAllWindows: openAllWindows,
       onOpenWindow: openWindowTab,
       onKillWindow: killWindow,
@@ -3016,6 +3019,7 @@ export default function App() {
     }),
     [
       sessions,
+      avatars,
       activeRealTab,
       activeSessionName,
       openAllWindows,

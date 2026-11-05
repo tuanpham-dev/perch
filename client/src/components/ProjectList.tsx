@@ -17,8 +17,9 @@ import { useGitRootDirs } from "../hooks/useGitRootDir";
 import { useListNavigation } from "../hooks/useListNavigation";
 import { useLongPressMenu } from "../hooks/useLongPressMenu";
 import { bindingMatches, recorderState, serializeEvent, type Keybinding } from "../keybindings";
-import { projectTree, sessionNameForBranch, type ProjectNode, type WorktreeNode } from "../lib/projects";
-import type { MenuItem, Project, RepoInfo, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
+import { autoAvatarColor, projectTree, sessionNameForBranch, type ProjectNode, type WorktreeNode } from "../lib/projects";
+import { downloadUrl } from "../api";
+import type { MenuItem, Project, ProjectAvatar, RepoInfo, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
 import Icon from "./Icon";
 
 export interface ProjectListHandle {
@@ -34,6 +35,9 @@ export interface ProjectListProps {
   activeSessionName: string | null;
   activeWindow: { sessionName: string; index: number } | null;
   projects: Project[];
+  // cwd → avatar. Separate from `projects` because the status-bar popover
+  // passes no projects (to hide pins) but still shows avatars.
+  avatars: Map<string, ProjectAvatar>;
   // Which repository each session folder belongs to, and that repository's
   // worktrees — the tree's middle level. An empty map renders the flat
   // two-level tree, which is also what a folder outside any repository gets.
@@ -152,12 +156,68 @@ const worktreeRowId = (node: WorktreeNode) => `worktree:${node.key}`;
 const moreRowId = (node: ProjectNode) => `more:${node.key}`;
 
 
+// Files a repository commonly keeps its icon in, tried in order when the
+// user hasn't picked an avatar. The outcome is remembered per folder so a
+// repository without one costs a handful of 404s once, not on every render.
+const REPO_ICON_CANDIDATES = ["icon.png", "favicon.png", "favicon.svg", "logo.svg", "logo.png"];
+const repoIconCache = new Map<string, string | null>();
+
+function ProjectAvatarView({ node, attached }: { node: ProjectNode; attached: boolean }) {
+  const letter = [...node.label][0]?.toUpperCase() ?? "?";
+  const key = node.cwd ?? node.label;
+  const avatar = node.avatar;
+  const [tried, setTried] = useState(0);
+  // Only the automatic avatar probes the repo for an icon.
+  const auto = !avatar && !!node.cwd;
+  const cached = auto ? repoIconCache.get(key) : undefined;
+  let imagePath: string | null = null;
+  if (avatar?.kind === "image") imagePath = avatar.path;
+  else if (auto && cached !== null) imagePath = cached ?? (tried < REPO_ICON_CANDIDATES.length ? `${node.cwd}/${REPO_ICON_CANDIDATES[tried]}` : null);
+
+  const [imgFailed, setImgFailed] = useState<string | null>(null);
+  const showImage = imagePath !== null && imgFailed !== imagePath;
+  const style: React.CSSProperties =
+    avatar?.kind === "color"
+      ? { background: avatar.color }
+      : avatar?.kind === "emoji" || showImage
+        ? {}
+        : { background: autoAvatarColor(key) };
+
+  return (
+    <span className={`project-avatar${avatar?.kind === "emoji" ? " emoji" : ""}${showImage ? " image" : ""}`} style={style}>
+      {showImage ? (
+        <img
+          src={downloadUrl(imagePath!)}
+          alt=""
+          draggable={false}
+          onLoad={() => {
+            if (auto) repoIconCache.set(key, imagePath);
+          }}
+          onError={() => {
+            if (avatar?.kind === "image") setImgFailed(imagePath);
+            else if (tried + 1 >= REPO_ICON_CANDIDATES.length) {
+              repoIconCache.set(key, null);
+              setTried(tried + 1);
+            } else setTried(tried + 1);
+          }}
+        />
+      ) : avatar?.kind === "emoji" ? (
+        avatar.emoji
+      ) : (
+        letter
+      )}
+      {attached && <span className="project-avatar-badge" />}
+    </span>
+  );
+}
+
 const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function ProjectList(
   {
     sessions,
     activeSessionName,
     activeWindow,
     projects,
+    avatars,
     repoIndex,
     onOpenAllWindows,
     onOpenWindow,
@@ -237,8 +297,12 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
   };
 
   const nodes = useMemo(
-    () => projectTree(sessions, projects, repoIndex),
-    [sessions, projects, repoIndex],
+    () =>
+      projectTree(sessions, projects, repoIndex).map((n) => {
+        const avatar = n.cwd ? avatars.get(n.cwd) : undefined;
+        return avatar ? { ...n, avatar } : n;
+      }),
+    [sessions, projects, repoIndex, avatars],
   );
 
   // `anchor` is the viewport rect the popover hangs off — the row's own "+"
@@ -768,7 +832,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
           onFocus={rowProps.onFocus}
         >
           {chevron(row.id)}
-          <span className={`session-dot${anyAttached ? " attached" : ""}`} />
+          <ProjectAvatarView node={node} attached={anyAttached} />
           {node.pinned && <Icon name="pinned" className="pin-indicator" />}
           <span className="session-name">{node.label}</span>
           {node.cwd && <span className="item-cwd">{node.cwd}</span>}

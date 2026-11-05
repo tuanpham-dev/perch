@@ -11,13 +11,14 @@ import {
   sessionNameForProject,
   type ProjectNode,
   type WorktreeNode,
+  AVATAR_COLORS,
 } from "../lib/projects";
 import { revealInFiles } from "../extensions";
 import { isRealTab, tabVirtualPath } from "../lib/tabs";
 import { notifyProjectCreated } from "../lib/projectSetupBridge";
 import type { SplitDirection } from "../lib/splits";
 import type { AppSettings } from "../settings";
-import type { MenuItem, Project, RepoInfo, Tab, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
+import type { MenuItem, Project, ProjectAvatar, RepoInfo, Tab, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
 
 // createWindow's server call returns void (see server/src/terminals.ts), so the
 // window it just created isn't known until the next session list fetch —
@@ -169,6 +170,64 @@ export function useSessionActions(
       });
     },
     [setProjects],
+  );
+
+  // Sets (or, with null, clears) a folder's avatar. Registers the folder if
+  // it was never opened as a project, like togglePinProject.
+  const setProjectAvatar = useCallback(
+    (cwd: string, avatar: ProjectAvatar | null) => {
+      if (!cwd) return;
+      setProjects((prev) => {
+        const existing = prev.find((p) => p.cwd === cwd);
+        if (!existing) {
+          return avatar ? [...prev, { cwd, pinned: false, lastOpened: Date.now(), avatar }] : prev;
+        }
+        return prev.map((p) => {
+          if (p.cwd !== cwd) return p;
+          const { avatar: _old, ...rest } = p;
+          return avatar ? { ...rest, avatar } : rest;
+        });
+      });
+    },
+    [setProjects],
+  );
+
+  const avatarMenuItems = useCallback(
+    (cwd: string, current: ProjectAvatar | undefined): MenuItem[] => [
+      { label: "", separator: true, onClick: () => {} },
+      {
+        label: "",
+        onClick: () => {},
+        swatches: {
+          colors: AVATAR_COLORS.map((hex) => ({ key: hex, hex })),
+          selected: current?.kind === "color" ? current.color : "",
+          onPick: (hex) => setProjectAvatar(cwd, { kind: "color", color: hex }),
+        },
+      },
+      {
+        label: "Choose Emoji…",
+        onClick: () => {
+          void promptDialog("Emoji for this project", current?.kind === "emoji" ? current.emoji : "").then((v) => {
+            const emoji = v?.trim();
+            if (emoji) setProjectAvatar(cwd, { kind: "emoji", emoji: [...emoji][0] });
+          });
+        },
+      },
+      {
+        label: "Choose Image…",
+        onClick: () => {
+          void promptDialog(
+            "Path to an image file (png, svg, jpg)",
+            current?.kind === "image" ? current.path : `${cwd}/`,
+          ).then((v) => {
+            const path = v?.trim();
+            if (path) setProjectAvatar(cwd, { kind: "image", path });
+          });
+        },
+      },
+      ...(current ? [{ label: "Reset Avatar", onClick: () => setProjectAvatar(cwd, null) }] : []),
+    ],
+    [promptDialog, setProjectAvatar],
   );
 
   const togglePinSession = useCallback(
@@ -529,7 +588,9 @@ export function useSessionActions(
           onClick: () => togglePinProject(node.cwd!),
         });
       }
+      if (node.cwd) items.push(...avatarMenuItems(node.cwd, node.avatar));
       if (all.length > 0) {
+        items.push({ label: "", separator: true, onClick: () => {} });
         items.push({ label: "Close Project", danger: true, onClick: () => void closeSessions(node.label, all) });
       }
       // A repository row with a worktree level — the only kind with linked
@@ -546,6 +607,7 @@ export function useSessionActions(
       openAllWindows,
       newTerminalInProject,
       togglePinProject,
+      avatarMenuItems,
       closeSessions,
     ],
   );

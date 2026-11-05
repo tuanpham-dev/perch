@@ -42,10 +42,19 @@ export interface TerminalSession {
 // list, MRU by lastOpened. A pinned project survives its session being
 // killed: the PROJECTS panel keeps a dead row that recreates the session in
 // exactly this folder; unpinned projects live only in the recents dropdown.
+// A project's picture in the PROJECTS tree. Absent = the automatic letter
+// tile (first letter on a colour hashed from the folder), or the repo's own
+// icon file when it has one.
+export type ProjectAvatar =
+  | { kind: "color"; color: string }
+  | { kind: "emoji"; emoji: string }
+  | { kind: "image"; path: string };
+
 export interface Project {
   cwd: string;
   pinned: boolean;
   lastOpened: number;
+  avatar?: ProjectAvatar;
 }
 
 export interface Tab {

@@ -1,4 +1,4 @@
-import type { Project, RepoInfo, TerminalSession, WorktreeInfo } from "../types";
+import type { Project, ProjectAvatar, RepoInfo, TerminalSession, WorktreeInfo } from "../types";
 import { isAbsolutePath } from "./paths";
 
 // A project's display name is always derived from its folder — never stored,
@@ -103,6 +103,22 @@ export function withoutWorktreeRecents(
   return next.length === projects.length ? projects : next;
 }
 
+// cwd → avatar for every project that has one. Separate from projectTree's
+// `projects` input because the status-bar popover hides pins (passes none)
+// yet still shows avatars.
+export function avatarMap(projects: Project[]): Map<string, ProjectAvatar> {
+  return new Map(projects.flatMap((p) => (p.avatar ? [[p.cwd, p.avatar] as const] : [])));
+}
+
+// Palette for the "pick a colour" avatar and the automatic letter tile.
+export const AVATAR_COLORS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#8b5cf6", "#64748b"];
+
+export function autoAvatarColor(key: string): string {
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
 // How many unpinned entries the recents list keeps — pinned entries never
 // count against (or get evicted by) the cap.
 const RECENTS_CAP = 15;
@@ -112,7 +128,7 @@ const RECENTS_CAP = 15;
 export function bumpRecent(projects: Project[], cwd: string): Project[] {
   const existing = projects.find((p) => p.cwd === cwd);
   const next: Project[] = [
-    { cwd, pinned: existing?.pinned ?? false, lastOpened: Date.now() },
+    { cwd, pinned: existing?.pinned ?? false, lastOpened: Date.now(), ...(existing?.avatar ? { avatar: existing.avatar } : {}) },
     ...projects.filter((p) => p.cwd !== cwd),
   ];
   let unpinned = 0;
@@ -157,6 +173,7 @@ export interface ProjectNode {
   cwd: string | null;
   label: string;
   pinned: boolean;
+  avatar?: ProjectAvatar;
   sessions: TerminalSession[];
   worktrees: WorktreeNode[];
 }

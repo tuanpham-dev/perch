@@ -1,7 +1,7 @@
 import { migrateKeybindingOverrides, type KeybindingOverrides } from "./keybindings";
 import { parsePanelState, parseSidebarLayout, type PanelState, type StoredSidebarLayout } from "./lib/sidebarLayout";
 import { parseStatusBarLayout, type StatusBarLayout } from "./lib/statusBarLayout";
-import type { Project } from "./types";
+import type { Project, ProjectAvatar } from "./types";
 
 // The API kinds core implements itself, plus - for a CLI - the id of an agent
 // from Settings → AI Providers' own Agents group. The CLIs used to be literals
@@ -620,6 +620,17 @@ export function saveExtensionSettings(values: ExtensionSettingsValues): void {
 // Projects (the recent-projects registry, pin flags included) live outside
 // AppSettings on purpose — "Reset Settings to Defaults" writes
 // `{...DEFAULT_SETTINGS}` and must not wipe them.
+function sanitizeAvatar(raw: unknown): ProjectAvatar | undefined {
+  if (!isPlainObject(raw)) return undefined;
+  if (raw.kind === "color" && typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color))
+    return { kind: "color", color: raw.color };
+  if (raw.kind === "emoji" && typeof raw.emoji === "string" && raw.emoji !== "")
+    return { kind: "emoji", emoji: raw.emoji };
+  if (raw.kind === "image" && typeof raw.path === "string" && raw.path !== "")
+    return { kind: "image", path: raw.path };
+  return undefined;
+}
+
 export function sanitizeProjects(parsed: unknown): Project[] {
   if (!Array.isArray(parsed)) return [];
   const seen = new Set<string>();
@@ -627,10 +638,12 @@ export function sanitizeProjects(parsed: unknown): Project[] {
   for (const p of parsed) {
     if (!isPlainObject(p) || typeof p.cwd !== "string" || p.cwd === "" || seen.has(p.cwd)) continue;
     seen.add(p.cwd);
+    const avatar = sanitizeAvatar(p.avatar);
     out.push({
       cwd: p.cwd,
       pinned: p.pinned === true,
       lastOpened: typeof p.lastOpened === "number" ? p.lastOpened : 0,
+      ...(avatar ? { avatar } : {}),
     });
   }
   return out;
