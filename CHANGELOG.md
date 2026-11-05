@@ -3,6 +3,18 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.11.0 - 2026-11-05
+
+- Reload the image, PDF, markdown, JSON and CSV previews by themselves when their file changes on disk, keeping a CSV's unsaved edits behind a prompt
+- Let projects be reordered by dragging their rows in the Projects panel, keeping the order per project
+- Mark each terminal row with its code agent's own icon (Claude, Codex in colour) or the plain terminal glyph, and show the same agent icons in the new-terminal menus
+- Show a pinned project's star as a yellow badge on its avatar instead of a pin beside it
+- Find a project's icon on the server across the usual asset folders and index.html, and show the project path under its name in a larger avatar row
+- Keep the Files tree's open folders per root across tab switches and refresh them one at a time in the background, so expanding no longer waits behind a burst of refetches
+- Show a per-project avatar in the Projects panel
+- Say in the install docs that the Mac app is Apple silicon only
+- Stop building the Intel Mac app; ship Apple silicon only
+
 ## 0.10.7 - 2026-11-03
 
 - Ship extensions/_shared's .js files too in the desktop bundle, so Live Preview loads pageBootstrap.js and HTML previews work in the installed app
