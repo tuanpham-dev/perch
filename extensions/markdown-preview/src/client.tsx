@@ -18,6 +18,7 @@ import { fetchFileText, downloadUrl } from "../../_shared/fileApi";
 import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
+import { useFileWatch } from "../../_shared/useFileWatch";
 import { scalarText, splitFrontmatter } from "../frontmatter.mjs";
 import { MermaidBlock, setMermaidAssetUrl } from "./MermaidBlock";
 
@@ -318,10 +319,10 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
     return () => observer.disconnect();
   }, []);
 
-  // No auto-refresh/polling — fetched once on mount, plus the portaled
-  // Refresh button below and the host-bumped reloadKey (an explicit open/
-  // preview action landing on this already-open tab) for picking up
-  // on-disk edits.
+  // Fetched on mount and re-fetched when the file changes on disk (see
+  // useFileWatch), plus the portaled Refresh button below and the host-bumped
+  // reloadKey (an explicit open/preview action landing on this already-open
+  // tab).
   const load = useCallback(() => {
     setError(null);
     fetchFileText(filePath)
@@ -333,6 +334,7 @@ function MarkdownView({ filePath, active, toolbarTarget, openInEditor, reloadKey
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, reloadKey]);
+  useFileWatch(filePath, active, load);
 
   useEffect(
     () => () => {

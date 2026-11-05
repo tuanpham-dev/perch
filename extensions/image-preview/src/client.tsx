@@ -5,6 +5,7 @@ import "./style.css";
 import { downloadUrl, fileLoadProblem } from "../../_shared/fileApi";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
+import { useFileWatch } from "../../_shared/useFileWatch";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"];
 
@@ -52,6 +53,8 @@ function ImageView({ filePath, active, toolbarTarget, reloadKey }: Props) {
     setNatural(null);
     setMode("fit");
   }, [filePath, reloadKey]);
+  // The file changed on disk: fetch it again, keeping the zoom and position.
+  useFileWatch(filePath, active, () => setVersion((v) => v + 1));
   const src = `${downloadUrl(filePath)}&v=${version}`;
   // "fit" is recomputed continuously from container/natural size (effect
   // below); "custom" is a user-picked scale/offset that sticks until they

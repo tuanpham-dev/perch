@@ -12,6 +12,7 @@ import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import Icon from "../../_shared/Icon";
 import { checkDiskConflict } from "../../_shared/diskConflict";
+import { useFileWatch } from "../../_shared/useFileWatch";
 
 const YAML_EXTENSIONS = new Set(["yml", "yaml"]);
 
@@ -145,6 +146,8 @@ function JsonView({ filePath, active, toolbarTarget, openInEditor, fontSize = 14
       .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, reloadKey, refreshTick]);
+  // Mirrors the file: pick up an edit made elsewhere without a manual Refresh.
+  useFileWatch(filePath, active, () => setRefreshTick((n) => n + 1));
 
   const parsed = useMemo(() => {
     if (content === null) return { ok: false as const, error: null };

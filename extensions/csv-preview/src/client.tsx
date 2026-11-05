@@ -18,6 +18,7 @@ import { createDraftClient, hashText, type DraftClient, type DraftsApi } from ".
 import { checkDiskConflict } from "../../_shared/diskConflict";
 import type { MenuItem } from "../../_shared/types";
 import Icon from "../../_shared/Icon";
+import { useFileWatch } from "../../_shared/useFileWatch";
 import { calcColWidths, EditableCell, EditableHeaderCell, escapeRegex, getBounds, inBounds } from "./Grid";
 import { useUndoHistory } from "./undo";
 import { CsvFindBar, CsvToolbar } from "./Toolbar";
@@ -325,6 +326,20 @@ function CsvView({ filePath, active, toolbarTarget, openInEditor, showMenu, setD
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
+
+  // The file changed on disk (an agent edited it, or we just saved it). The
+  // text is compared with what was last loaded or saved first, so our own
+  // save is not mistaken for an outside edit. Then the same rule as an
+  // explicit re-open: reload when clean, offer the banner when dirty.
+  useFileWatch(filePath, active, () => {
+    void fetchFileText(filePath)
+      .then((text) => {
+        if (text === diskTextRef.current) return;
+        if (dirty) setShowReloadPrompt(true);
+        else void reloadFromDisk();
+      })
+      .catch(() => {});
+  });
 
   // Going clean (saved, or undone back to the loaded state) makes the
   // banner's "you have unsaved changes" claim false — drop it.

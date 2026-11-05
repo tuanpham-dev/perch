@@ -4,6 +4,7 @@ import "./style.css";
 import { fileLoadProblem, inlineUrl } from "../../_shared/fileApi";
 import Icon from "../../_shared/Icon";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
+import { useFileWatch } from "../../_shared/useFileWatch";
 
 const basename = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 
@@ -26,6 +27,8 @@ function PdfView({
   const [version, setVersion] = useState(0);
   const [problem, setProblem] = useState<string | null | undefined>(undefined);
   const src = `${inlineUrl(filePath)}&v=${version}`;
+  // The file changed on disk (a rebuilt document): reload the frame.
+  useFileWatch(filePath, active, () => setVersion((v) => v + 1));
   useEffect(() => {
     setVersion((v) => v + 1);
   }, [filePath, reloadKey]);
