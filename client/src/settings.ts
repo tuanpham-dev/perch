@@ -644,6 +644,7 @@ export function sanitizeProjects(parsed: unknown): Project[] {
       pinned: p.pinned === true,
       lastOpened: typeof p.lastOpened === "number" ? p.lastOpened : 0,
       ...(avatar ? { avatar } : {}),
+      ...(typeof p.order === "number" && Number.isFinite(p.order) ? { order: p.order } : {}),
     });
   }
   return out;

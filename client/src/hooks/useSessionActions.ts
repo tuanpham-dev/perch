@@ -172,6 +172,24 @@ export function useSessionActions(
     [setProjects],
   );
 
+  // Records the user's drag: `cwds` is the whole list in its new order, so every
+  // project in it gets its position (registering folders never opened as one,
+  // like togglePinProject), and projects not in it keep whatever they had.
+  const reorderProjects = useCallback(
+    (cwds: string[]) => {
+      setProjects((prev) => {
+        const known = new Map(prev.map((p) => [p.cwd, p]));
+        const placed = new Map(cwds.map((cwd, i) => [cwd, i]));
+        const next = prev.map((p) => (placed.has(p.cwd) ? { ...p, order: placed.get(p.cwd)! } : p));
+        for (const [cwd, order] of placed) {
+          if (!known.has(cwd)) next.push({ cwd, pinned: false, lastOpened: Date.now(), order });
+        }
+        return next;
+      });
+    },
+    [setProjects],
+  );
+
   // Sets (or, with null, clears) a folder's avatar. Registers the folder if
   // it was never opened as a project, like togglePinProject.
   const setProjectAvatar = useCallback(
@@ -893,6 +911,7 @@ export function useSessionActions(
   );
 
   return {
+    reorderProjects,
     closeProject,
     killSessionNow,
     createWindow,

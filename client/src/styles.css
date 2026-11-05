@@ -6281,3 +6281,24 @@ body.scrollbar-dragging {
   background: var(--accent);
   border: 2px solid var(--panel-bg);
 }
+
+/* ---- Dragging a project to reorder ----
+   The dragged project dims where it stands; a line marks the slot it will land
+   in — above the project it would precede, or under the last one. */
+body.project-reordering,
+body.project-reordering * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.session-list-ul > li.project-dragging {
+  opacity: 0.45;
+}
+.session-list-ul > li.project-drop-before {
+  box-shadow: 0 -2px 0 0 var(--accent, #3b82f6);
+}
+.session-list-ul > li.project-drop-end {
+  height: 2px;
+  margin-top: 6px;
+  background: var(--accent, #3b82f6);
+  list-style: none;
+}

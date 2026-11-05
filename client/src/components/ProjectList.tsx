@@ -17,7 +17,7 @@ import { useGitRootDirs } from "../hooks/useGitRootDir";
 import { useListNavigation } from "../hooks/useListNavigation";
 import { useLongPressMenu } from "../hooks/useLongPressMenu";
 import { bindingMatches, recorderState, serializeEvent, type Keybinding } from "../keybindings";
-import { autoAvatarColor, projectTree, sessionNameForBranch, type ProjectNode, type WorktreeNode } from "../lib/projects";
+import { applyProjectOrder, autoAvatarColor, projectTree, sessionNameForBranch, type ProjectNode, type WorktreeNode } from "../lib/projects";
 import { downloadUrl, fetchProjectIcon } from "../api";
 import type { MenuItem, Project, ProjectAvatar, RepoInfo, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
 import { useWindowAgents, windowAgentKey, type WindowAgent } from "../lib/windowAgents";
@@ -39,6 +39,10 @@ export interface ProjectListProps {
   // cwd → avatar. Separate from `projects` because the status-bar popover
   // passes no projects (to hide pins) but still shows avatars.
   avatars: Map<string, ProjectAvatar>;
+  // cwd → where the user dragged that project to, and the call that records a
+  // new order (the whole list of cwds, top to bottom).
+  projectOrder: Map<string, number>;
+  onReorderProjects: (cwds: string[]) => void;
   // Which repository each session folder belongs to, and that repository's
   // worktrees — the tree's middle level. An empty map renders the flat
   // two-level tree, which is also what a folder outside any repository gets.
@@ -230,6 +234,8 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     activeWindow,
     projects,
     avatars,
+    projectOrder,
+    onReorderProjects,
     repoIndex,
     onOpenAllWindows,
     onOpenWindow,
@@ -311,12 +317,114 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
 
   const nodes = useMemo(
     () =>
-      projectTree(sessions, projects, repoIndex).map((n) => {
-        const avatar = n.cwd ? avatars.get(n.cwd) : undefined;
-        return avatar ? { ...n, avatar } : n;
-      }),
-    [sessions, projects, repoIndex, avatars],
+      applyProjectOrder(
+        projectTree(sessions, projects, repoIndex).map((n) => {
+          const avatar = n.cwd ? avatars.get(n.cwd) : undefined;
+          return avatar ? { ...n, avatar } : n;
+        }),
+        projectOrder,
+      ),
+    [sessions, projects, repoIndex, avatars, projectOrder],
   );
+
+  // ---- Drag a project to reorder ----
+  //
+  // Pointer-based like the status bar's and the tab strip's drags: a few
+  // pixels of movement starts it (so a plain click still activates the row),
+  // the drop slot comes from where the pointer sits against the other project
+  // rows, and the click the browser fires after the drop is swallowed. Mouse
+  // and pen only — on touch a long press already opens the row's menu.
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const onReorderRef = useRef(onReorderProjects);
+  onReorderRef.current = onReorderProjects;
+  const reorderRef = useRef<{ pointerId: number; rowId: string; startY: number; dragging: boolean; slot: number } | null>(null);
+  const justReorderedRef = useRef(false);
+  const [reorder, setReorder] = useState<{ rowId: string; beforeRowId: string | null } | null>(null);
+
+  const otherProjectRows = (rowId: string) =>
+    [...(containerRef.current?.querySelectorAll<HTMLElement>('li[data-kind="project"]') ?? [])].filter(
+      (el) => el.dataset.rowId !== rowId,
+    );
+
+  const slotAt = (clientY: number, rowId: string) => {
+    const others = otherProjectRows(rowId);
+    let slot = others.length;
+    for (let i = 0; i < others.length; i++) {
+      const r = others[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) {
+        slot = i;
+        break;
+      }
+    }
+    return { slot, beforeRowId: others[slot]?.dataset.rowId ?? null };
+  };
+
+  const endReorder = () => {
+    reorderRef.current = null;
+    window.removeEventListener("pointermove", onReorderMove);
+    window.removeEventListener("pointerup", onReorderUp);
+    window.removeEventListener("pointercancel", onReorderCancel);
+    window.removeEventListener("keydown", onReorderKey);
+    document.body.classList.remove("project-reordering");
+    setReorder(null);
+  };
+
+  const onReorderMove = (e: PointerEvent) => {
+    const s = reorderRef.current;
+    if (!s || e.pointerId !== s.pointerId) return;
+    if (!s.dragging) {
+      if (Math.abs(e.clientY - s.startY) < 5) return;
+      s.dragging = true;
+      document.body.classList.add("project-reordering");
+    }
+    const { slot, beforeRowId } = slotAt(e.clientY, s.rowId);
+    s.slot = slot;
+    setReorder((prev) =>
+      prev && prev.rowId === s.rowId && prev.beforeRowId === beforeRowId ? prev : { rowId: s.rowId, beforeRowId },
+    );
+  };
+
+  const onReorderUp = (e: PointerEvent) => {
+    const s = reorderRef.current;
+    if (!s || e.pointerId !== s.pointerId) return;
+    if (s.dragging) {
+      justReorderedRef.current = true;
+      window.setTimeout(() => (justReorderedRef.current = false), 0);
+      const all = nodesRef.current;
+      const moved = all.find((n) => projectRowId(n) === s.rowId);
+      if (moved) {
+        const rest = all.filter((n) => n !== moved);
+        rest.splice(s.slot, 0, moved);
+        const cwds = rest.flatMap((n) => (n.cwd ? [n.cwd] : []));
+        if (cwds.join("\n") !== all.flatMap((n) => (n.cwd ? [n.cwd] : [])).join("\n")) onReorderRef.current(cwds);
+      }
+    }
+    endReorder();
+  };
+
+  const onReorderCancel = (e: PointerEvent) => {
+    if (reorderRef.current && e.pointerId === reorderRef.current.pointerId) endReorder();
+  };
+
+  const onReorderKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && reorderRef.current?.dragging) {
+      justReorderedRef.current = true;
+      window.setTimeout(() => (justReorderedRef.current = false), 0);
+      endReorder();
+    }
+  };
+
+  const startReorder = (e: React.PointerEvent, node: ProjectNode) => {
+    if (e.button !== 0 || e.pointerType === "touch" || !node.cwd || reorderRef.current) return;
+    reorderRef.current = { pointerId: e.pointerId, rowId: projectRowId(node), startY: e.clientY, dragging: false, slot: 0 };
+    window.addEventListener("pointermove", onReorderMove);
+    window.addEventListener("pointerup", onReorderUp);
+    window.addEventListener("pointercancel", onReorderCancel);
+    window.addEventListener("keydown", onReorderKey);
+  };
+
+  useEffect(() => () => endReorder(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // `anchor` is the viewport rect the popover hangs off — the row's own "+"
   // button for a menu pick. The palette command has no pointer to anchor to,
@@ -833,14 +941,25 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
     const isActive = activeSessionName !== null && members.some((m) => m.name === activeSessionName);
     const anyAttached = members.some((m) => m.attached > 0);
     const sessionNames = members.map((m) => m.name).join(", ");
+    const menu = menuBindings(row);
     const tooltip = `${node.cwd ?? node.label}${sessionNames ? ` (session: ${sessionNames})` : ""}`;
     return (
       <div className={`session-row${isActive ? " active" : ""}`}>
         <button
           className={`session-item project-item${isActive ? " active" : ""}`}
           title={tooltip}
+          onClickCapture={(e) => {
+            if (justReorderedRef.current) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
           onClick={() => onActivate(row.id)}
-          {...menuBindings(row)}
+          {...menu}
+          onPointerDown={(e) => {
+            menu.onPointerDown?.(e);
+            startReorder(e, node);
+          }}
           tabIndex={rowProps.tabIndex}
           ref={rowProps.ref}
           onFocus={rowProps.onFocus}
@@ -1160,6 +1279,15 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
             data-row-id={row.id}
             data-kind={row.kind}
             data-block={blockPos.get(row.id)}
+            className={
+              reorder && row.kind === "project"
+                ? reorder.rowId === row.id
+                  ? "project-dragging"
+                  : reorder.beforeRowId === row.id
+                    ? "project-drop-before"
+                    : undefined
+                : undefined
+            }
             style={{ "--row-depth": row.depth } as React.CSSProperties}
           >
             {row.kind === "project"
@@ -1171,6 +1299,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
                   : renderWindowRow(row)}
           </li>
         ))}
+        {reorder && reorder.beforeRowId === null && <li className="project-drop-end" aria-hidden />}
         {rows.length === 0 && <li className="session-empty">No projects open</li>}
       </ul>
       {formFor && formNode && renderCreateForm(formNode)}

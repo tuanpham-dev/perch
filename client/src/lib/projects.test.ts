@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project, RepoInfo, TerminalSession, WorktreeInfo } from "../types";
 import {
+  applyProjectOrder,
   bumpRecent,
+  orderMap,
   isLinkedWorktreePath,
   projectName,
   projectTree,
@@ -360,5 +362,34 @@ describe("projectTree", () => {
     expect(nodes[0].key).toBe("~/works/app");
     expect(nodes[0].sessions).toEqual([stray]);
     expect(nodes[0].worktrees.every((w) => w.sessions.length === 0)).toBe(true);
+  });
+});
+
+describe("applyProjectOrder", () => {
+  const n = (cwd: string | null) => ({ cwd });
+
+  it("leaves the list alone when nothing was placed", () => {
+    const nodes = [n("/a"), n("/b")];
+    expect(applyProjectOrder(nodes, new Map())).toBe(nodes);
+  });
+
+  it("puts placed projects first, in their placed order", () => {
+    const out = applyProjectOrder([n("/a"), n("/b"), n("/c")], new Map([["/c", 0], ["/a", 1]]));
+    expect(out.map((x) => x.cwd)).toEqual(["/c", "/a", "/b"]);
+  });
+
+  it("keeps unplaced and pathless projects in session order after the placed ones", () => {
+    const out = applyProjectOrder([n(null), n("/x"), n("/y"), n("/z")], new Map([["/z", 0]]));
+    expect(out.map((x) => x.cwd)).toEqual(["/z", null, "/x", "/y"]);
+  });
+});
+
+describe("orderMap", () => {
+  it("reads the placed positions and skips the rest", () => {
+    const m = orderMap([
+      { cwd: "/a", pinned: false, lastOpened: 0, order: 2 },
+      { cwd: "/b", pinned: false, lastOpened: 0 },
+    ]);
+    expect([...m]).toEqual([["/a", 2]]);
   });
 });

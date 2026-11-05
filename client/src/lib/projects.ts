@@ -110,6 +110,29 @@ export function avatarMap(projects: Project[]): Map<string, ProjectAvatar> {
   return new Map(projects.flatMap((p) => (p.avatar ? [[p.cwd, p.avatar] as const] : [])));
 }
 
+// cwd → the position the user dragged that project to.
+export function orderMap(projects: Project[]): Map<string, number> {
+  return new Map(projects.flatMap((p) => (p.order !== undefined ? [[p.cwd, p.order] as const] : [])));
+}
+
+// Puts projects the user has placed first, in the order they placed them; the
+// rest keep their session order after them, so a project opened later shows
+// up at the bottom rather than jumping into the middle. Stable, and a no-op
+// when nothing was ever placed.
+export function applyProjectOrder<T extends { cwd: string | null }>(nodes: T[], order: Map<string, number>): T[] {
+  if (order.size === 0) return nodes;
+  const rank = (n: T) => (n.cwd !== null ? (order.get(n.cwd) ?? Infinity) : Infinity);
+  return nodes
+    .map((n, i) => ({ n, i }))
+    .sort((a, b) => {
+      const ra = rank(a.n);
+      const rb = rank(b.n);
+      if (ra === rb) return a.i - b.i;
+      return ra < rb ? -1 : 1;
+    })
+    .map((x) => x.n);
+}
+
 // Palette for the "pick a colour" avatar and the automatic letter tile.
 export const AVATAR_COLORS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#8b5cf6", "#64748b"];
 
@@ -128,7 +151,7 @@ const RECENTS_CAP = 15;
 export function bumpRecent(projects: Project[], cwd: string): Project[] {
   const existing = projects.find((p) => p.cwd === cwd);
   const next: Project[] = [
-    { cwd, pinned: existing?.pinned ?? false, lastOpened: Date.now(), ...(existing?.avatar ? { avatar: existing.avatar } : {}) },
+    { cwd, pinned: existing?.pinned ?? false, lastOpened: Date.now(), ...(existing?.avatar ? { avatar: existing.avatar } : {}), ...(existing?.order !== undefined ? { order: existing.order } : {}) },
     ...projects.filter((p) => p.cwd !== cwd),
   ];
   let unpinned = 0;

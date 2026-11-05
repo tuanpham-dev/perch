@@ -55,6 +55,9 @@ export interface Project {
   pinned: boolean;
   lastOpened: number;
   avatar?: ProjectAvatar;
+  // Where the user dragged this project to in the PROJECTS list (0 = first).
+  // Absent = never placed: it follows the placed ones in session order.
+  order?: number;
 }
 
 export interface Tab {

@@ -89,6 +89,7 @@ import type { MenuItem, MenuState, OpenTargetPayload, RegistrySourceResult, Tab,
 import { groupKeyForTab, isRealTab } from "./lib/tabs";
 import {
   avatarMap,
+  orderMap,
   bumpRecent,
   isLinkedWorktreePath,
   projectName,
@@ -1714,6 +1715,7 @@ export default function App() {
   }, [floating, sessions, projectLabelForSession]);
 
   const {
+    reorderProjects,
     closeProject,
     killSessionNow,
     createWindow,
@@ -2984,6 +2986,7 @@ export default function App() {
   ]);
 
   const avatars = useMemo(() => avatarMap(projects), [projects]);
+  const projectOrder = useMemo(() => orderMap(projects), [projects]);
   const projectListProps = useMemo(
     () => ({
       sessions,
@@ -2993,6 +2996,8 @@ export default function App() {
           ? { sessionName: activeRealTab.sessionName, index: activeRealTab.windowIndex }
           : null,
       avatars,
+      projectOrder,
+      onReorderProjects: reorderProjects,
       onOpenAllWindows: openAllWindows,
       onOpenWindow: openWindowTab,
       onKillWindow: killWindow,
@@ -3021,6 +3026,8 @@ export default function App() {
     [
       sessions,
       avatars,
+      projectOrder,
+      reorderProjects,
       activeRealTab,
       activeSessionName,
       openAllWindows,
