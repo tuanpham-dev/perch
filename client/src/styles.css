@@ -1220,6 +1220,21 @@ body.resizing-row {
   font-weight: 600;
 }
 
+/* The mark before a terminal row's name: the agent's own icon (Claude's
+   orange, Codex's blue) or the plain terminal glyph. */
+.window-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+  line-height: 14px;
+  opacity: 0.85;
+}
+img.window-icon.agent {
+  object-fit: contain;
+  opacity: 1;
+}
+
 .window-label {
   white-space: nowrap;
 }
@@ -2993,6 +3008,12 @@ body.scrollbar-dragging {
   justify-content: center;
   width: 16px;
   flex-shrink: 0;
+}
+
+.context-menu-item-image {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
 }
 
 .context-menu-item.disabled {

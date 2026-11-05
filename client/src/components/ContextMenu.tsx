@@ -58,7 +58,7 @@ function MenuList({ items, resolvedBindings, onClose, x, y, parentRect }: ListPr
     return key ? formatBinding(key) : undefined;
   };
 
-  const hasChecks = items.some((item) => item.checked !== undefined || item.icon !== undefined);
+  const hasChecks = items.some((item) => item.checked !== undefined || item.icon !== undefined || item.iconUrl !== undefined);
 
   const openSubmenuFor = (index: number, el: HTMLElement) => {
     setOpenSub({ index, rect: el.getBoundingClientRect() });
@@ -133,7 +133,13 @@ function MenuList({ items, resolvedBindings, onClose, x, y, parentRect }: ListPr
           >
             {hasChecks && (
               <span className="context-menu-item-check">
-                {item.checked ? <Icon name="check" /> : item.icon ? <Icon name={item.icon} /> : null}
+                {item.checked ? (
+                  <Icon name="check" />
+                ) : item.iconUrl ? (
+                  <img className="context-menu-item-image" src={item.iconUrl} alt="" draggable={false} />
+                ) : item.icon ? (
+                  <Icon name={item.icon} />
+                ) : null}
               </span>
             )}
             <span className="context-menu-item-label">{item.label}</span>

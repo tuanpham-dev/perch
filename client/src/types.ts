@@ -183,6 +183,9 @@ export interface MenuItem {
   // `checked` — used by the chip dropdown's "New Window" item. `checked`
   // wins if both are set.
   icon?: string;
+  // An image in the same gutter, for a mark that has no codicon (an agent's own
+  // logo). Wins over `icon`; `checked` still wins over both.
+  iconUrl?: string;
   // Right-aligned icon button giving the row a secondary action — e.g. the
   // recent-projects dropdown's per-entry "Remove from Recent". Clicking it
   // runs its own onClick without triggering the row's; Delete on the

@@ -2138,6 +2138,7 @@ export default function App() {
         ...worktreeAgents.map((agent) => ({
           label: agent.name,
           icon: agent.icon ?? "sparkle",
+          iconUrl: agent.iconUrl,
           onClick: () => createWindow(primary?.name ?? chipKey, undefined, agent.command),
         })),
         { label: "New Grid", icon: "layout", onClick: () => void newGrid(editorGroupId, chipKey) },

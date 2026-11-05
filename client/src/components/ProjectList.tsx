@@ -20,6 +20,7 @@ import { bindingMatches, recorderState, serializeEvent, type Keybinding } from "
 import { autoAvatarColor, projectTree, sessionNameForBranch, type ProjectNode, type WorktreeNode } from "../lib/projects";
 import { downloadUrl, fetchProjectIcon } from "../api";
 import type { MenuItem, Project, ProjectAvatar, RepoInfo, TerminalSession, TerminalWindow, WorktreeBranch } from "../types";
+import { useWindowAgents, windowAgentKey, type WindowAgent } from "../lib/windowAgents";
 import Icon from "./Icon";
 
 export interface ProjectListHandle {
@@ -81,7 +82,7 @@ export interface ProjectListProps {
   // The agents offered by the New Worktree form's picker, from the one
   // registry (see App.tsx). Each `command` already carries the app's
   // Yolo/Manual choice, so the form launches it as given and asks nothing.
-  worktreeAgents: { name: string; command: string; icon?: string }[];
+  worktreeAgents: { name: string; command: string; icon?: string; iconUrl?: string }[];
   // Settings → AI Providers' Yolo/Manual choice, as the checkbox's starting
   // position. The form can override it for one launch.
   onShowMenu: (x: number, y: number, items: MenuItem[]) => void;
@@ -160,6 +161,14 @@ const moreRowId = (node: ProjectNode) => `more:${node.key}`;
 // repository without an icon costs one lookup, not one per render.
 const repoIconCache = new Map<string, string | null>();
 const repoIconPending = new Map<string, Promise<void>>();
+
+// A terminal row's mark: the agent's own icon when a code agent runs in the
+// window, the plain terminal glyph otherwise.
+function WindowIcon({ agent }: { agent: WindowAgent | undefined }) {
+  if (!agent) return <Icon name="terminal" className="window-icon" />;
+  if (agent.iconUrl) return <img className="window-icon agent" src={agent.iconUrl} alt="" title={agent.label} draggable={false} />;
+  return <Icon name={agent.icon || "robot"} className="window-icon" />;
+}
 
 function ProjectAvatarView({ node, attached }: { node: ProjectNode; attached: boolean }) {
   const letter = [...node.label][0]?.toUpperCase() ?? "?";
@@ -249,6 +258,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
   },
   ref,
 ) {
+  const windowAgents = useWindowAgents();
   // Ephemeral, and shared by both collapsible kinds — project rows and
   // worktree rows are both just ids in here.
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
@@ -600,6 +610,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
           ...worktreeAgents.map((agent) => ({
             label: agent.name,
             icon: agent.icon ?? "sparkle",
+            iconUrl: agent.iconUrl,
             onClick: () => start(agent.command),
           })),
         ];
@@ -1091,6 +1102,7 @@ const ProjectList = forwardRef<ProjectListHandle, ProjectListProps>(function Pro
         onFocus={rowProps.onFocus}
       >
         {w.activity && <span className="activity-dot" />}
+        <WindowIcon agent={windowAgents.get(windowAgentKey(s.name, w.index))} />
         <span className="window-label">{w.name}</span>
         <span className="item-cwd">{rootOf(w.cwd)}</span>
         {getWindowDecorations(ctx).map(({ provider, decoration }) => (

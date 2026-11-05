@@ -188,6 +188,26 @@ export async function agentsForSession(session: string): Promise<AgentWindow[]> 
   return resolveAgentWindows(windows, agents, map);
 }
 
+// Every agent window of every session, for a list that marks them all (the
+// sidebar's terminal rows): one call, one process map, instead of one request
+// per session.
+export async function agentsForAllSessions(): Promise<(AgentWindow & { session: string })[]> {
+  const sessions = await listSessions();
+  if (sessions.length === 0) return [];
+  const [agents, map] = await Promise.all([enabledAgents(), processMap()]);
+  const out: (AgentWindow & { session: string })[] = [];
+  for (const s of sessions) {
+    let windows: WindowFacts[];
+    try {
+      windows = await windowFacts(s.name);
+    } catch {
+      continue;
+    }
+    for (const w of resolveAgentWindows(windows, agents, map)) out.push({ ...w, session: s.name });
+  }
+  return out;
+}
+
 export async function agentForWindow(session: string, windowIndex: number): Promise<AgentWindow | null> {
   const windows = await agentsForSession(session);
   return windows.find((w) => w.windowIndex === windowIndex) ?? null;

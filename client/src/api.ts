@@ -163,6 +163,10 @@ export interface AgentWindowDto {
   matchedBy: "foreground" | "descendant";
 }
 
+export function fetchAllAgentWindows(): Promise<{ windows: (AgentWindowDto & { session: string })[] }> {
+  return request("/api/agents/windows/all");
+}
+
 export function fetchAgentWindows(session: string, windowIndex?: number): Promise<{ windows: AgentWindowDto[] }> {
   const window = windowIndex === undefined ? "" : `&window=${windowIndex}`;
   return request(`/api/agents/windows?session=${encodeURIComponent(session)}${window}`);
@@ -303,11 +307,13 @@ export interface AgentLaunchOption {
   command: string;
   // A codicon for menus that list the agents.
   icon?: string;
+  // The agent's own image (Claude's mark, Codex's), preferred over `icon`.
+  iconUrl?: string;
 }
 
 export async function fetchAgentLaunchOptions(): Promise<AgentLaunchOption[]> {
   const body = await request<{
-    agents?: { label?: string; command?: string; skipPermissionsArgs?: string; icon?: string }[];
+    agents?: { label?: string; command?: string; skipPermissionsArgs?: string; icon?: string; iconUrl?: string }[];
     skipPermissions?: boolean;
   }>("/api/agents");
   const skip = body.skipPermissions === true;
@@ -320,6 +326,7 @@ export async function fetchAgentLaunchOptions(): Promise<AgentLaunchOption[]> {
         name: a.label || command,
         command: skip && args ? `${command} ${args}` : command,
         icon: a.icon,
+        ...(a.iconUrl ? { iconUrl: a.iconUrl } : {}),
       };
     });
 }

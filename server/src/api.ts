@@ -26,7 +26,7 @@ import {
 import { agentSessionMessages, listAgentSessions } from "./agentSessions.js";
 import { findProjectIcon } from "./projectIcon.js";
 import { listNever, openProjectSetup, readProjectSetup, saveProjectSetup, setNever } from "./projectSetup.js";
-import { agentsForSession } from "./agentWindows.js";
+import { agentsForAllSessions, agentsForSession } from "./agentWindows.js";
 import { reportAgentHook, subscribedEvents, subscriberSummary } from "./agentHooks.js";
 import {
   ConflictError,
@@ -427,6 +427,14 @@ api.get("/agent-sessions/messages", async (req, res) => {
   }
   try {
     res.json({ messages: await agentSessionMessages(agent, id, cwd, Number.isFinite(limit) ? limit : 50) });
+  } catch (err) {
+    res.status(500).json({ error: errMessage(err) });
+  }
+});
+
+api.get("/agents/windows/all", async (_req, res) => {
+  try {
+    res.json({ windows: await agentsForAllSessions() });
   } catch (err) {
     res.status(500).json({ error: errMessage(err) });
   }
