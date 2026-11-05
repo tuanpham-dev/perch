@@ -95,6 +95,35 @@ interface DirState {
   error: string | null;
 }
 
+// What the tree had open and loaded, per root folder. Held outside the
+// component so it survives the panel unmounting (switching sidebar tabs) and
+// the root changing under it (switching terminal tabs): coming back restores
+// the same open folders instantly from the cache, then a background refetch
+// brings them up to date. Bounded so a long session over many projects
+// doesn't hold every listing it ever saw.
+interface SavedTree {
+  expanded: Set<string>;
+  dirCache: Map<string, DirState>;
+}
+const savedTrees = new Map<string, SavedTree>();
+const SAVED_TREES_CAP = 12;
+
+function saveTree(root: string | null, tree: SavedTree): void {
+  if (!root) return;
+  savedTrees.delete(root);
+  savedTrees.set(root, tree);
+  if (savedTrees.size > SAVED_TREES_CAP) savedTrees.delete(savedTrees.keys().next().value as string);
+}
+
+function loadTree(root: string | null): SavedTree {
+  const saved = root ? savedTrees.get(root) : undefined;
+  if (!saved) return { expanded: new Set(), dirCache: new Map() };
+  // A listing saved mid-fetch must not come back stuck on "loading".
+  const dirCache = new Map<string, DirState>();
+  for (const [k, v] of saved.dirCache) dirCache.set(k, v.loading ? { ...v, loading: false } : v);
+  return { expanded: new Set(saved.expanded), dirCache };
+}
+
 // Same-length, same-order, same-fields comparison — the two responses being
 // compared always come from the same "/api/fs" listing (server sorts
 // deterministically), so this never needs to tolerate reordering.
@@ -244,8 +273,13 @@ export default function FileTree({
   useExtensionRegistryVersion();
   // Touch/pen long-press → the same context menu right-click opens.
   const bindMenu = useLongPressMenu();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [dirCache, setDirCache] = useState<Map<string, DirState>>(new Map());
+  const [initialTree] = useState(() => loadTree(rootDir));
+  const [expanded, setExpanded] = useState<Set<string>>(initialTree.expanded);
+  const [dirCache, setDirCache] = useState<Map<string, DirState>>(initialTree.dirCache);
+  // The root the expanded/dirCache state currently describes. Lags rootDir by
+  // one render when the root changes, which is what lets the effects below
+  // save the old root's tree under the old root.
+  const treeRootRef = useRef(rootDir);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   // Rows currently being dragged out of the tree — dims them for the duration
   // of the drag. The ref is the source of truth during the drag itself (the
@@ -278,6 +312,7 @@ export default function FileTree({
   // sees the live set without being rebuilt on every expand/collapse.
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
+  const dirCacheRef = useRef(dirCache);
   // Tracks the last prunePath object already applied, so an unrelated
   // refreshKey bump (a mutation action — see the effect below) doesn't
   // re-run the prune scan twice for the same prune.
@@ -313,9 +348,9 @@ export default function FileTree({
   // listing for the result tree.
   const searching = trimmedQuery.length > 0;
 
-  const fetchDir = useCallback((dirPath: string, opts?: { background?: boolean }) => {
+  const fetchDir = useCallback((dirPath: string, opts?: { background?: boolean }): Promise<void> => {
     const background = opts?.background ?? false;
-    if (background && inFlightDirsRef.current.has(dirPath)) return;
+    if (background && inFlightDirsRef.current.has(dirPath)) return Promise.resolve();
     inFlightDirsRef.current.add(dirPath);
     if (!background) {
       setDirCache((prev) => {
@@ -324,7 +359,7 @@ export default function FileTree({
         return next;
       });
     }
-    api
+    return api
       .listDir(dirPath)
       .then((listing) => {
         inFlightDirsRef.current.delete(dirPath);
@@ -349,19 +384,47 @@ export default function FileTree({
       });
   }, []);
 
-  // New root: forget prior expansion/cache/selection and load the root
-  // listing fresh.
+  // Keeps the saved copy current, and flushes it when the panel unmounts.
+  // Declared before the root-change effect on purpose: in the commit where
+  // rootDir changes, the state here still describes the old root
+  // (treeRootRef hasn't moved yet), so this skips and the next effect saves
+  // the old tree under the old root itself.
+  dirCacheRef.current = dirCache;
   useEffect(() => {
-    setExpanded(new Set());
-    setDirCache(new Map());
+    if (treeRootRef.current === rootDir) saveTree(rootDir, { expanded, dirCache });
+  }, [rootDir, expanded, dirCache]);
+  useEffect(
+    () => () => saveTree(treeRootRef.current, { expanded: expandedRef.current, dirCache: dirCacheRef.current }),
+    [],
+  );
+
+  // New root: restore what was open there before (or start shut), clear the
+  // selection, and refresh the listings.
+  useEffect(() => {
+    // On mount the state was already loaded for this root.
+    let live = expandedRef.current;
+    if (treeRootRef.current !== rootDir) {
+      saveTree(treeRootRef.current, { expanded: expandedRef.current, dirCache: dirCacheRef.current });
+      const next = loadTree(rootDir);
+      treeRootRef.current = rootDir;
+      live = next.expanded;
+      setExpanded(next.expanded);
+      setDirCache(next.dirCache);
+    }
     setFocusedPath(null);
     setSelectedPaths(new Set());
     setAnchorPath(null);
     // Results were relative to the old root — a stale query would list paths
     // that no longer exist. The box itself stays open, ready to retype into.
     setQuery("");
-    if (rootDir) fetchDir(rootDir);
+    if (rootDir) {
+      // Foreground for the root (a first visit has nothing to show yet);
+      // background for restored folders, which already display their cache.
+      fetchDir(rootDir, { background: dirCacheRef.current.has(rootDir) || savedTrees.get(rootDir)?.dirCache.has(rootDir) });
+      for (const dirPath of live) fetchDir(dirPath, { background: true });
+    }
   }, [rootDir, fetchDir]);
+
 
   // Searched server-side per keystroke (debounced), like the quick switcher:
   // the server fuzzy-ranks and returns only the top matches, so a large repo
@@ -443,11 +506,26 @@ export default function FileTree({
   // stays mount-stable (registered once) while always seeing their current
   // values; background: true skips the loading flicker and keeps unchanged
   // responses from touching dirCache's identity (see fetchDir).
+  // One folder at a time, and not at all while the page is hidden or the
+  // previous round is still running. Firing the root plus every open folder
+  // at once each tick filled the browser's few connections per host, so a
+  // click that expanded a folder queued behind them and felt slow.
+  const bgRefreshingRef = useRef(false);
   const refetchVisibleBackground = useCallback(() => {
     const dir = rootDirRef.current;
-    if (!dir) return;
-    fetchDir(dir, { background: true });
-    for (const dirPath of expandedRef.current) fetchDir(dirPath, { background: true });
+    if (!dir || bgRefreshingRef.current || document.hidden) return;
+    bgRefreshingRef.current = true;
+    void (async () => {
+      try {
+        await fetchDir(dir, { background: true });
+        for (const dirPath of [...expandedRef.current]) {
+          if (rootDirRef.current !== dir) break;
+          await fetchDir(dirPath, { background: true });
+        }
+      } finally {
+        bgRefreshingRef.current = false;
+      }
+    })();
   }, [fetchDir]);
 
   useEffect(() => subscribePollTick(refetchVisibleBackground), [refetchVisibleBackground]);
