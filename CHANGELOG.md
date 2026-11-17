@@ -3,6 +3,10 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.11.1 - 2026-11-17
+
+- Sign and notarize the macOS desktop app in CI with the Developer ID certificate, signing the bundled Node, node-pty, fsevents and esbuild binaries too, so Gatekeeper opens downloaded builds without warnings
+
 ## 0.11.0 - 2026-11-05
 
 - Reload the image, PDF, markdown, JSON and CSV previews by themselves when their file changes on disk, keeping a CSV's unsaved edits behind a prompt
