@@ -58,6 +58,23 @@ Compatibility minimums change only when a change breaks the other side: `MIN_DES
 
 The desktop app installs only updates signed with the project's update key (minisign, made with `npx tauri signer generate`). Its public half is `plugins.updater.pubkey` in `tauri.conf.json`. The private key and its password are the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, which the workflow uses. The maintainer's backup copy is in `.backups/` at the repo root (`perch-updater.key`, `.key.password` and `.key.pub`), which git ignores; keep another copy somewhere safe off the machine. Without the private key, a release can't be signed, so installed apps can't update themselves. A new key would need every user to install one release by hand.
 
+### Signing and notarizing the macOS app
+
+The macOS builds are signed with the maintainer's Developer ID Application certificate and notarized by Apple, so Gatekeeper opens them without warnings. The workflow's "macOS signing" step needs these repository secrets. Without `APPLE_CERTIFICATE` it skips signing, and the app stays ad-hoc signed (`"signingIdentity": "-"` in `tauri.conf.json`, which local builds keep).
+
+| Secret | Value |
+|---|---|
+| `APPLE_CERTIFICATE` | the Developer ID Application certificate and its private key, exported from Keychain Access as a `.p12`, base64-encoded (`base64 -i DeveloperID.p12`) |
+| `APPLE_CERTIFICATE_PASSWORD` | the `.p12` password |
+| `APPLE_SIGNING_IDENTITY` | the identity's name, e.g. `Developer ID Application: Name (TEAMID)` |
+| `APPLE_API_KEY` | an App Store Connect API key's ID (Users and Access > Integrations), used to notarize |
+| `APPLE_API_ISSUER` | that key's issuer ID |
+| `APPLE_API_KEY_P8` | the contents of that key's `AuthKey_<id>.p8` |
+
+Tauri signs the app's own binary but not the staged server, so the step first runs `desktop/scripts/sign-resources.sh`, which signs every Mach-O file under `src-tauri/resources/perch` (Node, node-pty's `pty.node` and `spawn-helper`, fsevents, esbuild) with hardened runtime. Node gets `src-tauri/node.entitlements` (JIT, and loading native modules), without which V8 crashes at launch under the hardened runtime. A new native dependency is picked up automatically. To sign a local build, run the script after `npm run stage` with `APPLE_SIGNING_IDENTITY` set, then `npx tauri build --config '{"bundle":{"macOS":{"signingIdentity":"<identity>"}}}'`, with `APPLE_API_KEY`, `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH` set to notarize too. Check a built app with `spctl -a -vvv -t install Perch.app`, which should say `source=Notarized Developer ID`.
+
+The current certificate expires on 2027-12-17; replace it and the `APPLE_CERTIFICATE` secrets before then. Its private key exists only in the maintainer's keychain and the secret, so keep the `.p12` backed up with the update key.
+
 ### Testing the app's updater
 
 To try a self-update without publishing a release, make a throwaway key and build two versions with its public half, the newer one with update files:
