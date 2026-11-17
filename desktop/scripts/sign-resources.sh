@@ -16,7 +16,17 @@ root="$here/../src-tauri/resources/perch"
 entitlements="$here/../src-tauri/node.entitlements"
 [ -d "$root" ] || { echo "sign-resources: no staged server at $root (run npm run stage first)" >&2; exit 1; }
 
-sign() { codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$@"; }
+# Apple's timestamp server now and then doesn't answer ("A timestamp was
+# expected but was not found"), so each file gets a few tries.
+sign() {
+  local try
+  for try in 1 2 3 4; do
+    codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$@" && return 0
+    [ "$try" = 4 ] && return 1
+    echo "sign-resources: retrying in $((try * 5))s" >&2
+    sleep $((try * 5))
+  done
+}
 
 count=0
 while IFS= read -r -d '' f; do
