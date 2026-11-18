@@ -3,6 +3,16 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.11.2 - 2026-11-18
+
+- **A terminal no longer stops taking your typing until a reload.** Input
+  waits while a terminal's screen is replayed (after a tab comes back, a
+  resize, or scrolling up into history), and a replay the terminal daemon
+  couldn't answer left it waiting for good, so keystrokes went nowhere
+  while output kept coming. The daemon and server now always answer, and
+  the page sends what you typed after 5 seconds regardless. Restart the
+  terminal daemon after updating (`perch daemon stop`; sessions come back).
+
 ## 0.11.1 - 2026-11-17
 
 - Sign and notarize the macOS desktop app in CI with the Developer ID certificate, signing the bundled Node, node-pty, fsevents and esbuild binaries too, so Gatekeeper opens downloaded builds without warnings
