@@ -289,26 +289,20 @@ export class DaemonServer {
         });
         return { session: session.name, index, name: window.displayName(), windowId: window.id };
       }
-      case 'history.full': {
-        if (!conn.attachedSession) return {};
-        const session = this.store.sessions.get(conn.attachedSession);
-        if (!session || session.windows.length === 0) return {};
-        const window = conn.pinnedWindowId
-          ? session.windows.find((w) => w.id === conn.pinnedWindowId)
-          : this.store.currentWindow(session);
+      case 'history.full':
+      case 'window.refresh': {
+        const session = conn.attachedSession ? this.store.sessions.get(conn.attachedSession) : undefined;
+        const window = !session
+          ? undefined
+          : conn.pinnedWindowId
+            ? session.windows.find((w) => w.id === conn.pinnedWindowId)
+            : this.store.currentWindow(session);
         // Written in one go, so no live output lands inside it; the reset at
         // its start clears the tail it replaces.
-        if (window && !window.exited) this.#sendRefresh(conn, window, true);
-        return {};
-      }
-      case 'window.refresh': {
-        if (!conn.attachedSession) return {};
-        const session = this.store.sessions.get(conn.attachedSession);
-        if (!session || session.windows.length === 0) return {};
-        const window = conn.pinnedWindowId
-          ? session.windows.find((w) => w.id === conn.pinnedWindowId)
-          : this.store.currentWindow(session);
-        if (window && !window.exited) this.#sendRefresh(conn, window, req.full === true);
+        if (window && !window.exited) this.#sendRefresh(conn, window, req.kind === 'history.full' || (req.kind === 'window.refresh' && req.full === true));
+        // The viewer holds its input until "replayed": with nothing to replay
+        // it still has to hear that, or typing goes nowhere until a reload.
+        else conn.socket.write(encodeControl({ event: 'replayed', session: conn.attachedSession ?? '' } satisfies ServerEvent));
         return {};
       }
       case 'session.detach': {

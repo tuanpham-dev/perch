@@ -542,6 +542,26 @@ export default function TerminalView({
       // they land in the shell as typed junk (and garble a resume command).
       let replayDone = false;
       const heldInput: string[] = [];
+      // A replay whose "replayed" never comes (a request the backend dropped)
+      // would hold every keystroke until a reload. Past this deadline the held
+      // input goes out anyway: it is already stripped of terminal replies.
+      const REPLAY_DEADLINE_MS = 5_000;
+      let replayDeadline: number | undefined;
+      const releaseHeldInput = () => {
+        window.clearTimeout(replayDeadline);
+        replayDeadline = undefined;
+        replayDone = true;
+        for (const data of heldInput.splice(0)) ws.send(JSON.stringify({ type: "input", data }));
+      };
+      const holdInput = () => {
+        replayDone = false;
+        window.clearTimeout(replayDeadline);
+        replayDeadline = window.setTimeout(() => {
+          if (disposed || replayDone || ws.readyState !== WebSocket.OPEN) return;
+          console.warn("[perch] no \"replayed\" from the server; releasing held input");
+          releaseHeldInput();
+        }, REPLAY_DEADLINE_MS);
+      };
       // Each attach replays only recent history (?tail=1); the "replayed"
       // frame says whether earlier history was left out. The rest is asked
       // for once, when the view scrolls up to the top, a search starts, or a
@@ -559,7 +579,7 @@ export default function TerminalView({
           historyLoading = { fromBottom: length - viewportY, afterHistory: [] };
           // The full replay can hold capability queries too: input waits for
           // it exactly as it does for the attach replay.
-          replayDone = false;
+          holdInput();
           ws.send(JSON.stringify({ type: "history" }));
         }
         if (then) historyLoading.afterHistory.push(then);
@@ -953,7 +973,7 @@ export default function TerminalView({
         if (historyLoading || !replayDone) return;
         const { viewportY, length } = engine.getScrollState();
         historyLoading = { fromBottom: length - viewportY, afterHistory: [] };
-        replayDone = false;
+        holdInput();
         // All of the history again when it was all there.
         ws.send(JSON.stringify({ type: "refresh", full: !historyPartial }));
       };
@@ -1079,7 +1099,7 @@ export default function TerminalView({
         // history can contain capability queries, and a terminal answers
         // those — answers that must not reach the shell as typed keys, and
         // real keystrokes that must not interleave with them.
-        replayDone = false;
+        holdInput();
         historyPartial = false;
         historyLoading = null;
         // Send the real grid size along so the attach starts at it (see
@@ -1143,11 +1163,13 @@ export default function TerminalView({
             const socket = ws;
             const partial = msg.partial === true;
             const release = () => {
-              if (ws !== socket || replayDone) return;
-              replayDone = true;
+              if (ws !== socket) return;
+              // Arriving after the deadline released input, it still ends the
+              // history load it answers, or later resyncs wait on it forever.
+              if (replayDone && !historyLoading) return;
               historyPartial = partial;
               historyLoaded();
-              for (const data of heldInput.splice(0)) ws.send(JSON.stringify({ type: "input", data }));
+              if (!replayDone) releaseHeldInput();
             };
             if (engine.whenWritten) engine.whenWritten(release);
             else release();
@@ -2362,6 +2384,7 @@ export default function TerminalView({
 
       cleanup = () => {
         clearTimeout(reconnectTimer);
+        clearTimeout(replayDeadline);
         clearTimeout(pongTimer);
         clearInterval(heartbeatTimer);
         document.removeEventListener("visibilitychange", onConnectivityResume);

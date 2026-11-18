@@ -143,7 +143,9 @@ export function handleAttach(ws: WebSocket, req: IncomingMessage): void {
     } else if (msg.type === "activate") {
       handle.activate();
     } else if (msg.type === "history") {
-      handle.loadFullHistory?.();
+      // Same as refresh below: an engine without it must still release input.
+      if (handle.loadFullHistory) handle.loadFullHistory();
+      else send({ type: "replayed" });
     } else if (msg.type === "refresh") {
       // An engine that can't replay says it's done at once, so the viewer
       // doesn't hold input waiting for it.

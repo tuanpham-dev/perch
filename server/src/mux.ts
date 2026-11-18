@@ -192,14 +192,16 @@ async function attach(
     write: (data) => conn.sendInput(typeof data === "string" ? Buffer.from(data, "utf8") : data),
     resize: (cols, rows) => void conn.request({ kind: "resize", cols, rows }).catch(() => {}),
     activate: () => void conn.request({ kind: "activate" }).catch(() => {}),
-    loadFullHistory: () => void conn.request({ kind: "history.full" }).catch(() => {}),
+    // A failed request still answers "replayed": the viewer holds its input
+    // until it hears one.
+    loadFullHistory: () => void conn.request({ kind: "history.full" }).catch(() => handlers.replayed()),
     // A daemon older than window.refresh refuses it: the full replay is the
     // same screen, only with all its history.
     refresh: (full) =>
       void conn
         .request({ kind: "window.refresh", full })
         .catch(() => conn.request({ kind: "history.full" }))
-        .catch(() => {}),
+        .catch(() => handlers.replayed()),
     close: () => {
       closed = true;
       conn.close();
