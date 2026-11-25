@@ -3,6 +3,10 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.11.6 - 2026-11-25
+
+- Show subagent counts again on a machine with no ~/.claude/sessions folder, which 0.11.5 turned into an error for every window
+
 ## 0.11.5 - 2026-11-25
 
 - Resume the conversation each agent window was running after a restart instead of the folder's newest one, and find which conversation a Codex process has open on macOS
