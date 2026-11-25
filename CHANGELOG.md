@@ -3,6 +3,11 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.11.5 - 2026-11-25
+
+- Resume the conversation each agent window was running after a restart instead of the folder's newest one, and find which conversation a Codex process has open on macOS
+- Show each Claude window's own subagents on macOS, where two Claude windows in one folder both showed the newest conversation's progress, by finding a window's session through its agent's pid
+
 ## 0.11.4 - 2026-11-25
 
 - Redraw a terminal by itself whenever it returns to the screen after being away a few seconds, not only when its window grid differs
