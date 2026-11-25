@@ -5,6 +5,8 @@
 // as soon as the shell's prompt has settled. Settings → Terminal → Resume
 // agents turns it off.
 import { listAgents, resumeCommand } from "./agents.js";
+import { resumeSessionCommand } from "./agentSessions.js";
+import { rememberedSession } from "./agentSessionMemory.js";
 import { getMultiplexer, type MuxWindow } from "./multiplexer.js";
 import { readSettingsDoc } from "./settingsStore.js";
 import { sendTextToWindow } from "./terminals.js";
@@ -48,7 +50,10 @@ async function pass(): Promise<boolean> {
       if (count >= MAX_PASSES) await done();
       continue;
     }
-    const line = await resumeCommand(agent.id);
+    // The conversation this window itself was running, when it's known;
+    // otherwise the agent's "continue the newest in this folder".
+    const remembered = await rememberedSession(w.id, agent.id);
+    const line = (remembered && (await resumeSessionCommand(agent.id, remembered))) || (await resumeCommand(agent.id));
     // Acknowledged before typing: a failure after this point leaves a window
     // without its agent, never one with the line typed twice.
     await done();

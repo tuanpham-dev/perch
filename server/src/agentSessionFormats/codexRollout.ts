@@ -7,6 +7,7 @@
 // the file they hold open (Linux only).
 //
 // Read-only: nothing here writes to Codex's files.
+import { execFile } from "node:child_process";
 import { open, readdir, readFile, readlink, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -170,6 +171,10 @@ export function createCodexReader(root = path.join(homedir(), ".codex", "session
     },
 
     async sessionForProcess(pid) {
+      if (process.platform === "darwin") {
+        const target = (await openFilesOf(pid)).find((f) => f.startsWith(root) && f.endsWith(".jsonl"));
+        return target ? ((await parsed(target, false))?.parsed.meta?.id ?? null) : null;
+      }
       if (process.platform !== "linux") return null;
       let fds: string[];
       try {
@@ -191,4 +196,20 @@ export function createCodexReader(root = path.join(homedir(), ".codex", "session
       return null;
     },
   };
+}
+
+// The files a process has open, from lsof (macOS has no /proc). Empty when
+// lsof is missing, the process is gone, or it isn't ours to look at.
+export function openFilesOf(pid: number): Promise<string[]> {
+  if (!Number.isInteger(pid) || pid <= 0) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    execFile("lsof", ["-n", "-P", "-a", "-p", String(pid), "-Fn"], { encoding: "utf8", timeout: 2_000, maxBuffer: 4 * 1024 * 1024 }, (_err, stdout) => {
+      resolve(
+        String(stdout ?? "")
+          .split("\n")
+          .filter((l) => l.startsWith("n/"))
+          .map((l) => l.slice(1)),
+      );
+    });
+  });
 }

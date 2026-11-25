@@ -15,6 +15,7 @@ import { agentHookBodyParser, ensureAgentHookShim } from "./agentHooks.js";
 import { draftsRouter, startDraftPruning } from "./drafts.js";
 import { createExtensionStorageRouter } from "./extensionStorageRoutes.js";
 import { resumeRestoredAgents } from "./agentResume.js";
+import { startAgentSessionMemory } from "./agentSessionMemory.js";
 import { applyTerminalSettings } from "./terminalSettings.js";
 import { api } from "./api.js";
 import { paintIndexHtml, paintManifest, readThemePaint } from "./themePaint.js";
@@ -468,6 +469,7 @@ selectEngine(typeof backend === "string" ? backend : DAEMON_ENGINE_ID, {
 startDaemonLink(PORT, () => whenEngineReady().then(() => activeEngineId() === DAEMON_ENGINE_ID));
 applyTerminalSettings().catch((err) => console.error("failed to apply terminal settings:", err));
 resumeRestoredAgents();
+startAgentSessionMemory();
 startUpdateChecks();
 getMultiplexer().onEvent((event) => {
   if (event.event === "sessions-changed") resumeRestoredAgents();

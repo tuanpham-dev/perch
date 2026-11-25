@@ -230,3 +230,18 @@ export async function resumeSessionCommand(agentId: string, id: string): Promise
   if (!agent?.resumeSession) return null;
   return withPermissions(agent, agent.resumeSession.replaceAll("{id}", id));
 }
+
+// The conversation an agent window is running right now, read from the
+// agent's own process. Null when the agent's reader can't place it.
+export async function sessionIdForAgentWindow(w: AgentWindow): Promise<string | null> {
+  if (w.agentPid === null) return null;
+  const agent = (await enabledAgents()).find((a) => a.id === w.agentId);
+  const reader = agent ? readerFor(agent) : null;
+  if (!reader?.sessionForProcess) return null;
+  try {
+    const id = await withTimeout(reader.sessionForProcess(w.agentPid), "sessionForProcess");
+    return isSafeSessionId(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
