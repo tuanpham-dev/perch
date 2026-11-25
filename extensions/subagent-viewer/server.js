@@ -13,7 +13,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { claudeSessionsByWindow } from "./claudePanes.mjs";
+import { claudeSessions } from "./claudePanes.mjs";
 
 const CLAUDE_PROJECTS_DIR = path.join(homedir(), ".claude", "projects");
 
@@ -146,6 +146,7 @@ async function readMeta(metaPath) {
 
 // Set by activate(): the host's terminal sessions.
 let sessionsApi = null;
+let agentsApi = null;
 
 // "session:index" -> the window ids at that address (one per window).
 async function panesByWindow() {
@@ -162,13 +163,25 @@ async function panesByWindow() {
 }
 
 // { projectDir, sessionId } for a window, or null when it has no session.
-async function resolveWindowSession(win, panes, sessions) {
+async function resolveWindowSession(win, panes, { byWindow, byPid }) {
   for (const windowId of panes.get(`${win.sessionName}:${win.windowIndex}`) ?? []) {
-    const session = sessions.get(windowId);
+    const session = byWindow.get(windowId);
     if (session) {
       const cwd = session.cwd ?? expandHome(win.cwd);
       return { projectDir: await projectDirFor(cwd), sessionId: session.sessionId };
     }
+  }
+  // No /proc to read a window off a CLI's environment (macOS): core knows the
+  // window's agent process, and that pid names the CLI's own session file.
+  try {
+    const agentPid = (await agentsApi?.forWindow?.(win.sessionName, win.windowIndex))?.agentPid;
+    const session = typeof agentPid === "number" ? byPid.get(agentPid) : undefined;
+    if (session) {
+      const cwd = session.cwd ?? expandHome(win.cwd);
+      return { projectDir: await projectDirFor(cwd), sessionId: session.sessionId };
+    }
+  } catch {
+    // Fall through to the newest-transcript guess.
   }
   const projectDir = await projectDirFor(expandHome(win.cwd));
   const sessionId = await mostRecentSessionIdCached(projectDir);
@@ -210,7 +223,7 @@ const countsCache = new Map(); // sessionId -> { at, value }
 // `counts` the running subagents, `recent` the recently finished ones.
 // Windows with neither are omitted.
 export async function getCounts(windows) {
-  const [panes, sessions] = await Promise.all([panesByWindow(), claudeSessionsByWindow()]);
+  const [panes, sessions] = await Promise.all([panesByWindow(), claudeSessions()]);
   const counts = {};
   const recent = {};
   const now = Date.now();
@@ -321,7 +334,7 @@ async function readAgentSummary(file) {
 // transcript, unlike the cheap getCounts above. Only called while the
 // popover is open, not on every counts poll.
 export async function getSubagentDetails(win) {
-  const [panes, sessions] = await Promise.all([panesByWindow(), claudeSessionsByWindow()]);
+  const [panes, sessions] = await Promise.all([panesByWindow(), claudeSessions()]);
   const resolved = await resolveWindowSession(win, panes, sessions);
   if (!resolved) return [];
   const files = await listSubagentFiles(resolved.projectDir, resolved.sessionId);
@@ -345,6 +358,7 @@ function readWindow(value) {
 
 export function activate({ router, host }) {
   sessionsApi = host?.sessions ?? null;
+  agentsApi = host?.agents ?? null;
   router.post("/counts", async (req, res) => {
     const windows = Array.isArray(req.body?.windows) ? req.body.windows.map(readWindow).filter(Boolean) : [];
     try {

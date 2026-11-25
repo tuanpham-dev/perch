@@ -43,3 +43,11 @@ test("without a readable environment, a record's tmux field names its window", (
   const map = sessionsByWindow([{ ...rec(100, "a"), tmux: "perch-view:@0.%7" }], isAlive, new Map());
   assert.equal(map.get("tmux-7").sessionId, "a");
 });
+
+test("sessionsByPid maps each live CLI to its own session", async () => {
+  const { sessionsByPid } = await import("./claudePanes.mjs");
+  const map = sessionsByPid([rec(100, "a"), rec(200, "b"), rec(999, "dead")], isAlive);
+  assert.equal(map.get(100).sessionId, "a");
+  assert.equal(map.get(200).sessionId, "b");
+  assert.equal(map.has(999), false);
+});
