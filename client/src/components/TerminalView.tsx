@@ -1095,15 +1095,12 @@ export default function TerminalView({
         refitRef.current?.();
         scrollQueryRef.current?.();
         if (resyncOnReveal && resyncTimer === undefined) resyncTimer = window.setTimeout(resync, RESYNC_SETTLE_MS);
-        // Coming back after a while to a window another viewer sized (a
-        // different grid than this view would fit) is when output goes bad;
-        // repaint it as the Redraw button does, without being asked.
+        // Coming back after a while is when output goes bad (a window another
+        // viewer sized, a grid that changed while hidden); repaint it as the
+        // Redraw button does, without being asked.
         const awayFor = awaySinceRef.current === null ? 0 : Date.now() - awaySinceRef.current;
         awaySinceRef.current = null;
-        if (awayFor >= AUTO_REDRAW_AWAY_MS && windowGrid) {
-          const m = engine.measure?.();
-          if (m && (m.cols !== windowGrid.cols || m.rows !== windowGrid.rows)) redrawRef.current?.();
-        }
+        if (awayFor >= AUTO_REDRAW_AWAY_MS) redrawRef.current?.();
       };
 
       // Keys that move within the scrollback, so they must NOT snap it away:
