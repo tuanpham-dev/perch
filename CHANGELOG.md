@@ -3,6 +3,10 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.11.4 - 2026-11-25
+
+- Redraw a terminal by itself whenever it returns to the screen after being away a few seconds, not only when its window grid differs
+
 ## 0.11.3 - 2026-11-25
 
 - Add a Redraw button and context-menu item that repaints a garbled terminal by nudging its size, and redraw it by itself when it returns to the screen after another viewer sized the window
