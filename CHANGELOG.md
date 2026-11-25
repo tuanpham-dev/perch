@@ -3,6 +3,10 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.11.3 - 2026-11-25
+
+- Add a Redraw button and context-menu item that repaints a garbled terminal by nudging its size, and redraw it by itself when it returns to the screen after another viewer sized the window
+
 ## 0.11.2 - 2026-11-18
 
 - **A terminal no longer stops taking your typing until a reload.** Input
