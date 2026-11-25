@@ -51,3 +51,9 @@ test("sessionsByPid maps each live CLI to its own session", async () => {
   assert.equal(map.get(200).sessionId, "b");
   assert.equal(map.has(999), false);
 });
+
+test("a missing sessions folder is no sessions, not an error", async () => {
+  const { claudeSessionsByWindow } = await import("./claudePanes.mjs");
+  const map = await claudeSessionsByWindow("/nonexistent/claude/sessions");
+  assert.equal(map.size, 0);
+});

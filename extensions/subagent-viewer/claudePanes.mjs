@@ -98,7 +98,7 @@ async function readSessionsByWindow(dir) {
   try {
     names = await readdir(dir);
   } catch {
-    return new Map();
+    return { byWindow: new Map(), byPid: new Map() };
   }
   const records = await Promise.all(
     names.map(async (name) => {
