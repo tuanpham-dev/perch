@@ -1,3 +1,4 @@
+import { requestTerminalRedraw } from "./lib/terminalRedraw";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import { restartPerch } from "./lib/restartServer";
@@ -1281,20 +1282,35 @@ export default function App() {
           </button>
         );
       }
-      if (extWindowActions.length === 0) return null;
+      const redrawButton =
+        tab && isRealTab(tab) && tab.attachName ? (
+          <button
+            key="redraw-terminal"
+            className="tab-bar-window-action"
+            title="Redraw Terminal"
+            onClick={(e) => {
+              e.stopPropagation();
+              requestTerminalRedraw(tab.attachName);
+            }}
+          >
+            <Icon name="refresh" />
+          </button>
+        ) : null;
+      if (extWindowActions.length === 0) return redrawButton;
       if (!tab || !isRealTab(tab)) return null;
       const session = sessions.find((s) => s.name === tab.sessionName);
-      if (!session) return null;
+      if (!session) return redrawButton;
       const window =
         tab.windowIndex !== undefined
           ? session.windows.find((w) => w.index === tab.windowIndex)
           : session.windows.find((w) => w.active);
-      if (!window) return null;
+      if (!window) return redrawButton;
       const ctx = { sessionName: session.name, windowIndex: window.index, cwd: window.cwd, command: window.command };
       const actions = extWindowActions.filter((a) => a.showInTabBar && a.isVisible(ctx));
-      if (actions.length === 0) return null;
+      if (actions.length === 0) return redrawButton;
       return (
         <>
+          {redrawButton}
           {actions.map((action) => (
             <button
               key={action.id}

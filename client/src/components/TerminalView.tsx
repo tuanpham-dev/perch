@@ -27,6 +27,7 @@ import { LocalEcho, normalizeSpaces, wrapModeForCommand } from "../localEcho";
 import { inputDebug } from "../inputDebug";
 import type { AppSettings } from "../settings";
 import { whenMatches } from "../lib/terminalInput";
+import { onTerminalRedraw } from "../lib/terminalRedraw";
 import { jumpTarget } from "../lib/promptJump";
 import { lineForThumbTop, thumbGeometry } from "../lib/scrollThumb";
 import { findMatches, stepMatch, type Match } from "../lib/terminalSearch";
@@ -69,6 +70,8 @@ const CURSOR_MOVEMENT_KEY = /^(?:\x1b(?:\[|O)[ABDH]|\x01|\x02|\x1b[bB])$/;
 // How long a terminal's grid stays put before its window is replayed again
 // (see resync): a dragged divider or a phone keyboard resizes many times.
 const RESYNC_SETTLE_MS = 400;
+// Away at least this long before a reveal may trigger an automatic redraw.
+const AUTO_REDRAW_AWAY_MS = 3000;
 
 // Clipboard images have no filename; the ones dropped from a file manager
 // (handled separately, via file.name) do.
@@ -217,6 +220,8 @@ export default function TerminalView({
   const scrollTrackRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<TerminalEngineHandle | null>(null);
   const refitRef = useRef<(() => void) | null>(null);
+  // Repaints from scratch: re-measure, re-send the size, replay the window.
+  const redrawRef = useRef<(() => void) | null>(null);
   // Read from inside the mount effect's long-lived closure (which only ever
   // sees the `visible` value it mounted with), so the scroll-query throttle
   // below can tell whether this terminal is actually on screen right now.
@@ -229,6 +234,9 @@ export default function TerminalView({
   // everything that arrived while its paint was suppressed (see the engine's
   // reveal()).
   const revealRef = useRef<(() => void) | null>(null);
+  // When this terminal last left the screen (tab hidden or browser tab
+  // backgrounded); null while it is showing.
+  const awaySinceRef = useRef<number | null>(null);
   const bindingsRef = useRef(bindings);
   bindingsRef.current = bindings;
   const onExitRef = useRef(onExit);
@@ -1024,6 +1032,28 @@ export default function TerminalView({
         }
       };
       refitRef.current = refit;
+      const offRedraw = onTerminalRedraw(attachName, () => redrawRef.current?.());
+      redrawRef.current = () => {
+        if (disposed) return;
+        engine.reveal();
+        const m = engine.measure ? engine.measure() : null;
+        if (m && ws.readyState === WebSocket.OPEN && m.cols > 1) {
+          // A same-size resize raises no SIGWINCH, so the program would not
+          // redraw. Nudge the PTY one column narrower, then back to the real
+          // size, which is what a manual window resize does.
+          ws.send(JSON.stringify({ type: "resize", cols: m.cols - 1, rows: m.rows }));
+          window.setTimeout(() => {
+            if (disposed) return;
+            sentSize = "";
+            refit();
+            resync();
+          }, 120);
+          return;
+        }
+        sentSize = "";
+        refit();
+        resync();
+      };
 
       // History lives in the engine's own buffer (the terminal daemon replays a
       // window's output on attach), so the overlay thumb is drawn from the
@@ -1065,6 +1095,15 @@ export default function TerminalView({
         refitRef.current?.();
         scrollQueryRef.current?.();
         if (resyncOnReveal && resyncTimer === undefined) resyncTimer = window.setTimeout(resync, RESYNC_SETTLE_MS);
+        // Coming back after a while to a window another viewer sized (a
+        // different grid than this view would fit) is when output goes bad;
+        // repaint it as the Redraw button does, without being asked.
+        const awayFor = awaySinceRef.current === null ? 0 : Date.now() - awaySinceRef.current;
+        awaySinceRef.current = null;
+        if (awayFor >= AUTO_REDRAW_AWAY_MS && windowGrid) {
+          const m = engine.measure?.();
+          if (m && (m.cols !== windowGrid.cols || m.rows !== windowGrid.rows)) redrawRef.current?.();
+        }
       };
 
       // Keys that move within the scrollback, so they must NOT snap it away:
@@ -2421,6 +2460,8 @@ export default function TerminalView({
         engine.dispose();
         engineRef.current = null;
         refitRef.current = null;
+        redrawRef.current = null;
+        offRedraw();
         scrollQueryRef.current = null;
         unsubScrollChange();
         cancelAnimationFrame(thumbRaf);
@@ -2480,6 +2521,7 @@ export default function TerminalView({
   // moment the answer can actually be seen.
   useEffect(() => {
     if (visible) revealRef.current?.();
+    else awaySinceRef.current ??= Date.now();
   }, [visible]);
 
   // Counterpart to the document.hidden bail-outs above: a backgrounded browser
@@ -2487,7 +2529,8 @@ export default function TerminalView({
   // the foreground.
   useEffect(() => {
     const onVisibilityChange = () => {
-      if (!document.hidden && visibleRef.current) revealRef.current?.();
+      if (document.hidden) awaySinceRef.current ??= Date.now();
+      else if (visibleRef.current) revealRef.current?.();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -2716,6 +2759,7 @@ export default function TerminalView({
         shortcutCommand: "terminal.clear",
         onClick: () => engineRef.current?.clear(),
       });
+      items.push({ label: "Redraw", onClick: () => redrawRef.current?.() });
       showMenuRef.current?.(clientX, clientY, items);
     };
 
