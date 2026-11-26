@@ -354,3 +354,40 @@ test('a connection that keeps sending past the per-minute rate is closed', async
   await client.closedPromise
   assert.ok(client.closed)
 })
+
+test('refusals over the rate count over a minute, so frames accepted in between do not reset them (mock clock)', async () => {
+  const { fakeClock } = await import('./helpers.mjs')
+  const clock = fakeClock()
+  relay = await startTestRelay({ clock, env: { RELAY_FRAMES_PER_MINUTE: '10' } })
+  const { client } = await createGroup(relay)
+  let refused = 0
+  // Sends frames and reads every answer up to the one for the closing label.set.
+  const burst = async (pings) => {
+    for (let i = 0; i < pings; i++) client.send({ t: 'ping' })
+    client.send({ t: 'label.set', label: 'x' })
+    for (;;) {
+      const f = await client.until((x) => x.t === 'ok' || x.t === 'error', 500)
+      if (!f) return
+      if (f.t === 'error') refused++
+      if (f.t === 'ok' || f.re === 'label.set') return
+    }
+  }
+  // Fill the window with frames 6 s apart, so later one ages out every 6 s.
+  for (let i = 0; i < 9; i++) {
+    clock.tick(6000)
+    await burst(0)
+  }
+  // Each round: a slot frees up, then six frames arrive. Over 54 s that is far
+  // more than 50 refusals, with a frame accepted in most rounds.
+  const before = refused
+  let sent = 0
+  for (let round = 0; round < 9 && !client.closed; round++) {
+    clock.tick(6000)
+    await burst(8)
+    sent += 9
+  }
+  assert.ok(sent - (refused - before) >= 5, `frames were accepted between refusals (${sent - (refused - before)})`)
+  assert.ok(refused >= 50, `refused ${refused}`)
+  await Promise.race([client.closedPromise, new Promise((r) => setTimeout(r, 2000))])
+  assert.ok(client.closed, 'the connection was closed')
+})

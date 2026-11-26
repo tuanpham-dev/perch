@@ -38,6 +38,9 @@ const ADMIN_FAILS_PER_MINUTE = 5
 const OVERSIZE_STRIKES = 3
 // Frames a connection may send past framesPerMinute before it is closed.
 const RATE_STRIKES = 50
+// Bytes the relay may have queued for one connection before it is cut off as
+// not reading; at least 32 frames of the largest size.
+const SEND_BUFFER_MIN = 8 * 1024 * 1024
 const DEFAULT_MAX_PREAUTH_PER_ADDRESS = 20
 const DEFAULT_MAX_PENDING_PER_INVITE = 5
 
@@ -94,6 +97,7 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
   const rates = createCounter(60000, clock.now)
   const adminFails = createCounter(60000, clock.now)
   const oversize = createCounter(60000, clock.now)
+  const rateStrikes = createCounter(60000, clock.now)
   const maxPreauth = config.maxPreauthPerAddress ?? DEFAULT_MAX_PREAUTH_PER_ADDRESS
   const maxPendingPerInvite = config.maxPendingPerInvite ?? DEFAULT_MAX_PENDING_PER_INVITE
   // Connection numbers only ever grow, also across a restart of the relay.
@@ -136,6 +140,14 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
       } catch {}
     }
     const text = encodeFrame(frame)
+    // A peer that does not read its socket is cut off rather than queued for.
+    if (c.ws.bufferedAmount > Math.max(SEND_BUFFER_MIN, 32 * limits.frameBytes)) {
+      logf('not-reading', c)
+      try {
+        c.ws.terminate()
+      } catch {}
+      return
+    }
     try {
       c.ws.send(text)
       logf('send', c, { type: frame.t, size: text.length })
@@ -331,12 +343,11 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
     const peek = () => (c.stage === 'active' ? peekRoute(text) : {})
     const key = c.rateKey || `c:${c.id}`
     // A frame over the limit is answered but not recorded, so a flood cannot grow
-    // the counter; a connection that keeps sending past the limit is closed.
+    // the counter; a connection with RATE_STRIKES refusals in a minute is closed.
     if (rates.count(key) >= limits.framesPerMinute) {
-      c.rateStrikes = (c.rateStrikes || 0) + 1
-      return fail(c, 'limit', 'Too many frames this minute.', { limit: 'framesPerMinute', ...peek() }, { close: c.rateStrikes >= RATE_STRIKES })
+      const strikes = rateStrikes.hit(`c:${c.id}`)
+      return fail(c, 'limit', 'Too many frames this minute.', { limit: 'framesPerMinute', ...peek() }, { close: strikes >= RATE_STRIKES })
     }
-    c.rateStrikes = 0
     rates.hit(key)
     if (size > limits.frameBytes) {
       const strikes = oversize.hit(key)
@@ -1003,6 +1014,7 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
     rates.sweep()
     adminFails.sweep()
     oversize.sweep()
+    rateStrikes.sweep()
   }, TICK_MS)
 
   return {
