@@ -36,6 +36,8 @@ const INVITE_MAX_MS = 7 * 24 * 60 * 60 * 1000
 const INVITE_SLACK_MS = 30 * 1000
 const ADMIN_FAILS_PER_MINUTE = 5
 const OVERSIZE_STRIKES = 3
+// Frames a connection may send past framesPerMinute before it is closed.
+const RATE_STRIKES = 50
 const DEFAULT_MAX_PREAUTH_PER_ADDRESS = 20
 const DEFAULT_MAX_PENDING_PER_INVITE = 5
 
@@ -141,7 +143,7 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
   }
 
   function fail(c, code, message, extra = {}, { close = true } = {}) {
-    send(c, { t: 'error', code, message, ...extra })
+    send(c, { t: 'error', code, message, ...(c.answering ? { re: c.answering } : {}), ...extra })
     logf('refused', c, { code })
     if (close) closeConn(c)
   }
@@ -328,9 +330,14 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
     // that is already authenticated gets its route parsed out of a refused frame.
     const peek = () => (c.stage === 'active' ? peekRoute(text) : {})
     const key = c.rateKey || `c:${c.id}`
-    if (rates.hit(key) > limits.framesPerMinute) {
-      return fail(c, 'limit', 'Too many frames this minute.', { limit: 'framesPerMinute', ...peek() }, { close: false })
+    // A frame over the limit is answered but not recorded, so a flood cannot grow
+    // the counter; a connection that keeps sending past the limit is closed.
+    if (rates.count(key) >= limits.framesPerMinute) {
+      c.rateStrikes = (c.rateStrikes || 0) + 1
+      return fail(c, 'limit', 'Too many frames this minute.', { limit: 'framesPerMinute', ...peek() }, { close: c.rateStrikes >= RATE_STRIKES })
     }
+    c.rateStrikes = 0
+    rates.hit(key)
     if (size > limits.frameBytes) {
       const strikes = oversize.hit(key)
       fail(c, 'limit', 'That frame is larger than this relay allows.', { limit: 'frameBytes', ...peek() }, { close: strikes >= OVERSIZE_STRIKES })
@@ -579,6 +586,17 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
       unregister(c)
       return fail(c, 'bad-frame', 'You are not a member of this group.')
     }
+    // Refusals name the frame they answer, so a machine with several requests in
+    // flight can tell which one failed. Every handler below runs synchronously.
+    c.answering = f.t
+    try {
+      return memberFrame(c, f)
+    } finally {
+      c.answering = null
+    }
+  }
+
+  function memberFrame(c, f) {
     switch (f.t) {
       case 'ping':
         return
@@ -799,7 +817,8 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
     unregister(c)
     send(c, { t: 'ok', re: 'leave' })
     closeConn(c)
-    if (!store.machines(groupId).some((m) => m.status === 'member' || m.status === 'blocked')) {
+    // Blocked machines cannot sign in, so a group with no members left is dropped.
+    if (!store.machines(groupId).some((m) => m.status === 'member')) {
       dropGroup(groupId)
     } else {
       broadcastDirectory(groupId)
@@ -982,6 +1001,8 @@ export async function startRelay({ config, hooks = {}, clock = realClock, log = 
     }
     authFails.sweep()
     rates.sweep()
+    adminFails.sweep()
+    oversize.sweep()
   }, TICK_MS)
 
   return {

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { ADMIN, addMember, connect, connectMember, createGroup, helloFrame, joinAsMember, startTestRelay } from './helpers.mjs'
+import { ADMIN, addMember, connect, connectMember, createGroup, helloFrame, joinAsMember, leaveSig, startTestRelay } from './helpers.mjs'
 
 const run = promisify(execFile)
 const MAIN = fileURLToPath(new URL('../src/main.mjs', import.meta.url))
@@ -219,4 +219,25 @@ test('a malformed admin URL answers 400 and the relay keeps serving', async () =
   }
   assert.equal((await admin('/groups')).status, 200)
   assert.equal(await (await fetch(`http://127.0.0.1:${relay.port}/healthz`)).text(), '{"ok":true}')
+})
+
+test('a group whose last member leaves is dropped even when blocked machines remain', async () => {
+  relay = await startTestRelay()
+  const a = await createGroup(relay)
+  const b = await addMember(relay, a.client, a.groupId)
+  clients.push(a.client, b.client)
+  assert.equal((await admin(`/groups/${a.groupId}/machines/${b.keys.machineId}`, { method: 'DELETE' })).status, 200)
+  await a.client.until((f) => f.t === 'directory' && f.machines.some((m) => m.blocked))
+  a.client.send({ t: 'leave', sig: leaveSig(a.keys, a.groupId) })
+  await a.client.until('ok')
+  assert.deepEqual(await (await admin('/groups')).json(), [])
+})
+
+test('a refusal of a member frame names the frame it answers', async () => {
+  relay = await startTestRelay()
+  const a = await createGroup(relay)
+  clients.push(a.client)
+  a.client.send({ t: 'label.set', label: 'has space' })
+  const e = await a.client.until('error')
+  assert.deepEqual([e.code, e.re], ['bad-frame', 'label.set'])
 })

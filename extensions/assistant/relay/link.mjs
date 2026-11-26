@@ -272,9 +272,15 @@ export function createLink({
   function request(frame, pred) {
     const c = cur
     if (!c || !connected()) return Promise.reject(notConnected())
-    const p = waitFor(c, (f) => pred(f) || (f.t === 'error' && !f.sid))
+    // A refusal answers this request when it names this frame's type, or names
+    // none (refused before the relay read it, such as over the rate).
+    const p = waitFor(c, (f) => pred(f) || refusalOf(f, frame.t))
     sendFrame(c, frame)
     return p
+  }
+
+  function refusalOf(f, type) {
+    return f.t === 'error' && !f.sid && (f.re === undefined || f.re === type)
   }
 
   function notConnected() {
@@ -1624,7 +1630,11 @@ export function createLink({
     })
   }
 
-  async function remove(machineId) {
+  function remove(machineId) {
+    return exclusive(() => removeNow(machineId))
+  }
+
+  async function removeNow(machineId) {
     requireConnected()
     const first = entryOf(machineId)
     if (!first || first.self) throw new Error(first?.self ? 'This machine cannot remove itself. Use Leave group instead.' : 'No such machine in this group.')
@@ -1660,7 +1670,11 @@ export function createLink({
     throw new Error(`Could not remove ${targetName}: the group kept changing. Try again.`)
   }
 
-  async function leave() {
+  function leave() {
+    return exclusive(leaveNow)
+  }
+
+  async function leaveNow() {
     requireJoined()
     const c = cur
     let relayEntryRemoved = false
@@ -1671,7 +1685,7 @@ export function createLink({
       const { identity, state } = membership
       const sig = sign(identity.signKey, 'perch-relay-leave\n' + state.groupId + '\n' + identity.machineId)
       try {
-        const p = waitFor(c, (f) => (f.t === 'ok' && f.re === 'leave') || (f.t === 'error' && !f.sid), LEAVE_MS)
+        const p = waitFor(c, (f) => (f.t === 'ok' && f.re === 'leave') || refusalOf(f, 'leave'), LEAVE_MS)
         p.catch(() => {})
         sendFrame(c, { t: 'leave', sig })
         const reply = await p

@@ -346,3 +346,11 @@ test('lowering the pre-auth limit moves the threshold', async () => {
   a.ws.terminate()
   b.ws.terminate()
 })
+
+test('a connection that keeps sending past the per-minute rate is closed', async () => {
+  relay = await startTestRelay({ env: { RELAY_FRAMES_PER_MINUTE: '10' } })
+  const { client } = await createGroup(relay)
+  for (let i = 0; i < 70; i++) client.send({ t: 'ping' })
+  await client.closedPromise
+  assert.ok(client.closed)
+})

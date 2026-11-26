@@ -803,3 +803,17 @@ test('F6: turning Assistant Read-only on republishes accepts read without any st
     await rig.close()
   }
 })
+
+test("a refusal of another request in flight does not fail this one", async () => {
+  const rig = await startRig()
+  try {
+    const a = await rig.creator('alpha')
+    const pending = a.link.setLabel('desk')
+    // Arrives before the relay's answer to label.set: a refused profile.put.
+    rig.relay.inject(a.membership.state.groupId, a.mid(), { t: 'error', code: 'limit', message: 'Too big.', re: 'profile.put', limit: 'profileBytes' })
+    await pending
+    assert.equal(a.membership.state.label, 'desk')
+  } finally {
+    await rig.close()
+  }
+})

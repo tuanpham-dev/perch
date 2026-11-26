@@ -265,7 +265,7 @@ host or to `perch relay create`.
 | `RELAY_MAX_PREAUTH_PER_ADDRESS` | `20` | Connections from one address that may be open before they sign in. |
 | `RELAY_MAX_PENDING_PER_INVITE` | `5` | Join attempts that may wait on one invite at once. |
 | `RELAY_MAX_FRAME_BYTES` | `262144` | Largest frame accepted (at least 4096). |
-| `RELAY_FRAMES_PER_MINUTE` | `600` | Frames one machine may send per minute. |
+| `RELAY_FRAMES_PER_MINUTE` | `600` | Frames one machine may send per minute. Each frame over it is refused; a connection that sends 50 more in that minute is closed. |
 | `RELAY_MAX_MACHINES` | `50` | Machines per group. |
 | `RELAY_AUTH_FAILS_PER_MINUTE` | `5` | Failed sign-ins per address per minute before it is refused. |
 

@@ -31,7 +31,7 @@ Commands:
   machines             List the machines in the group
   remove <machine>     Remove a machine and replace the group secret
   rename <name>        Change this machine's name
-  label [<text>]       Show or set the label on this machine (--clear removes it)
+  label [<label>]      Show or set the label on this machine (--clear removes it)
   permission <level>   What other machines may do here: off, read-only or send
   leave                Leave the group and delete its keys here
 
@@ -79,7 +79,7 @@ const SWITCH_FLAGS: Record<string, string[]> = {
 // Positional words each command takes: [min, max].
 const POSITIONALS: Record<string, [number, number, string]> = {
   create: [1, 1, '<relay-url>'], join: [0, 0, ''], revoke: [1, 1, '<id>'], remove: [1, 1, '<machine>'], rename: [1, 1, '<name>'],
-  permission: [1, 1, '<off|read-only|send>'], label: [0, Infinity, '[<text>]'],
+  permission: [1, 1, '<off|read-only|send>'], label: [0, 1, '[<label>] (one word: letters, digits, . - _)'],
 };
 
 const PERMISSIONS: Record<string, string> = { off: 'off', 'read-only': 'read', send: 'send' };
@@ -149,7 +149,7 @@ export function parseRelayArgs(args: string[]): RelayArgs {
   if (cmd === 'remove') out.machine = words[0]!;
   if (cmd === 'rename') out.name = words[0]!;
   if (cmd === 'label') {
-    out.text = words.join(' ');
+    out.text = words[0] ?? '';
     if (out.clear && words.length > 0) die('--clear and a label text do the opposite of each other - pass one');
   }
   if (cmd === 'permission') {

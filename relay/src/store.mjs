@@ -132,6 +132,7 @@ export function openStore(dataDir, { now = Date.now } = {}) {
     setLabel: q('UPDATE machines SET label = ? WHERE group_id = ? AND id = ?'),
     touch: q('UPDATE machines SET last_seen = ? WHERE group_id = ? AND id = ?'),
     deleteMachine: q('DELETE FROM machines WHERE group_id = ? AND id = ?'),
+    deleteMachinePackages: q('DELETE FROM rekey_packages WHERE group_id = ? AND machine_id = ?'),
     deletePending: q("DELETE FROM machines WHERE group_id = ? AND status = 'pending'"),
     deleteAllPending: q("DELETE FROM machines WHERE status = 'pending'"),
   }
@@ -194,6 +195,7 @@ export function openStore(dataDir, { now = Date.now } = {}) {
       stmts.deleteAllPending.run()
     },
     deleteMachine(groupId, id) {
+      stmts.deleteMachinePackages.run(groupId, id)
       stmts.deleteMachine.run(groupId, id)
     },
     setProfile(groupId, id, blob, epoch) {
