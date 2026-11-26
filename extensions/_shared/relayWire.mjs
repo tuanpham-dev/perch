@@ -110,6 +110,7 @@ export const FRAMES = Object.freeze({
   error: {
     req: { code: 'string', message: 'string' },
     opt: {
+      re: 'string',
       limit: 'string',
       to: 'string',
       sid: 'string',

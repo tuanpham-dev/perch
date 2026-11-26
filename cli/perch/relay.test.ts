@@ -53,7 +53,7 @@ test('every subcommand parses', () => {
   assert.deepEqual([remove.machine, remove.yes], ['desk', true]);
   assert.equal(parseRelayArgs(['remove', 'desk']).yes, false);
   assert.equal(parseRelayArgs(['rename', 'new']).name, 'new');
-  assert.equal(parseRelayArgs(['label', 'build', 'box']).text, 'build box');
+  assert.equal(parseRelayArgs(['label', 'build-box']).text, 'build-box');
   assert.equal(parseRelayArgs(['label', '--clear']).clear, true);
   assert.equal(parseRelayArgs(['label']).text, '');
   assert.equal(parseRelayArgs(['permission', 'off']).inbound, 'off');
@@ -81,6 +81,7 @@ test('bad arguments are refused', async () => {
   await dies(['permission'], /needs/);
   await dies(['remove', 'a', 'b'], /unexpected: b/);
   await dies(['label', '--clear', 'x'], /--clear/);
+  await dies(['label', 'build', 'box'], /one word/);
   await dies(['status', '--port'], /--port requires a value/);
 });
 
@@ -156,7 +157,7 @@ async function withStub(
 const BASE = '/api/ext/perch.assistant/relay';
 const joinedState = {
   joined: true, relayHost: 'relay.test', connection: 'connected', reason: '', inbound: 'send', readOnlyLimiting: false,
-  machine: { name: 'alpha', label: 'build box' },
+  machine: { name: 'alpha', label: 'build-box' },
   machines: [
     { name: 'alpha', self: true, online: true, trust: 'verified', blocked: false, accepts: 'send' },
     { name: 'beta', self: false, online: true, trust: 'verified', blocked: false, accepts: 'read' },
@@ -228,13 +229,13 @@ test('each subcommand hits its route with the right body', async () => {
       await run(['rename', 'gamma']);
       assert.deepEqual([last().url, last().body], [`${BASE}/rename`, { name: 'gamma' }]);
 
-      await run(['label', 'my', 'label']);
-      assert.deepEqual([last().url, last().body], [`${BASE}/label`, { label: 'my label' }]);
+      await run(['label', 'my-label']);
+      assert.deepEqual([last().url, last().body], [`${BASE}/label`, { label: 'my-label' }]);
       await run(['label', '--clear']);
       assert.deepEqual([last().url, last().body], [`${BASE}/label`, { label: '' }]);
       r = await run(['label']);
       assert.deepEqual([last().method, last().url], ['GET', `${BASE}/state`]);
-      assert.equal(r.out, 'build box\n');
+      assert.equal(r.out, 'build-box\n');
 
       for (const [word, wire] of [['off', 'off'], ['read-only', 'read'], ['send', 'send']]) {
         await run(['permission', word!]);
