@@ -18,6 +18,8 @@ Set `APP_NAME` to rebrand the browser tab title and PWA name away from the "Perc
 
 To run a second instance beside the one you use (a test build, say), give it its own `PORT`, `PERCH_CONFIG_DIR` and `PERCH_STATE_DIR`: the config directory (default `~/.config/perch`) holds settings, extensions and the shims terminals use to reach the server, and the state directory (default `~/.local/state/perch`) holds the terminal daemon's socket and saved sessions. Two instances sharing either would rewrite each other's shims or share one set of terminals.
 
+To reach agents on other machines, run a relay (a separate small server in `relay/`) and join each Perch to it; see [Relay](RELAY.md) for hosting it, its nginx block (WebSocket upgrade, a read timeout above 60 s) and its limits. The relay and its admin port are not part of this server, and `AUTH_TOKEN` below also guards the Relay section of Settings.
+
 The app ships with a built-in **default extension registry** so extensions are installable out of the box from the **Extensions** tab (`Ctrl+Shift+X`) — no manual setup. It appears there as a non-removable source tagged "default". Override it with `EXTENSION_REGISTRY` (a registry URL serving an `index.json`, or a local directory path); set `EXTENSION_REGISTRY=` (empty) to disable it entirely and ship no default. Users can still add their own registries alongside it. Read at request time, so a restart applies changes with no rebuild.
 
 ### Behind nginx

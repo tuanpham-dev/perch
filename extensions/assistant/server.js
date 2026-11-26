@@ -14,6 +14,10 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { chooseTarget, expandHome, pickWindow, resolveRef, sessionPorts, statusFromEvent } from "./lib.mjs";
+import { createLink } from "./relay/link.mjs";
+import { createMembership } from "./relay/membership.mjs";
+import { createRemoteTools, NOT_IN_GROUP } from "./relay/remoteTools.mjs";
+import { noticeFor, registerRelayRoutes } from "./relay/routes.mjs";
 
 const HOME = homedir();
 // Hook state is per window; old windows fall off the front, as in
@@ -44,12 +48,16 @@ const TARGET = str(
   'A project or terminal: a window id ($PERCH_WINDOW), "project:index", a project (session) name, or a path inside the project.',
 );
 const PROJECT = str("A project (session) name, or a path inside the project.");
+const MACHINE = str("Another machine in this Perch's relay group, by name from list_machines. Omit for this machine.");
 
 // Ends every wait and pending browser action when the extension unloads, so
 // no tool call hangs on a router that is gone.
 let cleanup = null;
 
-export function activate({ router, host, getSettings, log }) {
+export function activate({ router, host, getSettings, log, secrets, storage }) {
+  // Set below when the relay link starts; closed by cleanup.
+  let relayLink = null;
+
   // ---- Agent hook state ----
 
   // window id -> { event, at }
@@ -170,6 +178,8 @@ export function activate({ router, host, getSettings, log }) {
       entry.reject(new ToolError("The Assistant extension was turned off."));
       pending.delete(id);
     }
+    relayLink?.close();
+    relayLink = null;
     for (const res of streams) res.end();
     streams.clear();
   };
@@ -249,9 +259,10 @@ export function activate({ router, host, getSettings, log }) {
     {
       name: "list_projects",
       kind: "read",
+      remote: true,
       description:
         "List every Perch project (terminal session): its directory, its terminal windows with what runs in each, which windows run an AI agent and that agent's status, and the ports its processes listen on.",
-      inputSchema: obj({}),
+      inputSchema: obj({ machine: MACHINE }),
       async run() {
         const [sessions, ports] = await Promise.all([host.sessions.list(), host.ports.list().catch(() => [])]);
         const agents = await agentWindowsBySession(sessions);
@@ -277,9 +288,10 @@ export function activate({ router, host, getSettings, log }) {
     {
       name: "agent_status",
       kind: "read",
+      remote: true,
       description:
         'What the AI agents are doing: "working" (a turn is running), "needs-input" (waiting on a permission prompt), "idle" (its turn ended), or "unknown" (no hook event seen). Includes the last message of the conversation each agent has open. Without a target, covers every agent window in every project.',
-      inputSchema: obj({ target: TARGET }),
+      inputSchema: obj({ target: TARGET, machine: MACHINE }),
       async run(args) {
         const resolved = args.target ? await resolveTarget(args.target) : null;
         const sessions = resolved ? [resolved.session] : await host.sessions.list();
@@ -314,12 +326,14 @@ export function activate({ router, host, getSettings, log }) {
     {
       name: "agent_conversation",
       kind: "read",
+      remote: true,
       description:
         "The last messages of an agent conversation: the one open in the target's agent window, or, with conversationId, a past one from list_conversations.",
       inputSchema: obj({
         target: TARGET,
         conversationId: str("A conversation id from list_conversations. Omit for the conversation open in the agent window."),
         limit: int(`How many messages, newest last (default ${MESSAGES_DEFAULT}).`, 1, MESSAGES_MAX),
+        machine: MACHINE,
       }, ["target"]),
       async run(args) {
         const limit = clampInt(args.limit, MESSAGES_DEFAULT, 1, MESSAGES_MAX);
@@ -339,10 +353,12 @@ export function activate({ router, host, getSettings, log }) {
     {
       name: "read_terminal",
       kind: "read",
+      remote: true,
       description: "The text on a terminal's screen, optionally with scrollback above it. For a project with several windows it reads the agent's window.",
       inputSchema: obj({
         target: TARGET,
         scrollback: int(`Lines of history above the screen to include (default 0, max ${SCROLLBACK_MAX}).`, 0, SCROLLBACK_MAX),
+        machine: MACHINE,
       }, ["target"]),
       async run(args) {
         const { session, window } = await resolveWindow(args.target);
@@ -388,29 +404,41 @@ export function activate({ router, host, getSettings, log }) {
     {
       name: "wait_for_agent",
       kind: "read",
+      remote: true,
       description:
         'Wait until an agent finishes its turn or stops for a permission prompt, then return its status. Returns at once when it is already idle or waiting, unless a message was just sent to it with send_to_agent. Returns "timed-out" after timeoutSeconds.',
       inputSchema: obj({
         target: TARGET,
         timeoutSeconds: int(`How long to wait (default ${WAIT_DEFAULT_S}, max ${WAIT_MAX_S}).`, 1, WAIT_MAX_S),
+        machine: MACHINE,
       }, ["target"]),
-      async run(args) {
+      async run(args, call) {
         const { session, window } = await resolveWindow(args.target);
         const label = `${session.name}:${window.index}`;
         const now = windowStatus(window.id);
         if (now.status === "idle" || now.status === "needs-input") return { window: label, ...now, waitedSeconds: 0 };
         const seconds = clampInt(args.timeoutSeconds, WAIT_DEFAULT_S, 1, WAIT_MAX_S);
         const started = Date.now();
-        const status = await new Promise((resolve) => {
+        const status = await new Promise((resolve, reject) => {
+          const signal = call?.signal;
           const waiter = {
             windowId: window.id,
             done(s) {
               clearTimeout(timer);
               waiters.delete(waiter);
+              signal?.removeEventListener("abort", onAbort);
               resolve(s);
             },
           };
+          // An aborted call (the caller went away, or may no longer ask) ends the wait with an error.
+          const onAbort = () => {
+            clearTimeout(timer);
+            waiters.delete(waiter);
+            reject(new ToolError("The wait was cancelled."));
+          };
           const timer = setTimeout(() => waiter.done("timed-out"), seconds * 1000);
+          if (signal?.aborted) return onAbort();
+          signal?.addEventListener("abort", onAbort, { once: true });
           waiters.add(waiter);
         });
         const waitedSeconds = Math.round((Date.now() - started) / 1000);
@@ -505,12 +533,14 @@ export function activate({ router, host, getSettings, log }) {
     {
       name: "send_to_agent",
       kind: "write",
+      remote: true,
       description:
         "Type text into a terminal, normally an AI agent's prompt, and press Enter unless submit is false. For a project with several windows it types into the agent's window. Follow with wait_for_agent to know when the agent is done.",
       inputSchema: obj({
         target: TARGET,
         text: str("What to type."),
         submit: { type: "boolean", description: "Press Enter after typing (default true)." },
+        machine: MACHINE,
       }, ["target", "text"]),
       async run(args) {
         const { session, window } = await resolveWindow(args.target);
@@ -632,6 +662,8 @@ export function activate({ router, host, getSettings, log }) {
       return false;
     }
   }
+  // For inbound writes from another machine: an unreadable setting throws, and the caller refuses.
+  const readOnlyStrict = async () => (await getSettings())["assistant.readOnly"] === true;
 
   router.get("/tools", async (_req, res) => {
     const ro = await readOnly();
@@ -645,22 +677,126 @@ export function activate({ router, host, getSettings, log }) {
     });
   });
 
-  router.post("/call", async (req, res) => {
-    const { name, arguments: args = {}, callerWindow = null } = req.body ?? {};
+  // Set when the relay link starts (see below); null on a Perch without it.
+  let remoteTools = null;
+
+  const readOnlyRefusal = (tool) =>
+    `${tool.name} is turned off: the Assistant extension is set to read-only (Settings → Extensions → Assistant).`;
+
+  const asResult = (text, isError = false) => ({ content: [{ type: "text", text }], isError });
+
+  // Runs one tool on this machine and shapes its answer. Used by /call and,
+  // for another machine's request, by the relay dispatcher.
+  async function runLocalTool(name, args, call) {
     const tool = TOOLS.find((t) => t.name === name);
-    const reply = (text, isError = false) => res.json({ content: [{ type: "text", text }], isError });
-    if (!tool) return reply(`Unknown tool: ${name}`, true);
-    if (isWrite(tool) && (await readOnly())) {
-      return reply(`${name} is turned off: the Assistant extension is set to read-only (Settings → Extensions → Assistant).`, true);
-    }
+    if (!tool) return asResult(`Unknown tool: ${name}`, true);
+    if (isWrite(tool) && (await readOnly())) return asResult(readOnlyRefusal(tool), true);
     try {
-      const result = await tool.run(args && typeof args === "object" ? args : {}, { callerWindow: typeof callerWindow === "string" ? callerWindow : null });
-      reply(typeof result === "string" ? result : JSON.stringify(result, null, 2));
+      const result = await tool.run(args && typeof args === "object" ? args : {}, call);
+      return asResult(typeof result === "string" ? result : JSON.stringify(result, null, 2));
     } catch (err) {
       if (!(err instanceof ToolError)) log(`${name} failed:`, err);
-      reply(err instanceof Error ? err.message : String(err), true);
+      return asResult(err instanceof Error ? err.message : String(err), true);
     }
+  }
+
+  router.post("/call", async (req, res) => {
+    const { name, arguments: given = {}, callerWindow = null } = req.body ?? {};
+    const tool = TOOLS.find((t) => t.name === name);
+    const call = { callerWindow: typeof callerWindow === "string" ? callerWindow : null };
+    if (!tool) return res.json(asResult(`Unknown tool: ${name}`, true));
+    const args = given && typeof given === "object" ? { ...given } : {};
+    const machine = args.machine;
+    const named = machine !== undefined && machine !== null && machine !== "";
+    if (named && !tool.remote) return res.json(asResult(`${name} only works on this machine; it does not take a machine.`, true));
+    delete args.machine;
+    if (named && !remoteTools?.isSelf(String(machine))) {
+      if (!remoteTools) return res.json(asResult(NOT_IN_GROUP, true));
+      if (isWrite(tool) && (await readOnly())) return res.json(asResult(readOnlyRefusal(tool), true));
+      try {
+        return res.json(await remoteTools.callRemote(String(machine), name, args, call));
+      } catch (err) {
+        if (!(err instanceof ToolError)) log(`${name} failed:`, err);
+        return res.json(asResult(err instanceof Error ? err.message : String(err), true));
+      }
+    }
+    res.json(await runLocalTool(name, args, call));
   });
+
+  // ---- Relay link ----
+
+  // Needs the secrets store and SQL storage of Perch 0.9 or later.
+  if (!secrets || !storage?.sql) {
+    log("relay needs Perch 0.9 or later");
+    // The Settings section says so instead of showing a failed request.
+    router.get("/relay/state", (_req, res) => res.json({ available: false, reason: "The relay needs Perch 0.9 or later." }));
+    return;
+  }
+  const sendEvent = (name, data) => {
+    const frame = `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const res of streams) res.write(frame);
+  };
+  const membership = createMembership({ secrets });
+  const link = createLink({
+    membership,
+    log: (line) => log(`relay: ${line}`),
+    onState: () => sendEvent("relay", { kind: "state" }),
+    onEvent: (e) => {
+      remoteTools?.recordEvent(e);
+      // The machine that did it gets no notice (the activity list still has the row).
+      const notice = e.local ? null : noticeFor(e);
+      if (notice) sendEvent("relay-notice", notice);
+      sendEvent("relay", { kind: "state" });
+    },
+    onCall: (...a) => remoteTools.onCall(...a),
+    onInbound: (value) => remoteTools?.onInbound(value),
+    readOnly,
+    clearActivity: () => remoteTools?.clearActivity(),
+  });
+  relayLink = link;
+  remoteTools = createRemoteTools({
+    link,
+    membership,
+    readOnly,
+    readOnlyStrict,
+    runLocalTool,
+    callerTerminal,
+    resolveWindow,
+    sendText: (windowId, typed, submit) => host.sessions.sendTextToWindow(windowId, typed, submit),
+    markSent: (windowId) => lastSend.set(windowId, Date.now()),
+    sql: storage.sql,
+    ToolError,
+    log,
+    emit: sendEvent,
+  });
+  TOOLS.push(
+    {
+      name: "list_machines",
+      kind: "read",
+      description:
+        "List the machines in this Perch's relay group: name, whether it is this machine, online or last seen, whether it is verified, and what it accepts from others (off, read-only, read and send). Pass a name as `machine` to the other tools to run them there.",
+      inputSchema: obj({}),
+      run: () => remoteTools.listMachines(),
+    },
+    {
+      name: "reply_to_agent",
+      kind: "write",
+      description:
+        "Answer an agent on another machine whose message arrived in this window, or send text to any agent in the group with `to`. The text is typed into that agent's prompt and submitted.",
+      inputSchema: obj({
+        text: str("What to say."),
+        to: str('Where to send it, as machine/project:index, as printed in the message label. Omit to answer the agent that last messaged this window.'),
+      }, ["text"]),
+      run: (args, call) => remoteTools.replyToAgent(args, call),
+    },
+  );
+  registerRelayRoutes({ router, membership, link, readOnly, sql: storage.sql });
+  membership
+    .load()
+    .then((joined) => {
+      if (joined && relayLink === link) link.start();
+    })
+    .catch((err) => log("relay state could not be read:", err?.message ?? err));
 }
 
 export function deactivate() {

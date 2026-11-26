@@ -5,12 +5,15 @@
 // preview, run a palette command, show a terminal, build the forward command.
 // Each action is answered on /reply and announced in a small notice over the
 // editor area, with a Copy button when there is text to take away.
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import "./style.css";
 import { copyText } from "../../_shared/clipboard";
 import { injectStylesheet } from "../../_shared/injectStylesheet";
 import { buildCommand, type TunnelAuth } from "../../_shared/tunnelCommand";
+import { NoticeOverlay, resetNotice, showNotice } from "./notice";
+import { RelaySection } from "./relay/RelaySection";
+import { makeRelayStatusItem } from "./relay/RelayStatusItem";
+import { fireRelayChanged, requestStateNow, setRelayHost } from "./relay/relayApi";
 
 interface ActiveContext {
   sessionName: string | null;
@@ -25,7 +28,9 @@ interface EventSourceLike {
 
 interface ExtensionContext {
   registerAppOverlay(overlay: { id: string; component: () => JSX.Element | null }): void;
-  registerSettingsComponent(component: { id: string; component: () => JSX.Element }): void;
+  registerSettingsComponent(component: { id: string; component: () => JSX.Element | null }): void;
+  registerStatusBarItem?(item: { id: string; title?: string; placement?: "left" | "right"; order?: number; component: (props: { context: { mobilePointer: boolean } }) => JSX.Element | null }): void;
+  settings?: { open?(): void; get?(key: string): unknown; onDidChange?(cb: () => void): () => void };
   serverFetch(path: string, init?: RequestInit): Promise<Response>;
   serverEventSource?(path: string): EventSourceLike;
   assetUrl(relPath: string): string;
@@ -38,6 +43,7 @@ interface ExtensionContext {
     openFileTab(path: string, line?: number): void;
     openSessionWindow(sessionName: string, opts?: { createCwd?: string; windowIndex?: number }): void;
     executeCommand(commandId: string): void;
+    confirmDialog?(message: string, confirmLabel?: string): Promise<boolean>;
     getCommands(): { id: string; label: string }[];
     tunnels: { auth(): Promise<TunnelAuth> };
   };
@@ -52,7 +58,6 @@ interface Action {
 
 const SETUP_COMMAND = "claude mcp add perch -- perch mcp";
 const PRESENCE_MS = 30_000;
-const NOTICE_MS = 8_000;
 
 // One id per page load. serverEventSource relays every event to every window
 // of this browser, so the server addresses actions to a page, not a browser.
@@ -63,80 +68,6 @@ const pageId = (() => {
 
 let host: ExtensionContext | null = null;
 let teardown: (() => void)[] = [];
-
-// ---- Notice store ----
-
-interface Notice {
-  key: number;
-  title: string;
-  detail?: string;
-  // What Copy puts on the clipboard; the detail may be a masked form of it.
-  copy?: string;
-}
-
-let notice: Notice | null = null;
-let noticeKey = 0;
-const noticeListeners = new Set<() => void>();
-
-function showNotice(next: Omit<Notice, "key">): void {
-  notice = { ...next, key: ++noticeKey };
-  for (const listener of noticeListeners) listener();
-}
-
-function dismissNotice(key: number): void {
-  if (notice?.key !== key) return;
-  notice = null;
-  for (const listener of noticeListeners) listener();
-}
-
-function NoticeOverlay() {
-  const [current, setCurrent] = useState(notice);
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    const listener = () => setCurrent(notice);
-    noticeListeners.add(listener);
-    listener();
-    return () => {
-      noticeListeners.delete(listener);
-    };
-  }, []);
-  useEffect(() => {
-    setCopied(false);
-    if (!current) return;
-    const timer = setTimeout(() => dismissNotice(current.key), NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [current]);
-  if (!current) return null;
-  const onCopy = () => {
-    if (!current.copy) return;
-    copyText(current.copy)
-      .then(() => setCopied(true))
-      .catch(() => setCopied(false));
-  };
-  // Portaled to <body>: the overlay layer this component mounts in sits
-  // below the floating terminal, which would otherwise cover the notice.
-  return createPortal(
-    <div className="assistant-notice" role="status" aria-live="polite">
-      <div className="assistant-notice-head">
-        <span className="assistant-notice-title">
-          <span className="assistant-notice-source">Assistant</span> · {current.title}
-        </span>
-        <div className="assistant-notice-buttons">
-          {current.copy && (
-            <button type="button" className="assistant-notice-button primary" onClick={onCopy}>
-              {copied ? "Copied" : "Copy"}
-            </button>
-          )}
-          <button type="button" className="assistant-notice-button" onClick={() => dismissNotice(current.key)}>
-            Dismiss
-          </button>
-        </div>
-      </div>
-      {current.detail && <div className="assistant-notice-detail">{current.detail}</div>}
-    </div>,
-    document.body,
-  );
-}
 
 // ---- Settings ----
 
@@ -292,8 +223,26 @@ function startActions(ctx: ExtensionContext): void {
       (err: unknown) => reply(ctx, action.id, { ok: false, error: err instanceof Error ? err.message : String(err) }),
     );
   });
+  // The relay link changed (state, members, invites, activity): sections and the status item reload.
+  source.addEventListener("relay", () => fireRelayChanged());
+  source.addEventListener("relay-notice", (e) => {
+    // The notice is what the user sees first (a removal says "removed"); the
+    // section behind it must not lag by the 200 ms the coalesced reload waits.
+    requestStateNow();
+    let data: { title?: unknown; detail?: unknown };
+    try {
+      data = JSON.parse(e.data) as { title?: unknown; detail?: unknown };
+    } catch {
+      return;
+    }
+    if (typeof data.title !== "string") return;
+    showNotice({ title: data.title, detail: typeof data.detail === "string" && data.detail ? data.detail : undefined, prose: true });
+  });
   // A reopened stream means the server restarted and forgot this page.
-  source.addEventListener("open", () => reportPresence());
+  source.addEventListener("open", () => {
+    reportPresence();
+    fireRelayChanged();
+  });
   teardown.push(() => source.close());
 }
 
@@ -302,6 +251,32 @@ export function activate(ctx: ExtensionContext): void {
   teardown.push(injectStylesheet(ctx.assetUrl, "dist/client.css"));
   ctx.registerAppOverlay({ id: "notice", component: NoticeOverlay });
   ctx.registerSettingsComponent({ id: "setup", component: SetupSection });
+  setRelayHost({
+    serverFetch: (path, init) => ctx.serverFetch(path, init),
+    confirmDialog: ctx.app.confirmDialog?.bind(ctx.app),
+    openSettings: () => ctx.settings?.open?.(),
+    hasEvents: !!ctx.serverEventSource,
+  });
+  // Assistant Read-only changes what this machine accepts (R51); the server
+  // does not announce that, so refresh when the setting moves.
+  if (ctx.settings?.onDidChange) {
+    let readOnly = ctx.settings.get?.("assistant.readOnly");
+    let later: ReturnType<typeof setTimeout> | undefined;
+    teardown.push(
+      ctx.settings.onDidChange(() => {
+        const next = ctx.settings?.get?.("assistant.readOnly");
+        if (next === readOnly) return;
+        readOnly = next;
+        fireRelayChanged();
+        // The server reads the saved setting, which lands a moment after this one.
+        clearTimeout(later);
+        later = setTimeout(fireRelayChanged, 1500);
+      }),
+      () => clearTimeout(later),
+    );
+  }
+  ctx.registerSettingsComponent({ id: "relay", component: RelaySection });
+  ctx.registerStatusBarItem?.({ id: "relay", title: "Relay", placement: "right", component: makeRelayStatusItem(() => ctx.settings?.open?.()) });
   startPresence(ctx);
   startActions(ctx);
 }
@@ -309,7 +284,8 @@ export function activate(ctx: ExtensionContext): void {
 export function deactivate(): void {
   for (const fn of teardown.reverse()) fn();
   teardown = [];
+  setRelayHost(null);
   host = null;
-  notice = null;
+  resetNotice();
   lastContextKey = "";
 }
