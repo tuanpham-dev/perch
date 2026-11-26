@@ -3,6 +3,15 @@
 What changed in each Perch release. The newest is first; each entry is
 drafted from the commit subjects by `npm run release`, then edited.
 
+## 0.12.0 - 2026-11-26
+
+- **Relay: Perch on different machines can now find and message each other.**
+  Run the self-hosted relay (`relay/`, Docker or Node 24), start a group with
+  `perch relay create <wss-url>` or Settings → Assistant → Relay, and add machines with
+  `perch relay invite` / `perch relay join`. Agents can then list, read and
+  message each other across machines. What they send is encrypted between the
+  machines: the relay never sees it or the group secret. See docs/RELAY.md.
+
 ## 0.11.6 - 2026-11-25
 
 - Show subagent counts again on a machine with no ~/.claude/sessions folder, which 0.11.5 turned into an error for every window
