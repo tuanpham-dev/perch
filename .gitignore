@@ -20,3 +20,6 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Relay server state
+relay/data/

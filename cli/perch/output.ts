@@ -48,3 +48,79 @@ export function table(rows: string[][], widths: number[]): void {
     console.log(row.map((cell, i) => (i < widths.length ? cell.padEnd(widths[i]!) : cell)).join(' ').trimEnd());
   }
 }
+
+export interface SecretState {
+  value: string;
+  /** Left over from an escape sequence that a later chunk may finish. */
+  esc: '' | 'esc' | 'csi' | 'ss3';
+  done: 'enter' | 'eof' | 'interrupt' | null;
+}
+
+export const initialSecret = (): SecretState => ({ value: '', esc: '', done: null });
+
+/**
+ * Pure keystroke handling for the hidden prompt. A paste arrives as one chunk,
+ * so it walks a character at a time. Enter and Ctrl-D end input, Ctrl-C
+ * interrupts, backspace edits, and CSI/SS3 escape sequences (arrow keys) are
+ * swallowed whole.
+ */
+export function reduceSecret(state: SecretState, chunk: string): SecretState {
+  let { value, esc } = state;
+  for (const ch of chunk) {
+    if (esc === 'esc') {
+      esc = ch === '[' ? 'csi' : ch === 'O' ? 'ss3' : '';
+      continue;
+    }
+    if (esc === 'csi') {
+      // Parameter and intermediate bytes continue; a final byte (0x40-0x7e) ends it.
+      if (ch >= '@' && ch <= '~') esc = '';
+      continue;
+    }
+    if (esc === 'ss3') {
+      esc = '';
+      continue;
+    }
+    if (ch === '\x1b') esc = 'esc';
+    else if (ch === '\r' || ch === '\n') return { value, esc: '', done: 'enter' };
+    else if (ch === '\x04') return { value, esc: '', done: 'eof' };
+    else if (ch === '\x03') return { value, esc: '', done: 'interrupt' };
+    else if (ch === '\x7f' || ch === '\b') value = value.slice(0, -1);
+    else if (ch >= ' ') value += ch;
+  }
+  return { value, esc, done: null };
+}
+
+/**
+ * One line typed with echo off, for secrets. "" when stdin isn't a terminal.
+ * The prompt and the closing newline go to stderr so stdout stays clean.
+ * Ctrl-C leaves with 130 like a shell would.
+ */
+export async function askSecret(question: string): Promise<string> {
+  if (!interactive()) return '';
+  const stdin = process.stdin;
+  process.stderr.write(question);
+  try {
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    return await new Promise<string>((resolve, reject) => {
+      let state = initialSecret();
+      const onData = (chunk: string) => {
+        state = reduceSecret(state, chunk);
+        if (!state.done) return;
+        stdin.off('data', onData);
+        if (state.done === 'interrupt') reject(new Exit(130));
+        else resolve(state.value.trim());
+      };
+      stdin.on('data', onData);
+    });
+  } finally {
+    try {
+      stdin.setRawMode(false);
+    } catch {
+      // The terminal may already be gone.
+    }
+    stdin.pause();
+    process.stderr.write('\n');
+  }
+}

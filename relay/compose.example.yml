@@ -1,0 +1,36 @@
+# Copy this file next to relay/Dockerfile (or keep it here), put
+# RELAY_ADMIN_SECRET=<a long random string> in a file named .env beside it, then:
+#   docker compose -f compose.example.yml up --build -d
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Only the relay port is published, and only on this machine's loopback;
+      # put a TLS proxy in front of it. The admin port (8788) is never published.
+      - "127.0.0.1:8787:8787"
+    environment:
+      RELAY_ADMIN_SECRET: ${RELAY_ADMIN_SECRET:?set RELAY_ADMIN_SECRET in .env}
+      # A reverse proxy on this host reaches the container from the gateway of
+      # the pinned network below, so that address is the trusted proxy and the
+      # relay sees each client's own address (X-Forwarded-For).
+      RELAY_TRUSTED_PROXIES: "172.30.87.1"
+    volumes:
+      - relay-data:/data
+    networks:
+      - relay-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  relay-net:
+    ipam:
+      config:
+        - subnet: 172.30.87.0/24
+          gateway: 172.30.87.1
+
+volumes:
+  relay-data:

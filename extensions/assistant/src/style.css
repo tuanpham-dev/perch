@@ -30,9 +30,7 @@
 .assistant-notice-title {
   color: var(--fg-bright);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .assistant-notice-source {
@@ -79,6 +77,12 @@
   white-space: nowrap;
 }
 
+.assistant-notice-detail.prose {
+  font-family: inherit;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 /* Settings → Extensions → Assistant */
 .assistant-setup {
   display: flex;
@@ -110,4 +114,308 @@
   margin: 0;
   padding-left: 18px;
   color: var(--fg-inactive);
+}
+
+/* Settings → Extensions → Assistant → Relay */
+.relay-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.relay-text {
+  margin: 0;
+}
+
+.relay-muted {
+  color: var(--fg-inactive);
+}
+
+.relay-bad {
+  color: var(--error);
+}
+
+/* The row before a hint has its bottom margin taken away, so the sentence
+   carries the row spacing itself. Full-strength text: this is the notice. */
+.relay-sentence {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+/* A hint that must be read, not skimmed (the Read-only limit). */
+.relay-section .settings-hint.relay-fg {
+  font-size: 12px;
+  color: var(--fg);
+}
+
+/* The Relay block: a divider above and a sub-heading a step above field labels. */
+.relay-block {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.relay-heading {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+/* Selected but held down by Assistant Read-only. */
+.relay-section .settings-segment.active.relay-limited {
+  opacity: 0.65;
+}
+
+/* Sized like Settings → AI Providers' control, not stretched by the column row. */
+.relay-section .settings-segmented {
+  align-self: flex-start;
+}
+
+.relay-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.relay-input {
+  width: 320px;
+  max-width: 100%;
+}
+
+.relay-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.relay-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.relay-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-inactive);
+}
+
+.relay-dot.connected {
+  background: var(--git-added-fg);
+}
+
+.relay-dot.reconnecting {
+  background: var(--warning);
+}
+
+.relay-dot.refused {
+  background: var(--error);
+}
+
+/* Remove, Revoke and Leave: the host's secondary button in the error colour. */
+.dialog-button.secondary.relay-danger {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.dialog-button.secondary.relay-danger:hover:not(:disabled) {
+  background: var(--list-hover-bg);
+}
+
+/* Text for a screen reader only. */
+.relay-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Tables scroll inside their own box so a 390 px Settings view never does. */
+.relay-table-wrap {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.relay-table-wrap:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.relay-activity {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.relay-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--fg-bright);
+}
+
+.relay-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--fg-inactive);
+}
+
+.relay-table th.relay-rowhead {
+  font-weight: normal;
+  color: inherit;
+}
+
+.relay-table th,
+.relay-table td {
+  padding: 5px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.relay-table tbody tr:last-child td,
+.relay-table tbody tr:last-child th {
+  border-bottom: none;
+}
+
+/* A long machine name wraps so Remove stays in view. */
+.relay-table th.relay-rowhead {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 64px;
+}
+
+/* A table that must fit its box (machines, invites): cells wrap and only the
+   action column stays on one line. The activity table scrolls instead. */
+.relay-table.relay-fit th,
+.relay-table.relay-fit td {
+  white-space: normal;
+  padding: 5px 6px;
+}
+
+.relay-table.relay-fit td {
+  overflow-wrap: anywhere;
+}
+
+.relay-table.relay-fit .relay-cell-action {
+  white-space: nowrap;
+}
+
+.relay-cell-action {
+  white-space: nowrap;
+}
+
+.relay-cell-action {
+  text-align: right;
+}
+
+.relay-cell-action .dialog-button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.relay-tag {
+  display: inline-block;
+  white-space: nowrap;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--fg-inactive);
+  border: 1px solid var(--border);
+}
+
+.relay-tag-warn {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.dialog.relay-dialog {
+  min-width: 0;
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.relay-invite-text {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--mono-font, monospace);
+  resize: none;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* Narrow screens (a phone, or a tablet with the side nav open): tables fit
+   their box. Machines stack as name + Remove, then state and accepts; the
+   Invites table drops its Created column; Activity cells wrap. */
+.relay-cell-name {
+  overflow-wrap: anywhere;
+  min-width: 72px;
+}
+
+.relay-activity-table td:first-child {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .relay-hide-narrow {
+    display: none;
+  }
+
+  .relay-machines thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .relay-machines tbody tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .relay-machines tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .relay-machines tbody th,
+  .relay-machines tbody td {
+    border-bottom: none;
+    padding: 2px 8px;
+  }
+
+  .relay-machines tbody th.relay-rowhead {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .relay-machines tbody td:nth-child(2),
+  .relay-machines tbody td:nth-child(3) {
+    grid-column: 1;
+    color: var(--fg);
+  }
+
+  .relay-machines tbody td.relay-cell-action {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+  }
 }

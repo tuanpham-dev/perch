@@ -1,0 +1,17 @@
+{
+  "name": "perch-relay",
+  "version": "0.1.0",
+  "description": "Self-hosted relay that lets Perch instances find and message each other. It forwards encrypted frames and never sees their contents.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.mjs serve",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

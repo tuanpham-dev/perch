@@ -50,7 +50,8 @@ or a reboot.
   configured once and reused everywhere, with hooks written for you and
   push notifications when an agent needs an answer. Run Claude Code against
   `perch mcp` and ask it what your agents are doing, hand them work, or open
-  a preview, from any terminal.
+  a preview, from any terminal. With a relay you host, agents on your
+  other machines are reachable the same way.
 - **Extensible on purpose.** Nearly every surface above is itself a bundled
   extension, built on the same API your own extensions get.
 
@@ -95,6 +96,7 @@ to your projects' terminals without a browser (see [Terminal UI](docs/TUI.md)).
 | [Keyboard & mouse](docs/KEYBINDINGS.md) | Default shortcuts and terminal gestures |
 | [Install](docs/INSTALL.md) | Requirements, the installer, the desktop app, and the `perch` CLI |
 | [Deployment](docs/DEPLOYMENT.md) | Production, nginx, and authentication |
+| [Relay](docs/RELAY.md) | Agents on different machines reaching each other through a relay you host |
 | [Terminal UI](docs/TUI.md) | `perch tui`: projects and terminals without a browser |
 | [Port forwarding](docs/PORT_FORWARDING.md) | The tunnel CLI and the built-in port proxy |
 | [Extensions](docs/EXTENSIONS.md) | Installing, bundling, and writing extensions |
